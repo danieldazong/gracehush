@@ -1,0 +1,313 @@
+import type { SymbolViewProps } from "expo-symbols";
+import { useState, type ReactElement } from "react";
+import {
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Switch,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { FadeIn } from "@/components/FadeIn";
+import { Icon } from "@/components/Icon";
+import { MiniPlayerCard } from "@/components/MiniPlayerCard";
+import { PrimaryButton } from "@/components/PrimaryButton";
+import { ReflectionCarousel } from "@/components/ReflectionCarousel";
+import { ScriptureCard } from "@/components/ScriptureCard";
+import { TranscriptRow } from "@/components/TranscriptRow";
+import { copy } from "@/constants/copy";
+import { colors, layout } from "@/constants/theme";
+import { getPlaybackTrack } from "@/data/selectors";
+import { useReflection } from "@/hooks/useReflection";
+import type { RootStackScreenProps } from "@/navigation/types";
+import { haptics } from "@/services/haptics";
+import type { Affirmation, Devotional, JournalEntry, Scripture, TimeSlot, UserProfile } from "@/types";
+import { formatEntryDate, getValidationHeadline, quoteVerse } from "@/utils/format";
+
+import {
+  ReflectionCrisis,
+  ReflectionError,
+  ReflectionFailed,
+  ReflectionLoading,
+  ReflectionNotFound,
+  ReflectionPreparing,
+} from "./ReflectionStateViews";
+
+const { subline, words, request, footer } = copy.reflection;
+
+// The sections arrive one after another: each rises 10dp while it fades in, 60 ms after the one above it.
+const ARRIVAL = { rise: 10, duration: 240 };
+const ARRIVAL_STEP_MS = 60;
+const arrive = (position: number) => ({ ...ARRIVAL, delay: position * ARRIVAL_STEP_MS });
+
+const icons = {
+  back: { android: "chevron_left", ios: "chevron.left" },
+  date: { android: "calendar_today", ios: "calendar" },
+  prayer: { android: "volunteer_activism", ios: "hands.sparkles" },
+  share: { android: "share", ios: "square.and.arrow.up" },
+} satisfies Record<string, SymbolViewProps["name"]>;
+
+type ReflectionHeaderProps = {
+  // Null until an entry is loaded: loading, not found and error show no date.
+  date: string | null;
+  onBack: () => void;
+};
+
+function ReflectionHeader({ date, onBack }: ReflectionHeaderProps) {
+  return (
+    <View className="border-b border-petal">
+      <View className="screen__content min-h-14 flex-row items-center gap-1">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={copy.reflection.back}
+          onPress={onBack}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
+          <View className="size-11 items-center justify-center">
+            <Icon name={icons.back} size={24} color={colors.ink} />
+          </View>
+        </Pressable>
+        {date ? (
+          <View className="flex-1 flex-row items-center gap-1.5">
+            <Icon name={icons.date} size={18} color={colors.rosewood} />
+            <Text className="shrink text-label-lg text-rosewood">{date}</Text>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+// The whole row is the touch target (the native Switch alone is 31 tall on iOS), so the Switch is only
+// a picture of the state and is hidden from the touch system and from screen readers.
+function PrayerRequestRow({ initialChecked }: { initialChecked: boolean }) {
+  // TODO(29): persist is_active_prayer + prayer fields
+  const [checked, setChecked] = useState(initialChecked);
+
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked }}
+      accessibilityLabel={request.title}
+      accessibilityHint={request.helper}
+      onPress={() => {
+        haptics.selection();
+        setChecked((current) => !current);
+      }}
+      style={({ pressed }) => pressed && styles.pressed}
+    >
+      <View className="card flex-row items-center gap-3 p-3.5">
+        <View className="size-9 items-center justify-center rounded-full bg-blush">
+          <Icon name={icons.prayer} size={20} color={colors.plum} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-label-lg text-ink">{request.title}</Text>
+          <Text className="mt-0.5 text-body-sm text-mauve">{request.helper}</Text>
+        </View>
+        <View
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          <Switch
+            value={checked}
+            trackColor={{ false: colors.petal, true: colors.plum }}
+            thumbColor={colors.card}
+            ios_backgroundColor={colors.petal}
+          />
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+// Only the verse and its reference leave the app: never the transcript, the emotion or the devotional.
+async function shareScripture(scripture: Scripture) {
+  if (!scripture.verified || scripture.text === null) return;
+  try {
+    await Share.share({
+      message: copy.reflection.share.message(quoteVerse(scripture.text), scripture.reference),
+    });
+  } catch {
+    // The share sheet could not open. There is nothing to show: nothing was shared.
+  }
+}
+
+type ReadyViewProps = {
+  entry: JournalEntry;
+  devotional: Devotional;
+  affirmations: Affirmation[];
+  profile: UserProfile;
+  currentSlot: TimeSlot;
+  onOpenPlayer: () => void;
+  onReturn: () => void;
+};
+
+// A finished entry with a devotional. The screen gives it key={entry.id}, so another entry starts from
+// its own prayer toggle, tab and expanded state.
+function ReadyView({
+  entry,
+  devotional,
+  affirmations,
+  profile,
+  currentSlot,
+  onOpenPlayer,
+  onReturn,
+}: ReadyViewProps) {
+  const { width } = useWindowDimensions();
+  const { scripture } = entry;
+  const transcript = entry.transcript?.trim() ?? "";
+  const isVoice = entry.inputType === "audio";
+  // Unverified scripture is never shared.
+  const shareable = scripture?.verified && scripture.text !== null ? scripture : null;
+
+  return (
+    <ScrollView
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingHorizontal:
+            width < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding,
+        },
+      ]}
+    >
+      <FadeIn {...arrive(0)}>
+        <View>
+          <Text
+            accessibilityRole="header"
+            className="font-fraunces text-[27px] leading-[34px] tracking-[-0.675px] text-plum-deep"
+          >
+            {getValidationHeadline(entry.dominantEmotion)}
+          </Text>
+          <Text className="mt-1.5 text-body-sm text-mauve">
+            {isVoice ? subline.audio : subline.text}
+          </Text>
+        </View>
+      </FadeIn>
+      <FadeIn {...arrive(1)}>
+        <MiniPlayerCard
+          devotional={devotional}
+          track={getPlaybackTrack(entry)}
+          ambientDefault={profile}
+          onOpen={onOpenPlayer}
+        />
+      </FadeIn>
+      {scripture ? (
+        <FadeIn {...arrive(2)}>
+          <ScriptureCard scripture={scripture} />
+        </FadeIn>
+      ) : null}
+      <FadeIn {...arrive(3)}>
+        <ReflectionCarousel
+          devotional={devotional}
+          affirmations={affirmations}
+          reminders={profile.reminders}
+          currentSlot={currentSlot}
+        />
+      </FadeIn>
+      {transcript ? (
+        <FadeIn {...arrive(4)}>
+          <TranscriptRow
+            title={isVoice ? words.titleAudio : words.titleText}
+            transcript={transcript}
+          />
+        </FadeIn>
+      ) : null}
+      <FadeIn {...arrive(5)}>
+        <View className="gap-3 pt-1">
+          <PrayerRequestRow initialChecked={entry.prayer !== null} />
+          <View className="flex-row items-center gap-2">
+            <View className="flex-1">
+              <PrimaryButton label={footer.returnToJournal} onPress={onReturn} />
+            </View>
+            {shareable ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={footer.share}
+                onPress={() => shareScripture(shareable)}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <View className="size-12 items-center justify-center rounded-full border border-petal bg-card">
+                  <Icon name={icons.share} size={20} color={colors.plum} />
+                </View>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      </FadeIn>
+    </ScrollView>
+  );
+}
+
+export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Reflection">) {
+  const state = useReflection(route.params.entryId);
+
+  // The chevron goes back to where the user came from. With nothing to go back to (a notification can
+  // open Reflection first, step 28) it lands on Journal, like "Return to Journal".
+  function goBack() {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      returnToJournal();
+    }
+  }
+
+  // popTo, not navigate: navigate would push a second MainTabs on top of Reflection, and Android back
+  // would then show Reflection again. popTo goes back to the MainTabs already in the stack.
+  function returnToJournal() {
+    navigation.popTo("MainTabs", { screen: "Journal" });
+  }
+
+  let body: ReactElement;
+  if (state.status === "loading") {
+    body = <ReflectionLoading />;
+  } else if (state.status === "not-found") {
+    body = <ReflectionNotFound onReturn={returnToJournal} />;
+  } else if (state.status === "error") {
+    body = <ReflectionError onRetry={state.retry} onReturn={returnToJournal} />;
+  } else if (state.entry.isCrisis) {
+    // Checked before the status: a crisis entry is a finished one in the data, and step 13 relies on this order.
+    body = <ReflectionCrisis onReturn={returnToJournal} />;
+  } else if (
+    state.entry.status === "pending" ||
+    state.entry.status === "uploading" ||
+    state.entry.status === "processing"
+  ) {
+    body = <ReflectionPreparing onReturn={returnToJournal} />;
+  } else if (state.entry.status === "failed" || state.entry.devotional === null) {
+    body = <ReflectionFailed onReturn={returnToJournal} />;
+  } else {
+    body = (
+      <ReadyView
+        key={state.entry.id}
+        entry={state.entry}
+        devotional={state.entry.devotional}
+        affirmations={state.affirmations}
+        profile={state.profile}
+        currentSlot={state.currentSlot}
+        onOpenPlayer={() => navigation.navigate("NowPlaying", { entryId: state.entry.id })}
+        onReturn={returnToJournal}
+      />
+    );
+  }
+
+  return (
+    <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
+      <ReflectionHeader
+        date={state.status === "ready" ? formatEntryDate(state.entry.createdAt) : null}
+        onBack={goBack}
+      />
+      {body}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.linen },
+  content: { gap: 16, paddingTop: 16, paddingBottom: 32 },
+  pressed: { opacity: 0.6 },
+});

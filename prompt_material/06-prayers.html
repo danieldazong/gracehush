@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&amp;family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&amp;family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "inverse-primary": "#e4b9e4", "on-primary": "#ffffff", "outline-variant": "#cfc3cc", "secondary": "#7b5455", "secondary-fixed": "#ffdad9", "on-primary-fixed": "#2d0f31", "background": "#fdf9f4", "error-container": "#ffdad6", "surface-container-low": "#f7f3ee", "surface-container-highest": "#e6e2dd", "on-secondary-fixed-variant": "#603d3e", "primary": "#432446", "on-tertiary-fixed": "#370e00", "surface": "#fdf9f4", "secondary-fixed-dim": "#ecbbba", "on-error": "#ffffff", "tertiary": "#C4704F", "primary-fixed-dim": "#e4b9e4", "surface-dim": "#ddd9d5", "inverse-surface": "#31302d", "on-primary-fixed-variant": "#5c3b5f", "on-tertiary-container": "#fa9c78", "on-primary-container": "#d0a6d1", "surface-container-lowest": "#ffffff", "outline": "#7e747c", "on-tertiary-fixed-variant": "#763317", "on-surface": "#1c1c19", "surface-container": "#f1ede8", "inverse-on-surface": "#f4f0eb", "on-secondary-fixed": "#2f1314", "error": "#ba1a1a", "on-error-container": "#93000a", "on-surface-variant": "#4d444c", "surface-container-high": "#ebe8e3", "surface-tint": "#765278", "on-tertiary": "#ffffff", "tertiary-fixed": "#ffdbce", "tertiary-container": "#743216", "primary-container": "#5B3A5E", "primary-fixed": "#ffd6fe", "on-background": "#1c1c19", "on-secondary": "#ffffff", "on-secondary-container": "#795354", "secondary-container": "#fdcbcb", "tertiary-fixed-dim": "#ffb59a", "surface-variant": "#e6e2dd", "surface-bright": "#fdf9f4" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "margin": "1.25rem", "margin-tablet": "2rem", "space-xs": "0.25rem", "space-lg": "1.5rem", "gutter-tablet": "1.5rem", "margin-desktop": "3rem", "space-md": "1rem", "gutter-desktop": "2rem", "space-sm": "0.5rem", "space-xl": "2.5rem", "gutter": "1rem" }, "fontFamily": { "label-sm": ["DM Sans"], "body-lg": ["DM Sans"], "headline-md": ["Fraunces", "serif"], "label-lg": ["DM Sans"], "label-md": ["DM Sans"], "display-lg-mobile": ["Fraunces", "serif"], "body-sm": ["DM Sans"], "display-lg": ["Fraunces", "serif"], "headline-lg": ["Fraunces", "serif"], "scripture-quote": ["Fraunces", "serif"], "body-md": ["DM Sans"], "headline-sm": ["Fraunces", "serif"], "fraunces": ["Fraunces", "serif"], "dm": ["DM Sans", "sans-serif"] }, "fontSize": { "label-sm": ["11px", { "lineHeight": "16px", "letterSpacing": "0.04em", "fontWeight": "600" }], "body-lg": ["17px", { "lineHeight": "26px", "fontWeight": "400" }], "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "500" }], "label-lg": ["15px", { "lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "600" }], "label-md": ["13px", { "lineHeight": "18px", "letterSpacing": "0.02em", "fontWeight": "500" }], "display-lg-mobile": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "400" }], "body-sm": ["13px", { "lineHeight": "19px", "fontWeight": "400" }], "display-lg": ["40px", { "lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "400" }], "headline-lg": ["30px", { "lineHeight": "38px", "fontWeight": "400" }], "scripture-quote": ["20px", { "lineHeight": "32px", "letterSpacing": "0.01em", "fontWeight": "400" }], "body-md": ["15px", { "lineHeight": "23px", "fontWeight": "400" }], "headline-sm": ["20px", { "lineHeight": "28px", "fontWeight": "500" }] } } } }</script><style>@layer base { html, body { width: 100%; margin: 0; padding: 0; min-height: 100%; } .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); } .pt-safe { padding-top: env(safe-area-inset-top, 0px); } main > :first-child { margin-top: 0 !important; } main > :last-child { margin-bottom: 0 !important; } } ::-webkit-scrollbar { display: none; }</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head><body class="bg-surface text-on-surface antialiased flex flex-col min-h-screen selection:bg-secondary-fixed selection:text-on-secondary-fixed"><header class="fixed top-0 w-full z-50 bg-surface/85 backdrop-blur-xl pt-safe shadow-[0_1px_8px_rgba(0,0,0,0.03)]"><div class="h-16 px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><img alt="Gracehush Emblem" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1WnCRmaXp5QFs8JsU12MhgZ1QFbu98wowYSVGxf2JUDogSzSzsKjPGgBIi0_1ZeLvCUffJjiVHt7tjcKSpd6c4GYEheOaM2NROSocVG7AxYVhgDLdkkmS_9C6fO7QzcLG6DKQPBnIKzyAMYusZ6KPqtY8ts60WkVts9DVzWgyTts-dZg9stOuwkCAWnK8pLo14pcwm2O0hDCTAfEqzAlZNxUJWHHQZhDFvYvBKa5uEuLM1NbjawQ7WYOzdY"/><div class="flex flex-col"><span class="font-label-sm text-label-sm text-secondary uppercase tracking-widest leading-none">Gracehush</span><span class="font-fraunces text-[22px] font-normal text-primary leading-tight">Prayers</span></div></div><div class="flex items-center gap-space-sm"><button aria-label="Spiritual Rhythm" class="w-11 h-11 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container transition-colors"><span class="material-symbols-outlined text-[22px]">spa</span></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-36 bg-surface"><div class="flex flex-col w-full px-margin pb-12">
+<!-- Interactive View Header & Segment Control -->
+<div class="flex flex-col gap-space-sm pt-2 mb-space-lg">
+<div class="flex items-baseline justify-between">
+<span class="font-fraunces text-headline-md text-primary font-normal">Sanctuary Prayers</span>
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-widest">17 PETITIONS RECORDED</span>
+</div>
+<!-- Segmented Tab Switcher -->
+<div class="flex p-1 bg-surface-container rounded-full w-full max-w-sm mx-auto shadow-sm">
+<button class="flex-1 flex items-center justify-center gap-space-xs py-2.5 px-4 rounded-full bg-surface-container-lowest text-primary shadow-sm transition-all duration-200" id="tab-active" onclick="switchTab('active')">
+<span class="font-label-lg text-label-lg font-medium">Active</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded-full bg-surface-container-high text-primary font-semibold">5</span>
+</button>
+<button class="flex-1 flex items-center justify-center gap-space-xs py-2.5 px-4 rounded-full text-outline transition-all duration-200 hover:text-on-surface" id="tab-answered" onclick="switchTab('answered')">
+<span class="font-label-lg text-label-lg font-medium">Answered</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 rounded-full bg-surface-container text-outline font-semibold">12</span>
+</button>
+</div>
+<!-- Quick Test Trigger for Sheet -->
+<div class="flex justify-center pt-1">
+<button class="text-[12px] font-dm text-secondary hover:text-primary transition-colors underline underline-offset-4 flex items-center gap-1" onclick="openAnswerModal('Mom\'s recovery and peaceful transition')">
+<span class="material-symbols-outlined text-[15px]">open_in_full</span>
+<span>Preview Mark Answered Sheet</span>
+</button>
+</div>
+</div>
+<!-- ACTIVE PRAYERS VIEW -->
+<section class="flex flex-col gap-space-md transition-opacity duration-300" id="view-active">
+<!-- Active Prayer 1 -->
+<article class="bg-surface-container-lowest rounded-xl p-space-lg shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] flex flex-col gap-space-md">
+<div class="flex items-start justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<span class="font-label-sm text-label-sm text-tertiary-container uppercase tracking-wider font-semibold">FAMILY &amp; HEALING</span>
+<h2 class="font-fraunces text-headline-sm text-primary leading-snug font-normal">Mom’s recovery and peaceful transition</h2>
+</div>
+<div class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-low text-secondary flex-shrink-0">
+<span class="material-symbols-outlined text-[15px]">hourglass_top</span>
+<span class="font-label-sm text-label-sm">24 days</span>
+</div>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant font-dm">
+        Lifting up her evening strength and asking for soft rest without sudden breathlessness. Praying for gentle spirit among caregivers.
+      </p>
+<div class="flex items-center justify-between pt-1">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[16px]">menu_book</span>
+<span class="font-body-sm text-body-sm italic">Psalm 91:4</span>
+</div>
+<button class="flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant hover:bg-surface-container-low text-primary transition-all active:scale-95" onclick="openAnswerModal('Mom\'s recovery and peaceful transition')">
+<span class="material-symbols-outlined text-[16px] text-tertiary">check_circle</span>
+<span class="font-label-md text-label-md">Mark Answered</span>
+</button>
+</div>
+</article>
+<!-- Active Prayer 2 -->
+<article class="bg-surface-container-lowest rounded-xl p-space-lg shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] flex flex-col gap-space-md">
+<div class="flex items-start justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider font-semibold">VOCATION &amp; CALLING</span>
+<h2 class="font-fraunces text-headline-sm text-primary leading-snug font-normal">Patience in daily work responsibilities</h2>
+</div>
+<div class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-low text-secondary flex-shrink-0">
+<span class="material-symbols-outlined text-[15px]">hourglass_top</span>
+<span class="font-label-sm text-label-sm">11 days</span>
+</div>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant font-dm">
+        Asking for quiet wisdom when deadlines feel rushed, and grace toward colleagues during tough negotiations.
+      </p>
+<div class="flex items-center justify-between pt-1">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[16px]">menu_book</span>
+<span class="font-body-sm text-body-sm italic">Colossians 3:12</span>
+</div>
+<button class="flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant hover:bg-surface-container-low text-primary transition-all active:scale-95" onclick="openAnswerModal('Patience in daily work responsibilities')">
+<span class="material-symbols-outlined text-[16px] text-tertiary">check_circle</span>
+<span class="font-label-md text-label-md">Mark Answered</span>
+</button>
+</div>
+</article>
+<!-- Active Prayer 3 -->
+<article class="bg-surface-container-lowest rounded-xl p-space-lg shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] flex flex-col gap-space-md">
+<div class="flex items-start justify-between gap-space-sm">
+<div class="flex flex-col gap-1">
+<span class="font-label-sm text-label-sm text-tertiary-container uppercase tracking-wider font-semibold">INNER PEACE</span>
+<h2 class="font-fraunces text-headline-sm text-primary leading-snug font-normal">Restful sleep through anxious evenings</h2>
+</div>
+<div class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-low text-secondary flex-shrink-0">
+<span class="material-symbols-outlined text-[15px]">hourglass_top</span>
+<span class="font-label-sm text-label-sm">4 days</span>
+</div>
+</div>
+<p class="font-body-md text-body-md text-on-surface-variant font-dm">
+        Quieting racing thoughts when the house is still. Entrusting tomorrow's unseen turns to God’s safe keeping.
+      </p>
+<div class="flex items-center justify-between pt-1">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[16px]">menu_book</span>
+<span class="font-body-sm text-body-sm italic">Proverbs 3:24</span>
+</div>
+<button class="flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant hover:bg-surface-container-low text-primary transition-all active:scale-95" onclick="openAnswerModal('Restful sleep through anxious evenings')">
+<span class="material-symbols-outlined text-[16px] text-tertiary">check_circle</span>
+<span class="font-label-md text-label-md">Mark Answered</span>
+</button>
+</div>
+</article>
+</section>
+<!-- ANSWERED MILESTONE JOURNEY VIEW -->
+<section class="hidden flex-col gap-space-lg transition-opacity duration-300" id="view-answered">
+<!-- Header Banner in Fraunces with Terracotta / Sage accent -->
+<div class="p-space-lg rounded-2xl bg-[#F7F2EC] border border-[#E7DFD5] flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-[#E5ECE4] text-[#4A6B56] flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined text-[20px]">eco</span>
+</div>
+<div class="flex flex-col">
+<h3 class="font-fraunces text-[18px] text-primary leading-snug">Look how faithful He has been — <span class="text-[#C4704F] font-medium">12 answered prayers.</span></h3>
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider mt-0.5">Recorded in your sanctuary journey</span>
+</div>
+</div>
+<!-- Timeline Journey -->
+<div class="relative pl-6 flex flex-col gap-space-xl pt-1">
+<!-- Vertical Connecting Line -->
+<div class="absolute left-2.5 top-3 bottom-6 w-0.5 bg-[#E8DDD8]"></div>
+<!-- Timeline Item 1 -->
+<div class="relative flex flex-col gap-space-sm">
+<!-- Terracotta Milestone Node -->
+<div class="absolute -left-6 top-1.5 w-5 h-5 rounded-full bg-[#C4704F] flex items-center justify-center shadow-sm ring-4 ring-surface">
+<span class="material-symbols-outlined text-[12px] text-white font-bold">check</span>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-[#C4704F] font-bold uppercase tracking-wider">Answered on Oct 2</span>
+<span class="font-body-sm text-body-sm text-outline">After 18 days</span>
+</div>
+<!-- Gratitude Card -->
+<article class="bg-surface-container-lowest rounded-xl p-space-lg shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] flex flex-col gap-space-sm">
+<h4 class="font-fraunces text-headline-sm text-primary font-normal">Clarity on family caregiving choices</h4>
+<p class="font-dm text-body-md text-secondary leading-relaxed bg-[#FBF7F4] p-space-sm rounded-lg border border-[#F2EAE4] italic">
+            “Sister called and offered to take the weekend shifts. God provided peace beyond what we could orchestrate.”
+          </p>
+<div class="flex items-center justify-between text-secondary pt-1">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px]">menu_book</span>
+<span class="font-body-sm text-body-sm italic font-dm">Philippians 4:19</span>
+</div>
+<div class="flex items-center gap-1 text-outline font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-[15px] text-[#C4704F]">favorite</span>
+<span>Answered</span>
+</div>
+</div>
+</article>
+</div>
+<!-- Timeline Item 2 -->
+<div class="relative flex flex-col gap-space-sm">
+<!-- Terracotta Milestone Node -->
+<div class="absolute -left-6 top-1.5 w-5 h-5 rounded-full bg-[#C4704F] flex items-center justify-center shadow-sm ring-4 ring-surface">
+<span class="material-symbols-outlined text-[12px] text-white font-bold">check</span>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-[#C4704F] font-bold uppercase tracking-wider">Answered on Sep 18</span>
+<span class="font-body-sm text-body-sm text-outline">After 32 days</span>
+</div>
+<!-- Gratitude Card -->
+<article class="bg-surface-container-lowest rounded-xl p-space-lg shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] flex flex-col gap-space-sm">
+<h4 class="font-fraunces text-headline-sm text-primary font-normal">Peace during quarterly review</h4>
+<p class="font-dm text-body-md text-secondary leading-relaxed bg-[#FBF7F4] p-space-sm rounded-lg border border-[#F2EAE4] italic">
+            “Felt calm walking into the room. Received encouraging feedback and healthy boundaries.”
+          </p>
+<div class="flex items-center justify-between text-secondary pt-1">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px]">menu_book</span>
+<span class="font-body-sm text-body-sm italic font-dm">Isaiah 26:3</span>
+</div>
+<div class="flex items-center gap-1 text-outline font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-[15px] text-[#C4704F]">favorite</span>
+<span>Answered</span>
+</div>
+</div>
+</article>
+</div>
+<!-- Timeline Item 3 -->
+<div class="relative flex flex-col gap-space-sm">
+<!-- Terracotta Milestone Node -->
+<div class="absolute -left-6 top-1.5 w-5 h-5 rounded-full bg-[#C4704F] flex items-center justify-center shadow-sm ring-4 ring-surface">
+<span class="material-symbols-outlined text-[12px] text-white font-bold">check</span>
+</div>
+<div class="flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-[#C4704F] font-bold uppercase tracking-wider">Answered on Aug 29</span>
+<span class="font-body-sm text-body-sm text-outline">After 7 days</span>
+</div>
+<article class="bg-surface-container-lowest rounded-xl p-space-lg shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] flex flex-col gap-space-sm">
+<h4 class="font-fraunces text-headline-sm text-primary font-normal">Healing from season of exhaustion</h4>
+<p class="font-dm text-body-md text-secondary leading-relaxed bg-[#FBF7F4] p-space-sm rounded-lg border border-[#F2EAE4] italic">
+            “Finally sleeping through the night without racing thoughts. Thank you Lord for restoration.”
+          </p>
+<div class="flex items-center justify-between text-secondary pt-1">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px]">menu_book</span>
+<span class="font-body-sm text-body-sm italic font-dm">Psalm 23:2</span>
+</div>
+<div class="flex items-center gap-1 text-outline font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-[15px] text-[#C4704F]">favorite</span>
+<span>Answered</span>
+</div>
+</div>
+</article>
+</div>
+</div>
+</section>
+<!-- BOTTOM SHEET MODAL (Mark Answered Variant) -->
+<div class="fixed inset-0 z-50 pointer-events-none opacity-0 transition-opacity duration-300 flex items-end" id="answer-modal">
+<!-- Backdrop -->
+<div class="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm transition-opacity" onclick="closeAnswerModal()"></div>
+<!-- Sheet Panel: Soft Blush (#F5ECE8) rounded sheet with 24px top corners -->
+<div class="relative w-full max-w-lg mx-auto bg-[#F5ECE8] rounded-t-[24px] p-space-lg shadow-[0_-8px_30px_rgba(46,42,51,0.12)] flex flex-col gap-space-md z-10 transform translate-y-full transition-transform duration-300 pointer-events-auto border-t border-[#E8DDD8]">
+<!-- Top Drag Handle -->
+<div class="w-12 h-1.5 rounded-full bg-[#D7C7BF] mx-auto mb-1"></div>
+<!-- Header -->
+<div class="flex items-center justify-between">
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-tertiary uppercase tracking-widest font-semibold">Testimony of Grace</span>
+<h3 class="font-fraunces text-[22px] text-primary font-normal leading-snug">How was this prayer answered?</h3>
+</div>
+<button class="w-9 h-9 rounded-full bg-surface-container-high/60 flex items-center justify-center text-outline hover:text-on-surface" onclick="closeAnswerModal()">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<!-- Selected Prayer Context Pill -->
+<div class="py-2 px-3 rounded-full bg-white/70 border border-[#E9DFD8] flex items-center gap-2 self-start max-w-full">
+<span class="material-symbols-outlined text-[16px] text-tertiary">church</span>
+<span class="font-body-sm text-body-sm text-primary truncate font-medium" id="modal-prayer-title">Mom’s recovery and peaceful transition</span>
+</div>
+<!-- Date Picker Row (Defaulting to October 24, 2026) -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface font-medium" for="answer-date">Date Answered</label>
+<div class="flex items-center gap-2 bg-white rounded-xl px-3 py-2.5 border border-[#E4D8D2] shadow-sm">
+<span class="material-symbols-outlined text-[20px] text-tertiary">calendar_today</span>
+<input class="flex-1 bg-transparent text-primary font-dm text-body-md focus:outline-none" id="answer-date" type="text" value="October 24, 2026"/>
+<span class="font-label-sm text-label-sm px-2.5 py-1 rounded-full bg-[#F3E5DF] text-[#C4704F] font-semibold">Today</span>
+</div>
+</div>
+<!-- Multiline Gratitude Field -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface font-medium" for="gratitude-text">Note of Gratitude</label>
+<textarea class="w-full p-space-md rounded-xl bg-white border border-[#E4D8D2] text-on-surface font-dm text-body-md placeholder:text-outline focus:outline-none focus:ring-1 focus:ring-primary resize-none shadow-sm" id="gratitude-text" placeholder="Write a note of gratitude… How did you see God's faithfulness in this situation?" rows="4"></textarea>
+</div>
+<!-- Action Buttons -->
+<div class="flex flex-col items-center gap-2.5 pt-1">
+<button class="w-full py-3.5 px-6 rounded-full bg-[#5B3A5E] text-white font-label-lg text-label-lg tracking-wide hover:opacity-95 active:scale-98 transition-all flex items-center justify-center gap-2 shadow-md shadow-[#5B3A5E]/20" onclick="saveAnsweredPrayer()">
+<span class="material-symbols-outlined text-[20px]">favorite</span>
+<span>Save Answered Prayer</span>
+</button>
+<button class="text-sm font-dm text-outline hover:text-on-surface transition-colors py-1" onclick="closeAnswerModal()">
+        Not yet — keep in active prayers
+      </button>
+</div>
+</div>
+</div>
+</div>
+<script>
+  function switchTab(tab) {
+    const activeView = document.getElementById('view-active');
+    const answeredView = document.getElementById('view-answered');
+    const btnActive = document.getElementById('tab-active');
+    const btnAnswered = document.getElementById('tab-answered');
+
+    if (tab === 'active') {
+      activeView.classList.remove('hidden');
+      answeredView.classList.add('hidden');
+      btnActive.className = "flex-1 flex items-center justify-center gap-space-xs py-2.5 px-4 rounded-full bg-surface-container-lowest text-primary shadow-sm transition-all duration-200";
+      btnAnswered.className = "flex-1 flex items-center justify-center gap-space-xs py-2.5 px-4 rounded-full text-outline transition-all duration-200 hover:text-on-surface";
+    } else {
+      activeView.classList.add('hidden');
+      answeredView.classList.remove('hidden');
+      btnAnswered.className = "flex-1 flex items-center justify-center gap-space-xs py-2.5 px-4 rounded-full bg-surface-container-lowest text-primary shadow-sm transition-all duration-200";
+      btnActive.className = "flex-1 flex items-center justify-center gap-space-xs py-2.5 px-4 rounded-full text-outline transition-all duration-200 hover:text-on-surface";
+    }
+  }
+
+  function openAnswerModal(prayerTitle) {
+    const modal = document.getElementById('answer-modal');
+    const titleEl = document.getElementById('modal-prayer-title');
+    if (prayerTitle) {
+      titleEl.textContent = prayerTitle;
+    }
+    
+    modal.classList.remove('pointer-events-none', 'opacity-0');
+    modal.classList.add('opacity-100');
+    const sheet = modal.querySelector('div.transform');
+    sheet.classList.remove('translate-y-full');
+    sheet.classList.add('translate-y-0');
+  }
+
+  function closeAnswerModal() {
+    const modal = document.getElementById('answer-modal');
+    const sheet = modal.querySelector('div.transform');
+    sheet.classList.remove('translate-y-0');
+    sheet.classList.add('translate-y-full');
+    modal.classList.remove('opacity-100');
+    modal.classList.add('opacity-0', 'pointer-events-none');
+  }
+
+  function saveAnsweredPrayer() {
+    closeAnswerModal();
+    setTimeout(() => {
+      switchTab('answered');
+    }, 250);
+  }
+</script></main><aside aria-label="Quick Actions" class="fixed bottom-[5.25rem] right-margin z-40 pb-safe flex items-end gap-space-sm pointer-events-none"><button aria-label="Write Prayer Journal" class="pointer-events-auto w-11 h-11 rounded-full bg-surface-container-lowest text-primary shadow-[0_4px_18px_-4px_rgba(46,42,51,0.12)] flex items-center justify-center active:scale-95 transition-transform hover:bg-surface-container-low"><span class="material-symbols-outlined text-[20px]">edit_note</span></button><button aria-label="Record Audio Prayer" class="pointer-events-auto w-14 h-14 rounded-full bg-primary-container text-on-primary shadow-[0_8px_24px_-4px_rgba(91,58,94,0.35)] flex items-center justify-center active:scale-95 transition-transform"><span class="material-symbols-outlined text-[26px]">mic</span></button></aside><nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface/90 backdrop-blur-xl shadow-[0_-4px_20px_rgba(46,42,51,0.04)]" data-active-classes="text-primary-container font-semibold"><div class="flex justify-around items-center h-16 px-space-md"><a class="flex flex-col items-center justify-center gap-space-xs min-w-[56px] min-h-[44px] text-outline hover:text-on-surface transition-colors" data-path="journal" href="#"><span class="material-symbols-outlined text-[22px]">menu_book</span><span class="font-label-sm text-label-sm leading-none">Journal</span></a><a aria-current="page" class="flex flex-col items-center justify-center gap-space-xs min-w-[56px] min-h-[44px] transition-colors text-primary-container font-semibold" data-path="prayers" href="#"><span class="material-symbols-outlined text-[22px]">volunteer_activism</span><span class="font-label-sm text-label-sm leading-none">Prayers</span></a><a class="flex flex-col items-center justify-center gap-space-xs min-w-[56px] min-h-[44px] text-outline hover:text-on-surface transition-colors" data-path="profile" href="#"><span class="material-symbols-outlined text-[22px]">church</span><span class="font-label-sm text-label-sm leading-none">Sanctuary</span></a></div></nav></body></html>

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<meta content="mobile_blank" name="shell-type"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&amp;family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,300..800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "warm-linen": "#FBF7F2",
+            "ink-plum": "#2E2A33",
+            "mauve-gray": "#8A7F88",
+            "rosewood": "#9E5A62",
+            "petal": "#EADFDB",
+            "soft-blush": "#F5ECE8"
+          },
+          fontFamily: {
+            fraunces: ["Fraunces", "serif"],
+            sans: ["DM Sans", "sans-serif"]
+          }
+        }
+      }
+    };
+  </script>
+<style>
+    @layer base {
+      html, body {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        background-color: #FBF7F2;
+      }
+      .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+      .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+      main > :first-child { margin-top: 0 !important; }
+      main > :last-child { margin-bottom: 0 !important; }
+    }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+</head>
+<body class="bg-warm-linen text-ink-plum font-sans antialiased flex flex-col min-h-screen">
+<main class="flex-1 flex flex-col justify-between w-full pt-safe pb-safe bg-warm-linen max-w-md mx-auto px-6">
+<div class="flex flex-col w-full">
+<!-- Top Bar / Back Navigation -->
+<div class="flex items-center justify-between w-full h-14">
+<button aria-label="Go back" class="inline-flex items-center justify-center w-10 h-10 rounded-full text-ink-plum hover:bg-petal/30 active:scale-95 transition-all duration-150" type="button">
+<span class="material-symbols-outlined text-[24px]">chevron_left</span>
+</button>
+<span class="text-[13px] font-medium tracking-wide text-mauve-gray">Step 1 of 1</span>
+<div class="w-10 h-10"></div>
+</div>
+<!-- Emblem & Header -->
+<div class="flex flex-col items-center text-center mt-2 mb-8">
+<!-- Elegant Line-Art Sanctuary Mark (Candle Flame & Open Hands) -->
+<div class="w-16 h-16 rounded-2xl bg-soft-blush border border-petal/60 flex items-center justify-center mb-5 shadow-sm">
+<svg class="w-8 h-8 text-rosewood" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" viewbox="0 0 32 32">
+<!-- Flame -->
+<path d="M16 6c-1.5 2.5-3.5 4.5-3.5 7 0 2.2 1.6 3.8 3.5 3.8s3.5-1.6 3.5-3.8c0-2.5-2-4.5-3.5-7z" fill="#9E5A62" fill-opacity="0.12"></path>
+<path d="M16 9.5c-.8 1.4-1.8 2.5-1.8 3.8 0 1 .8 1.8 1.8 1.8s1.8-.8 1.8-1.8c0-1.3-1-2.4-1.8-3.8z"></path>
+<!-- Gentle cupped hands -->
+<path d="M8.5 20c2 2.8 4.5 4.5 7.5 4.5s5.5-1.7 7.5-4.5"></path>
+<path d="M6 17.5c2.8 1 5.5 1.5 10 1.5s7.2-.5 10-1.5"></path>
+</svg>
+</div>
+<h1 class="font-fraunces font-semibold text-[26px] leading-[34px] tracking-tight text-ink-plum mb-2">
+          Your sanctuary is waiting.
+        </h1>
+<p class="text-[15px] leading-[22px] text-mauve-gray max-w-[290px] mx-auto">
+          Sign in to keep your reflections safe and synced across your devices.
+        </p>
+</div>
+<!-- Button Stack with 12px Gap -->
+<div class="flex flex-col gap-3 w-full">
+<!-- Continue with Apple -->
+<button class="flex items-center justify-center gap-3 w-full h-[48px] rounded-full bg-black text-white hover:opacity-95 active:scale-[0.99] transition duration-150 shadow-sm" type="button">
+<svg aria-hidden="true" class="w-4 h-4 fill-current mb-0.5" viewbox="0 0 24 24">
+<path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.87c.6-1.03.95-2.02.83-3.07-1.1.09-2.37.81-2.97 1.55-.53.64-.99 1.66-.87 2.66 1.23.1 2.44-.65 3.01-1.14z"></path>
+</svg>
+<span class="text-[15px] font-medium tracking-tight">Continue with Apple</span>
+</button>
+<!-- Continue with Google -->
+<button class="flex items-center justify-center gap-3 w-full h-[48px] rounded-full bg-white border border-petal text-ink-plum hover:bg-neutral-50 active:scale-[0.99] transition duration-150 shadow-sm" type="button">
+<svg aria-hidden="true" class="w-4 h-4" viewbox="0 0 24 24">
+<path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"></path>
+<path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"></path>
+<path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"></path>
+<path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"></path>
+</svg>
+<span class="text-[15px] font-medium tracking-tight text-ink-plum">Continue with Google</span>
+</button>
+</div>
+<!-- Subtle Divider -->
+<div class="relative flex items-center justify-center my-4">
+<div class="absolute inset-0 flex items-center">
+<div class="w-full h-px bg-petal"></div>
+</div>
+<span class="relative px-3 bg-warm-linen text-[13px] text-mauve-gray">or</span>
+</div>
+<!-- Continue with email (Outlined Button / Trigger) -->
+<div class="flex flex-col w-full" id="email-flow-container">
+<button class="flex items-center justify-center gap-2.5 w-full h-[48px] rounded-full bg-white border border-petal text-ink-plum hover:bg-neutral-50 active:scale-[0.99] transition duration-150 shadow-sm" id="email-reveal-btn" onclick="toggleEmailInput()" type="button">
+<span class="material-symbols-outlined text-[19px] text-rosewood">mail</span>
+<span class="text-[15px] font-medium tracking-tight">Continue with email</span>
+</button>
+<div class="hidden flex-col gap-2 mt-3 transition-all duration-200" id="email-drawer">
+<div class="relative w-full">
+<label class="sr-only" for="email-input">Email address</label>
+<input class="w-full h-12 px-4 rounded-xl bg-white border border-petal text-ink-plum placeholder:text-mauve-gray text-[15px] focus:outline-none focus:ring-1 focus:ring-rosewood shadow-sm" id="email-input" placeholder="name@example.com" type="email"/>
+</div>
+<button class="flex items-center justify-center w-full h-11 rounded-full bg-rosewood text-white hover:bg-rosewood/90 active:scale-98 transition duration-150 shadow-sm" type="button">
+<span class="text-[14px] font-medium">Continue</span>
+<span class="material-symbols-outlined text-[18px] ml-1.5">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Privacy Card -->
+<div class="flex items-start gap-3.5 mt-6 p-4 rounded-2xl bg-soft-blush border border-petal shadow-sm">
+<div class="w-7 h-7 rounded-full bg-white border border-petal flex items-center justify-center shrink-0 text-rosewood mt-0.5">
+<span class="material-symbols-outlined text-[15px]">lock</span>
+</div>
+<div class="flex flex-col">
+<div class="text-[14px] font-semibold text-ink-plum mb-0.5">Your entries are private</div>
+<p class="text-[13px] leading-[19px] text-mauve-gray">
+            AI helps write and organize your reflections; you can export or permanently delete everything at any time.
+          </p>
+</div>
+</div>
+</div>
+<!-- Muted Footer -->
+<div class="py-6 text-center px-4">
+<p class="text-[12px] leading-[18px] text-mauve-gray font-normal">
+        By continuing you agree to our 
+        <a class="text-rosewood underline underline-offset-2 hover:opacity-80 transition font-medium" href="#">Terms of Use</a> 
+        and 
+        <a class="text-rosewood underline underline-offset-2 hover:opacity-80 transition font-medium" href="#">Privacy Policy</a>
+</p>
+</div>
+</main>
+<script>
+    function toggleEmailInput() {
+      const drawer = document.getElementById('email-drawer');
+      const btn = document.getElementById('email-reveal-btn');
+      if (drawer && btn) {
+        drawer.classList.remove('hidden');
+        drawer.classList.add('flex');
+        btn.classList.add('hidden');
+        const input = document.getElementById('email-input');
+        if (input) input.focus();
+      }
+    }
+  </script>
+</body></html>

@@ -1,0 +1,79 @@
+import "./global.css";
+
+import { ClerkProvider, useAuth } from "@clerk/expo";
+import { tokenCache } from "@clerk/expo/token-cache";
+import { DMSans_400Regular } from "@expo-google-fonts/dm-sans/400Regular";
+import { DMSans_500Medium } from "@expo-google-fonts/dm-sans/500Medium";
+import { DMSans_600SemiBold } from "@expo-google-fonts/dm-sans/600SemiBold";
+import { DMSans_700Bold } from "@expo-google-fonts/dm-sans/700Bold";
+import { Fraunces_400Regular } from "@expo-google-fonts/fraunces/400Regular";
+import { Fraunces_400Regular_Italic } from "@expo-google-fonts/fraunces/400Regular_Italic";
+import { Fraunces_500Medium } from "@expo-google-fonts/fraunces/500Medium";
+import { Fraunces_600SemiBold } from "@expo-google-fonts/fraunces/600SemiBold";
+import { NavigationContainer } from "@react-navigation/native";
+import { useFonts } from "expo-font";
+import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+
+import { fonts } from "@/constants/theme";
+import { useStoreHydrated } from "@/hooks/useStoreHydrated";
+import { RootNavigator } from "@/navigation/RootNavigator";
+import { useOnboardingStore } from "@/store/onboardingStore";
+
+SplashScreen.preventAutoHideAsync();
+
+const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+function AppShell() {
+  const { isLoaded } = useAuth();
+  const hydrated = useStoreHydrated(useOnboardingStore);
+  const [loaded, error] = useFonts({
+    [fonts.fraunces]: Fraunces_400Regular,
+    [fonts.frauncesMedium]: Fraunces_500Medium,
+    [fonts.frauncesSemibold]: Fraunces_600SemiBold,
+    [fonts.frauncesItalic]: Fraunces_400Regular_Italic,
+    [fonts.dm]: DMSans_400Regular,
+    [fonts.dmMedium]: DMSans_500Medium,
+    [fonts.dmSemibold]: DMSans_600SemiBold,
+    [fonts.dmBold]: DMSans_700Bold,
+  });
+
+  // The fonts, Clerk and the saved onboarding state load in parallel. Waiting for all three means the
+  // navigator first renders with everything known: a signed-in user never sees Onboarding flash by, and
+  // a finished onboarding never shows Welcome.
+  useEffect(() => {
+    if ((loaded || error) && isLoaded && hydrated) {
+      SplashScreen.hideAsync();
+    }
+  }, [loaded, error, isLoaded, hydrated]);
+
+  // Nothing is rendered while waiting: the splash screen is still visible.
+  if ((!loaded && !error) || !hydrated) {
+    return null;
+  }
+
+  return (
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <RootNavigator />
+      </NavigationContainer>
+      <StatusBar style="dark" />
+    </SafeAreaProvider>
+  );
+}
+
+export default function App() {
+  if (!publishableKey) {
+    throw new Error(
+      "Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY. Add it to .env.local (see .env.example) and restart Expo with `npx expo start -c`.",
+    );
+  }
+
+  return (
+    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+      <AppShell />
+    </ClerkProvider>
+  );
+}

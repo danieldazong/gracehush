@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "gracehush",
+    "slug": "gracehush",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "gracehush",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.gracehush.app",
+      "usesAppleSignIn": true
+    },
+    "android": {
+      "package": "com.gracehush.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#5B3A5E",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      "@clerk/expo",
+      "expo-secure-store",
+      "expo-apple-authentication",
+      "@clerk/expo-google-signin",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Gracehush uses the microphone so you can pray out loud. Your recording is used only to create your reflection.",
+          "recordAudioAndroid": true,
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      ["expo-notifications", { "color": "#5B3A5E" }]
+    ],
+    "experiments": {
+      "reactCompiler": true
+    }
+  }
+}

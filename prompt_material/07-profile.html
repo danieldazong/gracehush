@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&amp;family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&amp;family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "inverse-primary": "#e4b9e4", "on-primary": "#ffffff", "outline-variant": "#cfc3cc", "secondary": "#7b5455", "secondary-fixed": "#ffdad9", "on-primary-fixed": "#2d0f31", "background": "#fdf9f4", "error-container": "#ffdad6", "surface-container-low": "#f7f3ee", "surface-container-highest": "#e6e2dd", "on-secondary-fixed-variant": "#603d3e", "primary": "#432446", "on-tertiary-fixed": "#370e00", "surface": "#fdf9f4", "secondary-fixed-dim": "#ecbbba", "on-error": "#ffffff", "tertiary": "#571c03", "primary-fixed-dim": "#e4b9e4", "surface-dim": "#ddd9d5", "inverse-surface": "#31302d", "on-primary-fixed-variant": "#5c3b5f", "on-tertiary-container": "#fa9c78", "on-primary-container": "#d0a6d1", "surface-container-lowest": "#ffffff", "outline": "#7e747c", "on-tertiary-fixed-variant": "#763317", "on-surface": "#1c1c19", "surface-container": "#f1ede8", "inverse-on-surface": "#f4f0eb", "on-secondary-fixed": "#2f1314", "error": "#ba1a1a", "on-error-container": "#93000a", "on-surface-variant": "#4d444c", "surface-container-high": "#ebe8e3", "surface-tint": "#765278", "on-tertiary": "#ffffff", "tertiary-fixed": "#ffdbce", "tertiary-container": "#743216", "primary-container": "#5b3a5e", "primary-fixed": "#ffd6fe", "on-background": "#1c1c19", "on-secondary": "#ffffff", "on-secondary-container": "#795354", "secondary-container": "#fdcbcb", "tertiary-fixed-dim": "#ffb59a", "surface-variant": "#e6e2dd", "surface-bright": "#fdf9f4", "petal": "#eadfdb", "crisis-red": "#b4443a", "rosewood": "#9e5a62", "sage": "#5b7561" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "margin": "1.25rem", "margin-tablet": "2rem", "space-xs": "0.25rem", "space-lg": "1.5rem", "gutter-tablet": "1.5rem", "margin-desktop": "3rem", "space-md": "1rem", "gutter-desktop": "2rem", "space-sm": "0.5rem", "space-xl": "2.5rem", "gutter": "1rem" }, "fontFamily": { "label-sm": ["DM Sans", "sans-serif"], "body-lg": ["DM Sans", "sans-serif"], "headline-md": ["Fraunces", "serif"], "label-lg": ["DM Sans", "sans-serif"], "label-md": ["DM Sans", "sans-serif"], "display-lg-mobile": ["Fraunces", "serif"], "body-sm": ["DM Sans", "sans-serif"], "display-lg": ["Fraunces", "serif"], "headline-lg": ["Fraunces", "serif"], "scripture-quote": ["Newsreader", "serif"], "body-md": ["DM Sans", "sans-serif"], "headline-sm": ["Fraunces", "serif"], "fraunces": ["Fraunces", "serif"] }, "fontSize": { "label-sm": ["11px", { "lineHeight": "16px", "letterSpacing": "0.04em", "fontWeight": "600" }], "body-lg": ["17px", { "lineHeight": "26px", "fontWeight": "400" }], "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "500" }], "label-lg": ["15px", { "lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "600" }], "label-md": ["13px", { "lineHeight": "18px", "letterSpacing": "0.02em", "fontWeight": "500" }], "display-lg-mobile": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "400" }], "body-sm": ["13px", { "lineHeight": "19px", "fontWeight": "400" }], "display-lg": ["40px", { "lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "400" }], "headline-lg": ["30px", { "lineHeight": "38px", "fontWeight": "400" }], "scripture-quote": ["20px", { "lineHeight": "32px", "letterSpacing": "0.01em", "fontWeight": "400" }], "body-md": ["15px", { "lineHeight": "23px", "fontWeight": "400" }], "headline-sm": ["20px", { "lineHeight": "28px", "fontWeight": "500" }] } } } }</script><style>@layer base { html, body { width: 100%; margin: 0; padding: 0; min-height: 100%; } .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); } .pt-safe { padding-top: env(safe-area-inset-top, 0px); } main > :first-child { margin-top: 0 !important; } main > :last-child { margin-bottom: 0 !important; } } ::-webkit-scrollbar { display: none; }</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head><body class="bg-surface text-on-surface antialiased flex flex-col min-h-screen selection:bg-secondary-fixed selection:text-on-secondary-fixed"><header class="fixed top-0 w-full z-30 bg-surface/85 backdrop-blur-xl pt-safe shadow-[0_1px_8px_rgba(0,0,0,0.03)]"><div class="h-16 px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><img alt="Gracehush Emblem" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1WnCRmaXp5QFs8JsU12MhgZ1QFbu98wowYSVGxf2JUDogSzSzsKjPGgBIi0_1ZeLvCUffJjiVHt7tjcKSpd6c4GYEheOaM2NROSocVG7AxYVhgDLdkkmS_9C6fO7QzcLG6DKQPBnIKzyAMYusZ6KPqtY8ts60WkVts9DVzWgyTts-dZg9stOuwkCAWnK8pLo14pcwm2O0hDCTAfEqzAlZNxUJWHHQZhDFvYvBKa5uEuLM1NbjawQ7WYOzdY"/><div class="flex flex-col"><span class="font-label-sm text-label-sm text-secondary uppercase tracking-widest leading-none">Gracehush</span><span class="font-headline-sm text-headline-sm text-primary leading-tight font-fraunces">Profile</span></div></div><div class="flex items-center gap-space-sm"><button aria-label="Spiritual Center" class="w-11 h-11 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container transition-colors"><span class="material-symbols-outlined text-[22px]">spa</span></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-36 bg-surface"><div class="flex flex-col w-full px-margin pb-10">
+<!-- View Switcher (Top Preview Controls) -->
+<div class="w-full flex items-center justify-between p-1 bg-surface-container-high rounded-full my-space-md shadow-inner">
+<button class="flex-1 py-1.5 px-1.5 rounded-full font-label-md text-label-md transition-all duration-200 bg-surface-container-lowest text-primary shadow-sm text-center font-semibold" id="tab-btn-settings" onclick="switchView('settings')" type="button">
+      Settings
+    </button>
+<button class="flex-1 py-1.5 px-1.5 rounded-full font-label-md text-label-md transition-all duration-200 text-on-surface-variant hover:text-primary text-center font-normal" id="tab-btn-export" onclick="switchView('export')" type="button">
+      Export View (Dialog)
+    </button>
+<button class="flex-1 py-1.5 px-1.5 rounded-full font-label-md text-label-md transition-all duration-200 text-on-surface-variant hover:text-primary text-center font-normal" id="tab-btn-delete" onclick="switchView('delete')" type="button">
+      Delete View (Dialog)
+    </button>
+</div>
+<!-- MAIN PROFILE & SETTINGS CONTENT -->
+<div class="flex flex-col w-full" id="view-settings">
+<!-- Header: User Identity Profile -->
+<div class="flex items-center gap-space-md py-space-sm mb-space-md">
+<div class="relative">
+<!-- Soft Blush Circle Avatar with SJ -->
+<div class="w-16 h-16 rounded-full bg-[#fcdfdc] flex items-center justify-center shadow-[0_4px_16px_rgba(46,42,51,0.06)] border border-petal">
+<span class="font-headline-md text-headline-md text-primary font-medium font-fraunces">SJ</span>
+</div>
+<div class="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-surface-container-lowest flex items-center justify-center shadow-xs">
+<span class="w-2.5 h-2.5 rounded-full bg-[#7b5455]"></span>
+</div>
+</div>
+<div class="flex flex-col">
+<h1 class="font-headline-md text-headline-md text-primary font-medium tracking-tight font-fraunces">Sarah Johnson</h1>
+<p class="font-label-md text-label-md text-outline mt-0.5">Member since October 2026</p>
+</div>
+</div>
+<!-- Plan Card with Gracehush Free & Pro Embedded -->
+<div class="w-full bg-surface-container-lowest rounded-2xl p-space-md mb-space-lg border border-petal shadow-[0_4px_18px_-4px_rgba(46,42,51,0.05)]">
+<div class="flex items-center justify-between mb-space-xs">
+<span class="font-label-lg text-label-lg text-primary font-semibold">Gracehush Free</span>
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-wider font-semibold">Active Plan</span>
+</div>
+<p class="font-body-sm text-body-sm text-outline mb-space-sm">2 of 3 audio devotionals used this week</p>
+<!-- Progress Track -->
+<div class="w-full h-2 rounded-full bg-surface-container mb-space-md overflow-hidden">
+<div class="h-full bg-primary rounded-full transition-all duration-500" style="width: 66.6%;"></div>
+</div>
+<!-- Embedded Deep Plum (#5B3A5E) Pro Card -->
+<div class="w-full bg-[#5b3a5e] text-on-primary rounded-xl p-4 flex flex-col gap-space-sm sm:flex-row sm:items-center sm:justify-between shadow-[0_6px_20px_-2px_rgba(91,58,94,0.25)]">
+<div class="flex items-start gap-space-sm">
+<span class="material-symbols-outlined text-[#ffd6fe] text-[22px] mt-0.5">auto_awesome</span>
+<div class="flex flex-col">
+<div class="flex items-center gap-2">
+<span class="font-label-lg text-label-lg text-on-primary font-semibold">Gracehush Pro</span>
+<span class="px-2 py-0.5 rounded-full bg-[#ffd6fe]/25 text-[#ffd6fe] text-[10px] uppercase font-bold tracking-wider">Premium</span>
+</div>
+<span class="font-body-sm text-body-sm text-inverse-primary leading-tight mt-0.5">Unlimited devotionals &amp; ambient audio sanctuary.</span>
+</div>
+</div>
+<button class="self-start sm:self-center px-4 py-2 rounded-full bg-white text-primary font-label-sm text-label-sm uppercase tracking-wider font-semibold active:scale-95 transition-transform shadow-sm whitespace-nowrap" type="button">
+          START FREE TRIAL
+        </button>
+</div>
+</div>
+<!-- Grouped Settings Section 1: PREFERENCES -->
+<div class="mb-space-lg">
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-widest px-2 mb-space-xs block font-semibold">Preferences</span>
+<div class="w-full bg-surface-container-lowest rounded-2xl border border-petal shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] overflow-hidden">
+<!-- Daily Reminders -->
+<button class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between text-left hover:bg-surface-container-low transition-colors active:bg-surface-container" type="button">
+<div class="flex items-center gap-space-md">
+<div class="w-9 h-9 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">notifications_active</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-lg text-label-lg text-on-surface">Daily Reminders</span>
+<span class="font-body-sm text-body-sm text-outline truncate">Morning 8:00 AM • Afternoon 1:00 PM • Evening 8:00 PM</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-[20px]">chevron_right</span>
+</button>
+<div class="h-[1px] bg-petal mx-space-md"></div>
+<!-- Devotional Voice -->
+<button class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between text-left hover:bg-surface-container-low transition-colors active:bg-surface-container" type="button">
+<div class="flex items-center gap-space-md">
+<div class="w-9 h-9 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">record_voice_over</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-lg text-label-lg text-on-surface">Devotional Voice</span>
+<span class="font-body-sm text-body-sm text-outline truncate">Grace — Warm &amp; Contemplative</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-[20px]">chevron_right</span>
+</button>
+<div class="h-[1px] bg-petal mx-space-md"></div>
+<!-- Ambient Soundscape -->
+<button class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between text-left hover:bg-surface-container-low transition-colors active:bg-surface-container" type="button">
+<div class="flex items-center gap-space-md">
+<div class="w-9 h-9 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">water_drop</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-lg text-label-lg text-on-surface">Ambient Soundscape</span>
+<span class="font-body-sm text-body-sm text-outline truncate">Soft Rain, 50% Volume</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-[20px]">chevron_right</span>
+</button>
+</div>
+</div>
+<!-- Grouped Settings Section 2: NOTIFICATIONS & STORAGE -->
+<div class="mb-space-lg">
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-widest px-2 mb-space-xs block font-semibold">Notifications &amp; Storage</span>
+<div class="w-full bg-surface-container-lowest rounded-2xl border border-petal shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] overflow-hidden">
+<!-- Daily Affirmations Push -->
+<div class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between">
+<div class="flex items-center gap-space-md">
+<div class="w-9 h-9 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">spa</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg text-on-surface">Daily Affirmations Push</span>
+<span class="font-body-sm text-body-sm text-outline">Gentle quietude whispers</span>
+</div>
+</div>
+<!-- Toggle switch ON -->
+<button aria-checked="true" class="w-12 h-6 rounded-full bg-secondary p-0.5 transition-colors duration-200 ease-in-out focus:outline-none flex items-center" id="push-toggle" onclick="toggleAffirmationSwitch()" role="switch" type="button">
+<div class="w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transform translate-x-6 transition-transform duration-200" id="push-toggle-knob"></div>
+</button>
+</div>
+<div class="h-[1px] bg-petal mx-space-md"></div>
+<!-- Offline Reflections -->
+<div class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between">
+<div class="flex items-center gap-space-md">
+<div class="w-9 h-9 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">cloud_done</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg text-on-surface">Offline Reflections</span>
+<span class="font-body-sm text-body-sm text-outline">2 synced, 0 pending</span>
+</div>
+</div>
+<!-- Sage Checkmark -->
+<span class="material-symbols-outlined text-sage text-[22px]">check_circle</span>
+</div>
+</div>
+</div>
+<!-- Grouped Settings Section 3: PRIVACY & ACCOUNT -->
+<div class="mb-space-lg">
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-widest px-2 mb-space-xs block font-semibold">Privacy &amp; Account</span>
+<div class="w-full bg-surface-container-lowest rounded-2xl border border-petal shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] overflow-hidden">
+<!-- Export Journal (opens Export Dialog) -->
+<button class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between text-left hover:bg-surface-container-low transition-colors active:bg-surface-container" onclick="openExportModal()" type="button">
+<div class="flex items-center gap-space-md">
+<div class="w-9 h-9 rounded-full bg-surface-container-low flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]">download</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg text-on-surface">Export Journal</span>
+<span class="font-body-sm text-body-sm text-outline">Save prayers &amp; audio notes as PDF</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline text-[20px]">open_in_new</span>
+</button>
+<div class="h-[1px] bg-petal mx-space-md"></div>
+<!-- Delete Account (opens Delete Dialog) -->
+<button class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between text-left hover:bg-[#ffdad6]/20 transition-colors active:bg-[#ffdad6]/40" onclick="openDeleteModal()" type="button">
+<div class="flex items-center gap-space-md">
+<div class="w-9 h-9 rounded-full bg-[#ffdad6] flex items-center justify-center text-crisis-red">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-lg text-label-lg text-crisis-red font-semibold">Delete Account</span>
+<span class="font-body-sm text-body-sm text-outline">Permanent data deletion</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-crisis-red text-[20px]">warning</span>
+</button>
+</div>
+</div>
+<!-- Grouped Settings Section 4: ABOUT & SUPPORT -->
+<div class="mb-space-lg">
+<span class="font-label-sm text-label-sm text-secondary uppercase tracking-widest px-2 mb-space-xs block font-semibold">About</span>
+<div class="w-full bg-surface-container-lowest rounded-2xl border border-petal shadow-[0_4px_18px_-4px_rgba(46,42,51,0.04)] overflow-hidden">
+<button class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between text-left hover:bg-surface-container-low transition-colors" type="button">
+<div class="flex items-center gap-space-md">
+<span class="material-symbols-outlined text-secondary text-[20px]">favorite</span>
+<span class="font-label-lg text-label-lg text-on-surface">Support &amp; Helpline Resources</span>
+</div>
+<span class="material-symbols-outlined text-outline text-[20px]">chevron_right</span>
+</button>
+<div class="h-[1px] bg-petal mx-space-md"></div>
+<button class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between text-left hover:bg-surface-container-low transition-colors" type="button">
+<div class="flex items-center gap-space-md">
+<span class="material-symbols-outlined text-secondary text-[20px]">help_outline</span>
+<span class="font-label-lg text-label-lg text-on-surface">Help &amp; Feedback</span>
+</div>
+<span class="material-symbols-outlined text-outline text-[20px]">chevron_right</span>
+</button>
+<div class="h-[1px] bg-petal mx-space-md"></div>
+<button class="w-full min-h-[56px] px-space-md py-3 flex items-center justify-between text-left hover:bg-surface-container-low transition-colors" type="button">
+<div class="flex items-center gap-space-md">
+<span class="material-symbols-outlined text-outline text-[20px]">logout</span>
+<span class="font-label-lg text-label-lg text-outline">Sign Out</span>
+</div>
+</button>
+</div>
+</div>
+<!-- Contemplative Footer Reference -->
+<div class="flex flex-col items-center justify-center text-center py-space-sm gap-1">
+<p class="font-label-sm text-label-sm text-outline max-w-xs leading-relaxed">
+        Gracehush v1.0 • Scripture quotes from Berean Standard Bible (BSB).
+      </p>
+<div class="flex items-center gap-1.5 text-secondary opacity-80 mt-1">
+<span class="material-symbols-outlined text-[15px]">anchor</span>
+<span class="font-label-sm text-label-sm tracking-wide">Peace be with your spirit.</span>
+</div>
+</div>
+</div>
+</div>
+<!-- VARIANT A — EXPORT DIALOG (MODAL OVERLAY) -->
+<div class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-inverse-surface/40 backdrop-blur-sm" id="modal-export" role="dialog">
+<div class="w-full max-w-sm bg-surface-container-lowest rounded-3xl p-6 shadow-2xl border border-petal flex flex-col items-center text-center transform transition-all animate-in fade-in zoom-in-95 duration-200">
+<!-- Document Icon -->
+<div class="w-16 h-16 rounded-full bg-secondary-fixed/50 flex items-center justify-center text-primary mb-4 border border-petal">
+<span class="material-symbols-outlined text-[32px]">description</span>
+</div>
+<!-- Title in Fraunces -->
+<h2 class="font-headline-md text-headline-md text-primary font-medium font-fraunces mb-2">Export your journal?</h2>
+<!-- Body Copy -->
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 leading-relaxed">
+      We'll prepare all your reflections and prayers as a beautifully formatted PDF and send it to <span class="font-semibold text-primary">sarah@email.com</span>.
+    </p>
+<!-- Preview Mini-Card -->
+<div class="w-full p-3 bg-surface-container-low rounded-xl mb-6 flex items-center gap-3 text-left border border-petal">
+<div class="w-10 h-10 rounded-lg bg-surface-container-lowest flex items-center justify-center text-secondary border border-petal">
+<span class="material-symbols-outlined text-[22px]">picture_as_pdf</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-label-md text-label-md text-primary font-medium truncate">sarah-reflections-2026.pdf</span>
+<span class="font-body-sm text-body-sm text-outline">Encrypted • 14 Prayer Entries</span>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="w-full flex flex-col gap-2">
+<!-- Deep Plum Primary Pill -->
+<button class="w-full h-12 rounded-full bg-[#5b3a5e] text-white font-label-lg text-label-lg active:scale-95 transition-transform flex items-center justify-center gap-2 shadow-md hover:bg-[#432446]" onclick="triggerExportAction()" type="button">
+<span class="material-symbols-outlined text-[20px]">download</span>
+<span>Export Journal</span>
+</button>
+<!-- Text Button Cancel -->
+<button class="w-full h-10 rounded-full text-on-surface-variant hover:text-primary font-label-md text-label-md active:scale-95 transition-colors flex items-center justify-center" onclick="closeModals()" type="button">
+        Cancel
+      </button>
+</div>
+</div>
+</div>
+<!-- VARIANT B — DELETE ACCOUNT DIALOG (MODAL OVERLAY) -->
+<div class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-inverse-surface/40 backdrop-blur-sm" id="modal-delete" role="dialog">
+<div class="w-full max-w-sm bg-surface-container-lowest rounded-3xl p-6 shadow-2xl border border-petal flex flex-col items-center text-center transform transition-all animate-in fade-in zoom-in-95 duration-200">
+<!-- Warning Triangle Icon in Crisis Red (#B4443A) -->
+<div class="w-16 h-16 rounded-full bg-[#ffdad6] flex items-center justify-center text-crisis-red mb-4 border border-crisis-red/20">
+<span class="material-symbols-outlined text-[32px]">warning</span>
+</div>
+<!-- Title in Fraunces -->
+<h2 class="font-headline-md text-headline-md text-on-surface font-medium font-fraunces mb-2">Delete your account?</h2>
+<!-- Body Copy -->
+<p class="font-body-md text-body-md text-on-surface-variant mb-4 leading-relaxed">
+      This permanently deletes all your reflections, prayers, and audio history. This action cannot be undone.
+    </p>
+<!-- Gentle Suggestion Link in Rosewood (#9E5A62) -->
+<button class="font-label-md text-label-md text-rosewood hover:underline mb-6 inline-flex items-center gap-1 active:opacity-75 font-medium" onclick="openExportModal()" type="button">
+      Export my journal first →
+    </button>
+<!-- Action Buttons -->
+<div class="w-full flex flex-col gap-2.5">
+<!-- Crisis Red Fill (#B4443A) Pill -->
+<button class="w-full h-12 rounded-full bg-crisis-red text-white font-label-lg text-label-lg active:scale-95 transition-transform flex items-center justify-center gap-2 shadow-md hover:bg-[#97372f]" onclick="triggerDeleteAction()" type="button">
+<span class="material-symbols-outlined text-[20px]">delete_forever</span>
+<span>Delete Forever</span>
+</button>
+<!-- Secondary Keep Button -->
+<button class="w-full h-11 rounded-full bg-surface-container-low text-on-surface hover:bg-surface-container font-label-md text-label-md active:scale-95 transition-colors flex items-center justify-center border border-petal font-medium" onclick="closeModals()" type="button">
+        Keep My Account
+      </button>
+</div>
+</div>
+</div>
+<!-- Feedback Toast Notification -->
+<div class="fixed top-20 left-1/2 -translate-x-1/2 bg-inverse-surface text-inverse-on-surface px-5 py-2.5 rounded-full shadow-lg opacity-0 pointer-events-none transition-all duration-300 z-50 flex items-center gap-2 max-w-xs text-center font-label-md text-label-md" id="grace-toast">
+<span class="material-symbols-outlined text-[18px] text-inverse-primary">check_circle</span>
+<span id="toast-message">Action processed</span>
+</div>
+<script>
+  function switchView(viewName) {
+    const tabs = {
+      settings: document.getElementById('tab-btn-settings'),
+      export: document.getElementById('tab-btn-export'),
+      delete: document.getElementById('tab-btn-delete')
+    };
+
+    // Reset tab active styling
+    Object.keys(tabs).forEach(key => {
+      if (key === viewName) {
+        tabs[key].className = 'flex-1 py-1.5 px-1.5 rounded-full font-label-md text-label-md transition-all duration-200 bg-surface-container-lowest text-primary shadow-sm text-center font-semibold';
+      } else {
+        tabs[key].className = 'flex-1 py-1.5 px-1.5 rounded-full font-label-md text-label-md transition-all duration-200 text-on-surface-variant hover:text-primary text-center font-normal';
+      }
+    });
+
+    if (viewName === 'settings') {
+      closeModals();
+    } else if (viewName === 'export') {
+      openExportModal(false);
+    } else if (viewName === 'delete') {
+      openDeleteModal(false);
+    }
+  }
+
+  function openExportModal(updateTab = true) {
+    document.getElementById('modal-delete').classList.add('hidden');
+    document.getElementById('modal-delete').classList.remove('flex');
+
+    const modal = document.getElementById('modal-export');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+
+    if (updateTab) {
+      highlightTab('export');
+    }
+  }
+
+  function openDeleteModal(updateTab = true) {
+    document.getElementById('modal-export').classList.add('hidden');
+    document.getElementById('modal-export').classList.remove('flex');
+
+    const modal = document.getElementById('modal-delete');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+
+    if (updateTab) {
+      highlightTab('delete');
+    }
+  }
+
+  function closeModals() {
+    const modalExport = document.getElementById('modal-export');
+    const modalDelete = document.getElementById('modal-delete');
+    modalExport.classList.add('hidden');
+    modalExport.classList.remove('flex');
+    modalDelete.classList.add('hidden');
+    modalDelete.classList.remove('flex');
+    highlightTab('settings');
+  }
+
+  function highlightTab(viewName) {
+    const tabs = {
+      settings: document.getElementById('tab-btn-settings'),
+      export: document.getElementById('tab-btn-export'),
+      delete: document.getElementById('tab-btn-delete')
+    };
+
+    Object.keys(tabs).forEach(key => {
+      if (key === viewName) {
+        tabs[key].className = 'flex-1 py-1.5 px-1.5 rounded-full font-label-md text-label-md transition-all duration-200 bg-surface-container-lowest text-primary shadow-sm text-center font-semibold';
+      } else {
+        tabs[key].className = 'flex-1 py-1.5 px-1.5 rounded-full font-label-md text-label-md transition-all duration-200 text-on-surface-variant hover:text-primary text-center font-normal';
+      }
+    });
+  }
+
+  function triggerExportAction() {
+    closeModals();
+    triggerToast('Your journal archive PDF is being sent to sarah@email.com');
+  }
+
+  function triggerDeleteAction() {
+    closeModals();
+    triggerToast('Account deletion initiated. Peace be with your spirit.');
+  }
+
+  function toggleAffirmationSwitch() {
+    const btn = document.getElementById('push-toggle');
+    const knob = document.getElementById('push-toggle-knob');
+    const isChecked = btn.getAttribute('aria-checked') === 'true';
+
+    if (isChecked) {
+      btn.setAttribute('aria-checked', 'false');
+      btn.classList.remove('bg-secondary');
+      btn.classList.add('bg-outline-variant');
+      knob.classList.remove('translate-x-6');
+      knob.classList.add('translate-x-0.5');
+      triggerToast('Daily affirmations silenced');
+    } else {
+      btn.setAttribute('aria-checked', 'true');
+      btn.classList.remove('bg-outline-variant');
+      btn.classList.add('bg-secondary');
+      knob.classList.add('translate-x-6');
+      knob.classList.remove('translate-x-0.5');
+      triggerToast('Daily affirmations activated');
+    }
+  }
+
+  function triggerToast(msg) {
+    const toast = document.getElementById('grace-toast');
+    const toastMsg = document.getElementById('toast-message');
+    toastMsg.textContent = msg;
+    toast.classList.remove('opacity-0', 'pointer-events-none');
+    toast.classList.add('opacity-100');
+
+    setTimeout(() => {
+      toast.classList.add('opacity-0', 'pointer-events-none');
+      toast.classList.remove('opacity-100');
+    }, 2800);
+  }
+</script></main><aside aria-label="Quick Actions" class="fixed bottom-[5.25rem] right-margin z-20 pb-safe flex items-end gap-space-sm pointer-events-none"><button aria-label="Write Prayer Journal" class="pointer-events-auto w-11 h-11 rounded-full bg-surface-container-lowest text-primary shadow-[0_4px_18px_-4px_rgba(46,42,51,0.12)] flex items-center justify-center active:scale-95 transition-transform hover:bg-surface-container-low border border-petal"><span class="material-symbols-outlined text-[20px]">edit_note</span></button><button aria-label="Record Audio Prayer" class="pointer-events-auto w-14 h-14 rounded-full bg-[#5b3a5e] text-on-primary shadow-[0_8px_24px_-4px_rgba(91,58,94,0.35)] flex items-center justify-center active:scale-95 transition-transform"><span class="material-symbols-outlined text-[26px]">mic</span></button></aside><nav class="fixed bottom-0 w-full z-40 pb-safe bg-surface/90 backdrop-blur-xl shadow-[0_-4px_20px_rgba(46,42,51,0.04)] border-t border-petal" data-active-classes="text-primary-container font-semibold"><div class="flex justify-around items-center h-16 px-space-md"><a class="flex flex-col items-center justify-center gap-space-xs min-w-[56px] min-h-[44px] text-outline hover:text-on-surface transition-colors" data-path="journal" href="#"><span class="material-symbols-outlined text-[22px]">menu_book</span><span class="font-label-sm text-label-sm leading-none">Journal</span></a><a class="flex flex-col items-center justify-center gap-space-xs min-w-[56px] min-h-[44px] text-outline hover:text-on-surface transition-colors" data-path="prayers" href="#"><span class="material-symbols-outlined text-[22px]">volunteer_activism</span><span class="font-label-sm text-label-sm leading-none">Prayers</span></a><a aria-current="page" class="flex flex-col items-center justify-center gap-space-xs min-w-[56px] min-h-[44px] transition-colors text-primary font-semibold" data-path="profile" href="#"><span class="material-symbols-outlined text-[22px]">church</span><span class="font-label-sm text-label-sm leading-none">Sanctuary</span></a></div></nav></body></html>

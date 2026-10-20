@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_stack" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&amp;family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&amp;family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "inverse-primary": "#e4b9e4", "on-primary": "#ffffff", "outline-variant": "#cfc3cc", "secondary": "#7b5455", "secondary-fixed": "#ffdad9", "on-primary-fixed": "#2d0f31", "background": "#FBF7F2", "error-container": "#ffdad6", "surface-container-low": "#f7f3ee", "surface-container-highest": "#e6e2dd", "on-secondary-fixed-variant": "#603d3e", "primary": "#432446", "deep-plum": "#5B3A5E", "crisis-red": "#B4443A", "warm-linen": "#FBF7F2", "sage-done": "#5D8A68", "on-tertiary-fixed": "#370e00", "surface": "#FBF7F2", "secondary-fixed-dim": "#ecbbba", "on-error": "#ffffff", "tertiary": "#571c03", "primary-fixed-dim": "#e4b9e4", "surface-dim": "#ddd9d5", "inverse-surface": "#31302d", "on-primary-fixed-variant": "#5c3b5f", "on-tertiary-container": "#fa9c78", "on-primary-container": "#d0a6d1", "surface-container-lowest": "#ffffff", "outline": "#7e747c", "on-tertiary-fixed-variant": "#763317", "on-surface": "#1c1c19", "surface-container": "#f1ede8", "inverse-on-surface": "#f4f0eb", "on-secondary-fixed": "#2f1314", "error": "#ba1a1a", "on-error-container": "#93000a", "on-surface-variant": "#4d444c", "surface-container-high": "#ebe8e3", "surface-tint": "#765278", "on-tertiary": "#ffffff", "tertiary-fixed": "#ffdbce", "tertiary-container": "#743216", "primary-container": "#5b3a5e", "primary-fixed": "#ffd6fe", "on-background": "#1c1c19", "on-secondary": "#ffffff", "on-secondary-container": "#795354", "secondary-container": "#fdcbcb", "tertiary-fixed-dim": "#ffb59a", "surface-variant": "#e6e2dd", "surface-bright": "#fdf9f4" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "margin": "1.25rem", "margin-tablet": "2rem", "space-xs": "0.25rem", "space-lg": "1.5rem", "gutter-tablet": "1.5rem", "margin-desktop": "3rem", "space-md": "1rem", "gutter-desktop": "2rem", "space-sm": "0.5rem", "space-xl": "2.5rem", "gutter": "1rem" }, "fontFamily": { "label-sm": ["DM Sans", "sans-serif"], "body-lg": ["DM Sans", "sans-serif"], "headline-md": ["Fraunces", "serif"], "label-lg": ["DM Sans", "sans-serif"], "label-md": ["DM Sans", "sans-serif"], "display-lg-mobile": ["Fraunces", "serif"], "body-sm": ["DM Sans", "sans-serif"], "display-lg": ["Fraunces", "serif"], "headline-lg": ["Fraunces", "serif"], "scripture-quote": ["Fraunces", "serif"], "body-md": ["DM Sans", "sans-serif"], "headline-sm": ["Fraunces", "serif"], "fraunces": ["Fraunces", "serif"] }, "fontSize": { "label-sm": ["11px", { "lineHeight": "16px", "letterSpacing": "0.04em", "fontWeight": "600" }], "body-lg": ["17px", { "lineHeight": "26px", "fontWeight": "400" }], "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "500" }], "label-lg": ["15px", { "lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "600" }], "label-md": ["13px", { "lineHeight": "18px", "letterSpacing": "0.02em", "fontWeight": "500" }], "display-lg-mobile": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "400" }], "body-sm": ["13px", { "lineHeight": "19px", "fontWeight": "400" }], "display-lg": ["40px", { "lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "400" }], "headline-lg": ["30px", { "lineHeight": "38px", "fontWeight": "400" }], "scripture-quote": ["20px", { "lineHeight": "32px", "letterSpacing": "0.01em", "fontWeight": "400" }], "body-md": ["15px", { "lineHeight": "23px", "fontWeight": "400" }], "headline-sm": ["20px", { "lineHeight": "28px", "fontWeight": "500" }] } } } }</script><style>@layer base { html, body { width: 100%; margin: 0; padding: 0; min-height: 100%; } .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); } .pt-safe { padding-top: env(safe-area-inset-top, 0px); } main > :first-child { margin-top: 0 !important; } main > :last-child { margin-bottom: 0 !important; } } ::-webkit-scrollbar { display: none; }
+  .font-fraunces { font-family: 'Fraunces', serif; }
+  @keyframes wave-bounce {
+    0%, 100% { height: 12px; }
+    50% { height: 48px; }
+  }
+  .wave-animated {
+    animation: wave-bounce 1.4s ease-in-out infinite;
+  }
+  </style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head><body class="bg-warm-linen text-on-surface antialiased flex flex-col min-h-screen selection:bg-secondary-fixed selection:text-on-secondary-fixed"><header class="fixed top-0 w-full z-50 bg-[#FBF7F2]/90 backdrop-blur-xl pt-safe shadow-[0_1px_8px_rgba(0,0,0,0.03)]"><div class="h-16 px-margin flex items-center justify-between gap-space-sm"><div class="flex items-center gap-space-sm min-w-0"><button aria-label="Go Back or Close" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface hover:bg-surface-container active:scale-95 transition-all" onclick="history.back()"><span class="material-symbols-outlined text-[22px]">arrow_back</span></button><img alt="Gracehush Emblem" class="h-8 w-auto object-contain shrink-0" src="https://lh3.googleusercontent.com/aida/AEtjO1WnCRmaXp5QFs8JsU12MhgZ1QFbu98wowYSVGxf2JUDogSzSzsKjPGgBIi0_1ZeLvCUffJjiVHt7tjcKSpd6c4GYEheOaM2NROSocVG7AxYVhgDLdkkmS_9C6fO7QzcLG6DKQPBnIKzyAMYusZ6KPqtY8ts60WkVts9DVzWgyTts-dZg9stOuwkCAWnK8pLo14pcwm2O0hDCTAfEqzAlZNxUJWHHQZhDFvYvBKa5uEuLM1NbjawQ7WYOzdY"/><h1 class="font-fraunces text-[22px] font-normal text-primary truncate leading-tight">New Entry</h1></div><div class="flex items-center gap-2 shrink-0"><div class="flex items-center gap-1 px-2.5 py-1 bg-surface-container rounded-full text-on-surface-variant"><span class="material-symbols-outlined text-[15px] text-primary" style="font-variation-settings: 'FILL' 1;">lock</span><span class="font-label-sm text-label-sm text-primary font-medium">Private</span></div><div class="w-8 h-8 rounded-full bg-deep-plum flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-safe bg-warm-linen"><div class="flex flex-col w-full relative">
+<!-- Interactive Top View Switcher Pill -->
+<div class="px-margin pt-space-sm pb-space-xs w-full flex items-center justify-center">
+<div class="flex items-center gap-1 p-1 bg-surface-container rounded-full w-full max-w-sm mx-auto shadow-sm">
+<button class="flex-1 py-1.5 px-3 rounded-full font-label-md text-label-md text-center transition-all bg-white text-primary shadow-sm font-semibold" id="viewBtnSpeak" onclick="switchView('speak')">
+        Speak
+      </button>
+<button class="flex-1 py-1.5 px-3 rounded-full font-label-md text-label-md text-center transition-all text-on-surface-variant hover:text-on-surface" id="viewBtnWrite" onclick="switchView('write')">
+        Write
+      </button>
+<button class="flex-1 py-1.5 px-3 rounded-full font-label-md text-label-md text-center transition-all text-on-surface-variant hover:text-on-surface" id="viewBtnProcess" onclick="switchView('process')">
+        Processing State
+      </button>
+</div>
+</div>
+<!-- Sub-Header: Dismissal & Draft Status -->
+<div class="px-margin py-space-xs flex items-center justify-between">
+<div class="flex items-center gap-2">
+<button aria-label="Cancel reflection" class="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container active:scale-95 transition-all" type="button">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+<div>
+<h2 class="font-fraunces text-[18px] text-primary leading-tight font-medium">New Reflection</h2>
+<div class="flex items-center gap-1.5 text-on-surface-variant">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed-dim"></span>
+<span class="font-label-sm text-label-sm">Saved locally</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-1 px-2.5 py-1 bg-surface-container-low rounded-full">
+<span class="material-symbols-outlined text-[14px] text-primary">lock</span>
+<span class="font-label-sm text-label-sm text-primary font-medium">Private</span>
+</div>
+</div>
+<!-- Subtle Divider Motif -->
+<div class="px-margin my-space-xs">
+<div class="w-full h-px bg-surface-variant/70"></div>
+</div>
+<!-- ================= VIEW 1: SPEAK MODE ================= -->
+<section class="flex flex-col px-margin pb-space-xl transition-opacity duration-300" id="sectionSpeak">
+<!-- Segmented toggle: Speak (active Deep Plum) | Write -->
+<div class="flex justify-center mt-space-xs mb-space-md">
+<div class="inline-flex p-1 bg-surface-container rounded-full shadow-inner">
+<button class="py-1 px-5 rounded-full font-label-md text-label-md font-semibold bg-deep-plum text-white shadow-sm transition-all" onclick="switchView('speak')">
+        Speak
+      </button>
+<button class="py-1 px-5 rounded-full font-label-md text-label-md font-medium text-on-surface-variant hover:text-on-surface transition-all" onclick="switchView('write')">
+        Write
+      </button>
+</div>
+</div>
+<!-- Gentle Prompt in Fraunces 24px -->
+<div class="text-center mb-space-md">
+<p class="font-label-sm text-label-sm text-secondary uppercase tracking-widest mb-1">Sanctuary of Voice</p>
+<h3 class="font-fraunces text-[24px] leading-tight text-primary font-normal">What's on your heart today?</h3>
+<p class="font-body-md text-body-md text-on-surface-variant mt-2 max-w-xs mx-auto">
+      Take a breath. Speak freely — there is no wrong way to pray.
+    </p>
+</div>
+<!-- Live Audio Visualizer Card -->
+<div class="w-full bg-white rounded-3xl p-space-lg flex flex-col items-center justify-center shadow-sm relative overflow-hidden">
+<!-- Soft animated / multi-bar waveform in center -->
+<div class="h-16 w-full flex items-center justify-center gap-1.5 px-4 my-space-xs">
+<div class="w-1.5 rounded-full bg-secondary-fixed-dim wave-animated" style="animation-delay: 0.1s; height: 16px;"></div>
+<div class="w-1.5 rounded-full bg-primary-container wave-animated" style="animation-delay: 0.4s; height: 28px;"></div>
+<div class="w-1.5 rounded-full bg-deep-plum wave-animated" style="animation-delay: 0.2s; height: 42px;"></div>
+<div class="w-1.5 rounded-full bg-primary wave-animated" style="animation-delay: 0.6s; height: 52px;"></div>
+<div class="w-1.5 rounded-full bg-secondary wave-animated" style="animation-delay: 0.3s; height: 36px;"></div>
+<div class="w-1.5 rounded-full bg-deep-plum wave-animated" style="animation-delay: 0.5s; height: 46px;"></div>
+<div class="w-1.5 rounded-full bg-secondary-fixed-dim wave-animated" style="animation-delay: 0.15s; height: 26px;"></div>
+<div class="w-1.5 rounded-full bg-primary-container wave-animated" style="animation-delay: 0.35s; height: 34px;"></div>
+<div class="w-1.5 rounded-full bg-secondary-fixed-dim wave-animated" style="animation-delay: 0.25s; height: 18px;"></div>
+</div>
+<!-- Timer Pill: "01:42 / 05:00" with recording indicator dot -->
+<div class="my-space-sm flex items-center gap-2 px-3.5 py-1 rounded-full bg-surface-container-low border border-surface-container">
+<span class="w-2.5 h-2.5 rounded-full bg-crisis-red animate-pulse" id="recordingIndicatorDot"></span>
+<span class="font-mono text-[14px] text-on-surface font-medium tracking-wider" id="speakTimer">01:42 / 05:00</span>
+</div>
+<!-- Large Centered Mic Button (Deep Plum #5B3A5E with soft glow; turns Crisis Red #B4443A while recording state) -->
+<div class="relative flex items-center justify-center my-space-sm">
+<!-- Glowing aura rings -->
+<div class="absolute w-[124px] h-[124px] rounded-full bg-[#B4443A]/20 transition-all duration-500 scale-105 pointer-events-none animate-pulse" id="micGlowRing"></div>
+<button aria-label="Toggle Recording" class="w-[84px] h-[84px] rounded-full bg-crisis-red text-white shadow-lg shadow-[#B4443A]/30 flex items-center justify-center active:scale-95 transition-all duration-300 z-10 hover:shadow-xl cursor-pointer" id="recordOrb" onclick="toggleRecording()" type="button">
+<span class="material-symbols-outlined text-[36px]" id="micIcon" style="font-variation-settings: 'FILL' 1;">mic</span>
+</button>
+</div>
+<p class="font-label-sm text-label-sm text-on-surface-variant mt-space-xs tracking-wider uppercase font-medium" id="recordStatusLabel">
+      Tap to start/stop
+    </p>
+</div>
+<!-- Tip Card -->
+<div class="mt-space-md p-space-md bg-surface-container-low rounded-2xl flex items-start gap-3 border border-surface-container-high/60">
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-secondary text-[18px]">spa</span>
+</div>
+<div class="min-w-0">
+<p class="font-label-md text-label-md text-primary font-medium">Whisper or speak aloud</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Gracehush transcribes tone, pauses, and heart-themes to shape tomorrow's personal psalm.</p>
+</div>
+</div>
+<!-- Action Footer Buttons: Cancel & Finish Reflection -->
+<div class="mt-space-lg flex items-center justify-between gap-space-md">
+<button class="px-5 py-3 rounded-full text-on-surface-variant font-label-lg text-label-lg hover:text-on-surface hover:bg-surface-container active:scale-95 transition-all" onclick="history.back()" type="button">
+      Cancel
+    </button>
+<button class="flex-1 h-12 rounded-full bg-deep-plum text-white font-label-lg text-label-lg flex items-center justify-center gap-2 shadow-md active:scale-95 hover:opacity-95 transition-all" onclick="switchView('process')" type="button">
+<span>Finish Reflection</span>
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+</section>
+<!-- ================= VIEW 2: WRITE MODE ================= -->
+<section class="hidden flex-col px-margin pb-space-xl transition-opacity duration-300" id="sectionWrite">
+<!-- Segmented toggle: Speak | Write (active Deep Plum) -->
+<div class="flex justify-center mt-space-xs mb-space-md">
+<div class="inline-flex p-1 bg-surface-container rounded-full shadow-inner">
+<button class="py-1 px-5 rounded-full font-label-md text-label-md font-medium text-on-surface-variant hover:text-on-surface transition-all" onclick="switchView('speak')">
+        Speak
+      </button>
+<button class="py-1 px-5 rounded-full font-label-md text-label-md font-semibold bg-deep-plum text-white shadow-sm transition-all" onclick="switchView('write')">
+        Write
+      </button>
+</div>
+</div>
+<div class="mb-space-sm text-center">
+<h3 class="font-fraunces text-[24px] leading-tight text-primary font-normal">Pour out your heart</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Written prayers hold the quiet weight of honest thoughts.</p>
+</div>
+<!-- Text Area with Generous Padding in Warm Linen/White Container -->
+<div class="w-full bg-white rounded-3xl p-space-lg shadow-sm flex flex-col border border-surface-container-high/60">
+<textarea class="w-full bg-transparent font-body-lg text-body-lg text-on-surface placeholder:text-outline focus:outline-none resize-none leading-relaxed min-h-[200px]" id="reflectionText" oninput="updateWordCount(this)" placeholder="Pour out your heart… Type freely, share your worries, praises, or questions without judgment." rows="8">Lord, today felt heavy in the quiet moments between meetings. I felt pulled in multiple directions and lost sight of the peace I asked for this morning. Help me return to still waters tonight, and remind me that not everything requires an immediate answer.</textarea>
+<!-- Word counter & Auto-saved tag -->
+<div class="mt-space-md pt-space-xs flex items-center justify-between border-t border-surface-container/80">
+<div class="flex items-center gap-1.5 text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]">edit_note</span>
+<span class="font-label-md text-label-md font-medium" id="wordCounter">41 words</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container transition-all" onclick="clearReflection()" title="Clear text" type="button">
+<span class="material-symbols-outlined text-[18px]">delete_sweep</span>
+</button>
+<span class="font-label-sm text-label-sm px-2.5 py-1 rounded-full bg-surface-container-low text-on-surface-variant">Auto-saved</span>
+</div>
+</div>
+</div>
+<!-- Mood Selector Chips: Anxious, Weary, Grateful, Hopeful -->
+<div class="mt-space-md">
+<p class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-2 font-medium">Select heart mood</p>
+<div class="flex flex-wrap gap-2">
+<button class="px-3.5 py-1.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-secondary-fixed hover:text-on-secondary-fixed transition-all active:scale-95" onclick="toggleMood(this)" type="button">
+        Anxious
+      </button>
+<button class="px-3.5 py-1.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-secondary-fixed hover:text-on-secondary-fixed transition-all active:scale-95" onclick="toggleMood(this)" type="button">
+        Weary
+      </button>
+<button class="px-3.5 py-1.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md font-medium transition-all active:scale-95" onclick="toggleMood(this)" type="button">
+        Grateful
+      </button>
+<button class="px-3.5 py-1.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-secondary-fixed hover:text-on-secondary-fixed transition-all active:scale-95" onclick="toggleMood(this)" type="button">
+        Hopeful
+      </button>
+</div>
+</div>
+<!-- Action Footer Buttons: Cancel & Submit Reflection -->
+<div class="mt-space-xl flex items-center justify-between gap-space-md">
+<button class="px-5 py-3 rounded-full text-on-surface-variant font-label-lg text-label-lg hover:text-on-surface hover:bg-surface-container active:scale-95 transition-all" onclick="switchView('speak')" type="button">
+      Cancel
+    </button>
+<button class="flex-1 h-12 rounded-full bg-deep-plum text-white font-label-lg text-label-lg flex items-center justify-center gap-2 shadow-md active:scale-95 hover:opacity-95 transition-all" onclick="switchView('process')" type="button">
+<span>Submit Reflection</span>
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+</section>
+<!-- ================= VIEW 3: PROCESSING STATE VARIANT ================= -->
+<section class="hidden flex-col px-margin pb-space-xl transition-opacity duration-300" id="sectionProcess">
+<div class="w-full bg-[#FBF7F2] rounded-3xl p-space-lg flex flex-col items-center text-center relative overflow-hidden my-space-xs border border-surface-container">
+<!-- Calm overlay glowing rings -->
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 w-64 h-64 rounded-full bg-secondary-fixed/40 blur-3xl pointer-events-none"></div>
+<!-- Soft pulsing Deep Plum circle with glowing rings -->
+<div class="relative w-32 h-32 flex items-center justify-center my-space-md">
+<div class="absolute inset-0 rounded-full bg-deep-plum/15 animate-ping opacity-60"></div>
+<div class="absolute w-28 h-28 rounded-full border border-deep-plum/30 animate-pulse"></div>
+<div class="w-20 h-20 rounded-full bg-deep-plum flex items-center justify-center shadow-lg shadow-deep-plum/30 text-white relative z-10">
+<span class="material-symbols-outlined text-[36px] animate-spin" style="animation-duration: 6s;">auto_awesome</span>
+</div>
+</div>
+<!-- Headline in Fraunces -->
+<h3 class="font-fraunces text-[24px] leading-snug text-primary max-w-xs font-normal">
+      Listening, praying, and finding scripture…
+    </h3>
+<p class="font-body-md text-body-md text-on-surface-variant mt-2 max-w-sm">
+      Gathering your thoughts into a contemplative benediction.
+    </p>
+<!-- Three Step Indicators -->
+<div class="w-full mt-space-lg space-y-3 text-left">
+<!-- Step 1: Listening (done, with Sage checkmark) -->
+<div class="flex items-start gap-3 p-3.5 rounded-2xl bg-white shadow-sm border border-surface-container">
+<div class="w-7 h-7 rounded-full bg-[#EBF4ED] text-[#5D8A68] flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-[18px] font-bold">check</span>
+</div>
+<div class="min-w-0">
+<div class="flex items-center gap-2">
+<p class="font-label-lg text-label-lg text-on-surface font-semibold">Listening</p>
+<span class="font-label-sm text-label-sm text-[#5D8A68] font-medium">Done</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Your spoken words were faithfully held in stillness.</p>
+</div>
+</div>
+<!-- Step 2: Reflecting (active pulse) -->
+<div class="flex items-start gap-3 p-3.5 rounded-2xl bg-white shadow-sm border border-deep-plum/30 ring-1 ring-deep-plum/20">
+<div class="w-7 h-7 rounded-full bg-deep-plum text-white flex items-center justify-center shrink-0 mt-0.5">
+<span class="w-2 h-2 rounded-full bg-white animate-ping"></span>
+</div>
+<div class="min-w-0">
+<div class="flex items-center gap-2">
+<p class="font-label-lg text-label-lg text-deep-plum font-semibold">Reflecting</p>
+<span class="font-label-sm text-label-sm text-deep-plum font-medium">In progress</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface mt-0.5">Discerning themes of heart-weariness and quiet longing.</p>
+</div>
+</div>
+<!-- Step 3: Preparing your devotional (upcoming) -->
+<div class="flex items-start gap-3 p-3.5 rounded-2xl bg-surface-container-low/80 opacity-70 border border-surface-container">
+<div class="w-7 h-7 rounded-full bg-surface-container flex items-center justify-center shrink-0 mt-0.5 text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]">radio_button_unchecked</span>
+</div>
+<div class="min-w-0">
+<p class="font-label-lg text-label-lg text-on-surface-variant font-medium">Preparing your devotional</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Upcoming personalized psalm &amp; scripture anchor.</p>
+</div>
+</div>
+</div>
+<!-- Muted reassurance note in Soft Blush card -->
+<div class="mt-space-lg w-full flex items-center gap-2.5 p-3.5 rounded-2xl bg-[#FCECEB] border border-[#F8D7D5] text-[#7B5455]">
+<span class="material-symbols-outlined text-[20px] text-crisis-red shrink-0">notifications_active</span>
+<span class="font-label-md text-label-md text-left leading-snug">You can close the app. We'll notify you when it's ready.</span>
+</div>
+<!-- Return Button -->
+<div class="mt-space-md w-full">
+<button class="w-full h-12 rounded-full bg-white border border-surface-container text-on-surface font-label-lg text-label-lg hover:bg-surface-container transition-all active:scale-98 shadow-sm" onclick="switchView('speak')" type="button">
+        Keep Editing Reflection
+      </button>
+</div>
+</div>
+</section>
+</div></main>
+<!-- State and View Controller Script -->
+<script>
+  let isRecording = true;
+
+  function switchView(mode) {
+    const secSpeak = document.getElementById('sectionSpeak');
+    const secWrite = document.getElementById('sectionWrite');
+    const secProcess = document.getElementById('sectionProcess');
+
+    const btnSpeak = document.getElementById('viewBtnSpeak');
+    const btnWrite = document.getElementById('viewBtnWrite');
+    const btnProcess = document.getElementById('viewBtnProcess');
+
+    secSpeak.classList.add('hidden');
+    secWrite.classList.add('hidden');
+    secProcess.classList.add('hidden');
+
+    const defaultClass = "flex-1 py-1.5 px-3 rounded-full font-label-md text-label-md text-center transition-all text-on-surface-variant hover:text-on-surface";
+    const activeClass = "flex-1 py-1.5 px-3 rounded-full font-label-md text-label-md text-center transition-all bg-white text-primary shadow-sm font-semibold";
+
+    btnSpeak.className = defaultClass;
+    btnWrite.className = defaultClass;
+    btnProcess.className = defaultClass;
+
+    if (mode === 'speak') {
+      secSpeak.classList.remove('hidden');
+      btnSpeak.className = activeClass;
+    } else if (mode === 'write') {
+      secWrite.classList.remove('hidden');
+      btnWrite.className = activeClass;
+    } else if (mode === 'process') {
+      secProcess.classList.remove('hidden');
+      btnProcess.className = activeClass;
+    }
+  }
+
+  function toggleRecording() {
+    isRecording = !isRecording;
+    const orb = document.getElementById('recordOrb');
+    const ring = document.getElementById('micGlowRing');
+    const label = document.getElementById('recordStatusLabel');
+    const dot = document.getElementById('recordingIndicatorDot');
+    const waveBars = document.querySelectorAll('.wave-animated');
+
+    if (isRecording) {
+      // Crisis Red active recording state
+      orb.className = "w-[84px] h-[84px] rounded-full bg-crisis-red text-white shadow-lg shadow-[#B4443A]/30 flex items-center justify-center active:scale-95 transition-all duration-300 z-10 hover:shadow-xl cursor-pointer";
+      ring.className = "absolute w-[124px] h-[124px] rounded-full bg-[#B4443A]/20 transition-all duration-500 scale-105 pointer-events-none animate-pulse";
+      label.innerText = "Recording… tap to pause";
+      dot.className = "w-2.5 h-2.5 rounded-full bg-crisis-red animate-pulse";
+      waveBars.forEach(b => b.style.animationPlayState = 'running');
+    } else {
+      // Deep Plum paused / ready state
+      orb.className = "w-[84px] h-[84px] rounded-full bg-deep-plum text-white shadow-lg shadow-[#5B3A5E]/30 flex items-center justify-center active:scale-95 transition-all duration-300 z-10 hover:shadow-xl cursor-pointer";
+      ring.className = "absolute w-[116px] h-[116px] rounded-full bg-secondary-container/40 transition-all duration-500 scale-95 pointer-events-none";
+      label.innerText = "Paused. Tap to resume";
+      dot.className = "w-2.5 h-2.5 rounded-full bg-secondary";
+      waveBars.forEach(b => b.style.animationPlayState = 'paused');
+    }
+  }
+
+  function updateWordCount(textarea) {
+    const text = textarea.value.trim();
+    const words = text ? text.split(/\s+/).length : 0;
+    document.getElementById('wordCounter').innerText = words + (words === 1 ? ' word' : ' words');
+  }
+
+  function clearReflection() {
+    const textarea = document.getElementById('reflectionText');
+    textarea.value = '';
+    updateWordCount(textarea);
+    textarea.focus();
+  }
+
+  function toggleMood(btn) {
+    const isSelected = btn.classList.contains('bg-secondary-fixed');
+    if (isSelected) {
+      btn.className = "px-3.5 py-1.5 rounded-full bg-surface-container-high text-on-surface font-label-md text-label-md hover:bg-secondary-fixed hover:text-on-secondary-fixed transition-all active:scale-95";
+    } else {
+      btn.className = "px-3.5 py-1.5 rounded-full bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md font-medium transition-all active:scale-95";
+    }
+  }
+</script>
+</body></html>

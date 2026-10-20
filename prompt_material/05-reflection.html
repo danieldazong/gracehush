@@ -1,0 +1,298 @@
+<!DOCTYPE html><html class="h-full" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport">
+<meta content="mobile_stack" name="shell-type">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&amp;family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,300..800&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"><style>.material-symbols-outlined, .material-symbols-rounded { font-family: 'Material Symbols Rounded', 'Material Symbols Outlined' !important; font-weight: normal; font-style: normal; font-size: 20px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; letter-spacing: normal; text-transform: none; white-space: nowrap; word-wrap: normal; direction: ltr; -webkit-font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased; overflow: hidden; vertical-align: middle; user-select: none; flex-shrink: 0; }</style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "plum": "#5B3A5E",
+            "plum-dark": "#432446",
+            "dusty-rose": "#D4A5A5",
+            "rosewood": "#9E5A62",
+            "soft-blush": "#F5ECE8",
+            "petal": "#EADFDB",
+            "warm-linen": "#FBF7F2",
+            "crisis-red": "#B4443A",
+            "crisis-red-light": "#FDEDEB",
+            "surface": "#FDF9F4",
+            "surface-dim": "#F4EFEA",
+            "on-surface": "#2D2627",
+            "on-surface-variant": "#635859",
+            "muted": "#8A7D80"
+          },
+          fontFamily: {
+            fraunces: ["Fraunces", "serif"],
+            sans: ["DM Sans", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    @layer base {
+      html, body {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        background-color: #FBF7F2;
+        font-family: 'DM Sans', sans-serif;
+        color: #2D2627;
+      }
+      .pb-safe { padding-bottom: env(safe-area-inset-bottom, 16px); }
+      .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-warm-linen text-on-surface antialiased flex flex-col min-h-screen selection:bg-dusty-rose/40 selection:text-plum-dark">
+<!-- Header Navigation -->
+<header class="fixed top-0 w-full z-40 bg-warm-linen/90 backdrop-blur-md pt-safe border-b border-petal/60 transition-all"><div class="h-14 px-4 flex items-center justify-between gap-3 max-w-lg mx-auto w-full"><div class="flex items-center gap-2"><button aria-label="Go Back" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface hover:bg-petal/50 active:scale-95 transition-all"><span class="material-symbols-rounded text-[22px] w-6 h-6 flex items-center justify-center">arrow_back</span></button><div class="flex items-center gap-1.5 text-rosewood text-sm font-medium"><span class="material-symbols-rounded text-[18px] w-5 h-5 flex items-center justify-center">calendar_today</span><span class="leading-none">Oct 24, 2026</span></div></div><div class="flex items-center gap-1"><button aria-label="Bookmark reflection" class="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-plum hover:bg-petal/40 active:scale-90 transition-all"><span class="material-symbols-rounded text-[20px] w-5 h-5 flex items-center justify-center">bookmark_border</span></button><button aria-label="Share reflection" class="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:text-plum hover:bg-petal/40 active:scale-90 transition-all"><span class="material-symbols-rounded text-[20px] w-5 h-5 flex items-center justify-center">share</span></button></div></div></header>
+<!-- Main Content Wrapper -->
+<main class="flex-1 flex flex-col relative w-full pt-[calc(3.5rem+env(safe-area-inset-top,0px))] max-w-lg mx-auto pb-safe">
+<!-- Top View-Mode Pill Switcher -->
+<div class="px-4 pt-3 pb-2 sticky top-[calc(3.5rem+env(safe-area-inset-top,0px))] z-30 bg-warm-linen/95 backdrop-blur-sm">
+<div class="bg-petal/60 p-1 rounded-full flex items-center justify-between shadow-xs">
+<button class="flex-1 py-1.5 px-2 rounded-full text-xs font-semibold tracking-wide transition-all text-center bg-plum text-white shadow-sm" id="btn-devotional" onclick="switchView('devotional')">
+          Devotional View
+        </button>
+<button class="flex-1 py-1.5 px-2 rounded-full text-xs font-medium tracking-wide transition-all text-center text-on-surface-variant hover:text-on-surface" id="btn-nowplaying" onclick="switchView('nowplaying')">
+          Now Playing Sheet
+        </button>
+<button class="flex-1 py-1.5 px-2 rounded-full text-xs font-medium tracking-wide transition-all text-center text-on-surface-variant hover:text-crisis-red" id="btn-crisis" onclick="switchView('crisis')">
+          Crisis Support
+        </button>
+</div>
+</div>
+<!-- 1. DEVOTIONAL VIEW -->
+<section class="flex flex-col w-full px-4 pt-2 pb-12 gap-4" id="view-devotional"><div class="pt-1"><h1 class="font-fraunces text-[27px] leading-[34px] font-normal text-plum tracking-tight break-words">It sounds like you're feeling anxious, and that's okay.</h1><p class="text-xs text-muted mt-1.5 tracking-wide font-normal">A sanctuary moment curated from your voice journal.</p></div><div class="bg-plum text-white rounded-2xl p-4 shadow-md cursor-pointer transition-transform active:scale-[0.99]" onclick="switchView('nowplaying')"><div class="flex items-center justify-between gap-3"><div class="flex items-center gap-3.5 min-w-0 flex-1"><button aria-label="Play devotional audio" class="w-12 h-12 rounded-full bg-dusty-rose text-plum-dark flex items-center justify-center shrink-0 shadow-sm transition-transform active:scale-95" onclick="event.stopPropagation(); switchView('nowplaying');"><span class="material-symbols-rounded text-[28px] w-7 h-7 flex items-center justify-center" style="font-variation-settings: 'FILL' 1;">play_arrow</span></button><div class="min-w-0 flex-1"><h3 class="font-fraunces text-lg font-medium text-white truncate leading-snug">Peace in the Midst</h3><p class="text-xs text-dusty-rose/90 truncate font-normal mt-0.5">1 min • Personalized devotional</p></div></div><span class="material-symbols-rounded text-dusty-rose text-[22px] w-6 h-6 shrink-0 flex items-center justify-center">expand_less</span></div><div class="mt-3.5"><div class="w-full bg-plum-dark/60 h-1.5 rounded-full overflow-hidden"><div class="bg-dusty-rose h-full rounded-full transition-all duration-300" style="width: 38.6%;"></div></div><div class="flex items-center justify-between mt-2 text-[11px] text-dusty-rose/90 font-medium tracking-tight"><span class="">0:34 / 1:28</span><span class="flex items-center gap-0.5 text-white/90 hover:underline">Tap to open player →</span></div></div></div><div class="bg-soft-blush border border-petal rounded-2xl p-4 shadow-xs"><div class="flex flex-wrap items-center justify-between gap-2 mb-2.5"><span class="font-fraunces text-lg font-medium text-rosewood break-words">Philippians 4:6–7</span><span class="text-[10px] uppercase tracking-wider font-semibold text-rosewood bg-white/70 border border-petal px-2 py-0.5 rounded-full shrink-0">BEREAN STANDARD BIBLE</span></div><p class="font-fraunces italic text-[16px] leading-[26px] text-on-surface/90 font-normal">“Be anxious for nothing, but in everything, by prayer and petition, with thanksgiving, present your requests to God. And the peace of God, which surpasses all comprehension, will guard your hearts and your minds in Christ Jesus.”</p></div><div class="bg-white rounded-2xl p-4 border border-petal/70 shadow-xs"><div class="grid grid-cols-3 gap-1 p-1 bg-warm-linen rounded-xl mb-3.5"><button class="py-1.5 px-1.5 rounded-lg text-[11px] font-semibold leading-tight transition-all text-center bg-white text-plum shadow-xs flex items-center justify-center" id="tab-btn-message" onclick="switchTab('message')">Devotional Text</button><button class="py-1.5 px-1.5 rounded-lg text-[11px] font-medium leading-tight transition-all text-center text-muted hover:text-on-surface flex items-center justify-center" id="tab-btn-affirmations" onclick="switchTab('affirmations')">Today's Affirmations</button><button class="py-1.5 px-1.5 rounded-lg text-[11px] font-medium leading-tight transition-all text-center text-muted hover:text-on-surface flex items-center justify-center" id="tab-btn-prayer" onclick="switchTab('prayer')">Closing Prayer</button></div><div class="flex flex-col gap-2.5" id="tab-pane-message"><p class="text-sm leading-relaxed text-on-surface/95">Sarah, your spirit feels weary because you've been carrying responsibilities meant for hands far larger than your own. Taking a breath right now isn't quitting—it is reverence.</p><p class="text-sm leading-relaxed text-on-surface/95">Peace isn't the absence of tomorrow's unanswered questions; it is the presence of an unwavering Shepherd sitting with you in this very hour. Rest your palms open.</p></div><div class="hidden flex flex-col gap-2.5" id="tab-pane-affirmations"><div class="p-3 bg-warm-linen/80 border border-petal/60 rounded-xl flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-soft-blush border border-petal flex items-center justify-center shrink-0 text-rosewood mt-0.5"><span class="material-symbols-rounded text-[17px] w-4 h-4 flex items-center justify-center">wb_twilight</span></div><div class="flex-1 min-w-0"><div class="flex items-center justify-between"><span class="text-[11px] uppercase tracking-wider font-semibold text-rosewood">Morning • 8:00 AM</span></div><p class="text-sm font-medium text-on-surface mt-0.5 font-fraunces italic">“You are held, not hurried.”</p></div></div><div class="p-3 bg-warm-linen/80 border border-petal/60 rounded-xl flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-soft-blush border border-petal flex items-center justify-center shrink-0 text-rosewood mt-0.5"><span class="material-symbols-rounded text-[17px] w-4 h-4 flex items-center justify-center">wb_sunny</span></div><div class="flex-1 min-w-0"><div class="flex items-center justify-between"><span class="text-[11px] uppercase tracking-wider font-semibold text-rosewood">Afternoon • 1:00 PM</span></div><p class="text-sm font-medium text-on-surface mt-0.5 font-fraunces italic">“Cast your cares like pebbles into quiet water.”</p></div></div><div class="p-3 bg-warm-linen/80 border border-petal/60 rounded-xl flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-soft-blush border border-petal flex items-center justify-center shrink-0 text-plum mt-0.5"><span class="material-symbols-rounded text-[17px] w-4 h-4 flex items-center justify-center">bedtime</span></div><div class="flex-1 min-w-0"><div class="flex items-center justify-between"><span class="text-[11px] uppercase tracking-wider font-semibold text-rosewood">Evening • 8:00 PM</span></div><p class="text-sm font-medium text-on-surface mt-0.5 font-fraunces italic">“Sleep is an act of trust.”</p></div></div></div><div class="hidden flex flex-col gap-2.5" id="tab-pane-prayer"><div class="p-3 bg-soft-blush/60 border border-petal/60 rounded-xl"><p class="font-fraunces italic text-[15px] leading-relaxed text-on-surface/90">“Lord, take what is unraveled inside me and lay it flat under Your quiet hand. When my chest tightens, remind me that my breath belongs to You, and my tomorrow is already held in peace. Amen.”</p></div></div></div><div class="bg-white rounded-2xl border border-petal/70 overflow-hidden shadow-xs"><button class="w-full p-3.5 flex items-center justify-between gap-3 text-left hover:bg-soft-blush/40 transition-colors" onclick="toggleWordsAccordion()"><div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="material-symbols-rounded text-muted text-[19px] w-5 h-5 flex items-center justify-center shrink-0">lock</span><span class="text-xs font-semibold text-on-surface truncate">Your spoken prayer snippet</span><span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-soft-blush text-rosewood shrink-0">Private to you</span></div><span class="material-symbols-rounded text-muted text-[20px] w-5 h-5 flex items-center justify-center transition-transform duration-200 shrink-0" id="accordion-arrow">expand_more</span></button><div class="hidden px-3.5 pb-3.5 text-on-surface-variant text-xs leading-relaxed" id="accordion-content"><div class="p-3 bg-warm-linen border border-petal/60 rounded-xl italic font-fraunces text-on-surface-variant">“Lord, work has been so overwhelming lately and I feel like I'm dropping every ball. I woke up with my heart pounding and I just need to breathe...”</div></div></div><div class="flex flex-col gap-3 pt-1"><div class="flex items-center justify-between gap-3 p-3.5 bg-white border border-petal/70 rounded-2xl shadow-xs"><div class="flex items-center gap-3 min-w-0 flex-1"><div class="w-9 h-9 rounded-full bg-soft-blush text-plum flex items-center justify-center shrink-0"><span class="material-symbols-rounded text-[20px] w-5 h-5 flex items-center justify-center">bookmark_add</span></div><div class="flex flex-col min-w-0 flex-1"><span class="text-xs font-semibold text-on-surface truncate">Mark as Prayer Request</span><span class="text-[11px] text-muted truncate">Keep in your weekly prayer sanctuary</span></div></div><label class="relative inline-flex items-center cursor-pointer shrink-0"><input checked="" class="sr-only peer" type="checkbox"><div class="w-11 h-6 bg-petal peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-plum"></div></label></div><div class="flex items-center gap-2"><button class="flex-1 h-12 rounded-full bg-plum hover:bg-plum-dark text-white font-medium text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-md"><span class="material-symbols-rounded text-[19px] w-5 h-5 flex items-center justify-center">bookmark</span><span class="">Save to Journal</span></button><button aria-label="Share devotional" class="w-12 h-12 rounded-full bg-white border border-petal hover:bg-soft-blush text-plum flex items-center justify-center active:scale-95 transition-all shadow-xs"><span class="material-symbols-rounded text-[20px] w-5 h-5 flex items-center justify-center">share</span></button></div></div></section>
+<!-- 2. NOW PLAYING SHEET VARIANT -->
+<section class="hidden flex flex-col w-full px-4 pt-1 pb-10 gap-3" id="view-nowplaying">
+<!-- Sheet Drag Handle & Close -->
+<div class="flex items-center justify-between pt-1 pb-2">
+<button class="text-muted hover:text-on-surface flex items-center gap-1 text-xs font-medium" onclick="switchView('devotional')">
+<span class="material-symbols-outlined text-[20px]">keyboard_arrow_down</span>
+<span class="">Close sheet</span>
+</button>
+<div class="w-10 h-1 rounded-full bg-petal"></div>
+<div class="w-12"></div>
+</div>
+<!-- Large Soft Plum-to-Rose Gradient Artwork with Sanctuary Flame Mark -->
+<div class="w-full aspect-[4/3] rounded-3xl bg-gradient-to-br from-plum via-[#814d79] to-dusty-rose flex flex-col items-center justify-center relative p-6 shadow-md overflow-hidden my-1">
+<!-- Ambient decorative blur circles -->
+<div class="absolute -right-8 -top-8 w-40 h-40 bg-dusty-rose/30 rounded-full blur-2xl pointer-events-none"></div>
+<div class="absolute -left-8 -bottom-8 w-40 h-40 bg-plum-dark/40 rounded-full blur-2xl pointer-events-none"></div>
+<!-- Sanctuary Flame Mark Emblem -->
+<div class="w-24 h-24 rounded-full bg-white/95 shadow-lg flex items-center justify-center p-3.5 z-10">
+<img alt="Sanctuary Flame Mark" class="w-full h-full object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1WnCRmaXp5QFs8JsU12MhgZ1QFbu98wowYSVGxf2JUDogSzSzsKjPGgBIi0_1ZeLvCUffJjiVHt7tjcKSpd6c4GYEheOaM2NROSocVG7AxYVhgDLdkkmS_9C6fO7QzcLG6DKQPBnIKzyAMYusZ6KPqtY8ts60WkVts9DVzWgyTts-dZg9stOuwkCAWnK8pLo14pcwm2O0hDCTAfEqzAlZNxUJWHHQZhDFvYvBKa5uEuLM1NbjawQ7WYOzdY">
+</div>
+<span class="mt-3.5 font-sans text-[11px] tracking-widest uppercase text-white/90 font-medium z-10">
+          Gracehush Sanctuary
+        </span>
+</div>
+<!-- Title & Reference -->
+<div class="text-center pt-2">
+<h2 class="font-fraunces text-2xl font-normal text-plum tracking-tight">Peace in the Midst</h2>
+<p class="font-sans text-xs text-rosewood font-medium mt-1">Philippians 4:6–7</p>
+</div>
+<!-- Audio Scrubber (0:34 / 1:28) -->
+<div class="pt-2 px-1">
+<div class="relative w-full h-2 bg-petal rounded-full cursor-pointer overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 bg-plum rounded-full" style="width: 38.6%;"></div>
+</div>
+<div class="flex items-center justify-between text-xs text-muted font-medium mt-1.5">
+<span class="">0:34</span>
+<span class="">1:28</span>
+</div>
+</div>
+<!-- Primary Audio Controls: 15s back, 64px Play/Pause, 15s forward -->
+<div class="flex items-center justify-center gap-6 py-2">
+<!-- Skip Back 15s -->
+<button aria-label="Skip back 15 seconds" class="w-12 h-12 rounded-full flex flex-col items-center justify-center text-plum hover:bg-soft-blush active:scale-90 transition-all">
+<span class="material-symbols-outlined text-[28px]">replay_10</span>
+<span class="text-[9px] -mt-1 font-semibold">15</span>
+</button>
+<!-- Large circular Play/Pause button (Deep Plum) -->
+<button aria-label="Pause audio" class="w-16 h-16 rounded-full bg-plum hover:bg-plum-dark text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[34px]" style="font-variation-settings: 'FILL' 1;">pause</span>
+</button>
+<!-- Skip Forward 15s -->
+<button aria-label="Skip forward 15 seconds" class="w-12 h-12 rounded-full flex flex-col items-center justify-center text-plum hover:bg-soft-blush active:scale-90 transition-all">
+<span class="material-symbols-outlined text-[28px]">forward_10</span>
+<span class="text-[9px] -mt-1 font-semibold">15</span>
+</button>
+</div>
+<!-- Playback Speed Chips -->
+<div class="flex items-center justify-center gap-2 pb-1">
+<button class="px-3.5 py-1 rounded-full text-xs font-medium text-muted hover:text-on-surface bg-white border border-petal">0.8x</button>
+<button class="px-4 py-1 rounded-full text-xs font-semibold bg-plum text-white shadow-xs">1x</button>
+<button class="px-3.5 py-1 rounded-full text-xs font-medium text-muted hover:text-on-surface bg-white border border-petal">1.2x</button>
+</div>
+<!-- Ambient Soundscape Selector Module -->
+<div class="p-4 bg-white border border-petal/70 rounded-2xl shadow-xs flex flex-col gap-3 mt-1">
+<div class="flex items-center justify-between">
+<span class="text-xs font-semibold text-on-surface flex items-center gap-1.5">
+<span class="material-symbols-outlined text-rosewood text-[18px]">graphic_eq</span>
+            Ambient Soundscape
+          </span>
+<span class="text-[11px] text-muted font-medium">Vol 40%</span>
+</div>
+<!-- Soundscape Chips -->
+<div class="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+<button class="px-3 py-1.5 rounded-full text-xs font-medium text-muted bg-warm-linen border border-petal/60 shrink-0">Off</button>
+<button class="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-plum text-white shrink-0 shadow-xs">Soft Rain</button>
+<button class="px-3 py-1.5 rounded-full text-xs font-medium text-muted bg-warm-linen border border-petal/60 shrink-0">Gentle Piano</button>
+<button class="px-3 py-1.5 rounded-full text-xs font-medium text-muted bg-warm-linen border border-petal/60 shrink-0">Morning Birds</button>
+</div>
+<!-- Volume Slider -->
+<div class="flex items-center gap-2.5 pt-1">
+<span class="material-symbols-outlined text-muted text-[16px]">volume_down</span>
+<div class="relative flex-1 h-1.5 bg-petal rounded-full overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 bg-rosewood rounded-full" style="width: 40%;"></div>
+</div>
+<span class="material-symbols-outlined text-muted text-[16px]">volume_up</span>
+</div>
+</div>
+</section>
+<!-- 3. CRISIS SUPPORT VARIANT -->
+<section class="hidden flex flex-col w-full px-4 pt-3 pb-10 gap-4" id="view-crisis">
+<!-- Empathetic Crisis Alert Banner with #B4443A Crisis Red left accent -->
+<div class="bg-white rounded-2xl p-4 shadow-xs relative overflow-hidden border border-petal/70">
+<!-- 4px Crisis Red Accent Bar -->
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-crisis-red"></div>
+<div class="pl-2">
+<div class="w-8 h-8 rounded-full bg-crisis-red-light text-crisis-red flex items-center justify-center mb-2.5">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">favorite</span>
+</div>
+<h2 class="font-fraunces text-[19px] leading-snug font-normal text-on-surface">
+            It sounds like you're going through something really heavy. You don't have to carry this alone.
+          </h2>
+<p class="text-xs text-on-surface-variant mt-2 leading-relaxed">
+            Trained listeners are available right now to offer gentle, confidential, human presence without judgment.
+          </p>
+</div>
+</div>
+<!-- Resource List Cards (White Cards, Material-style phone/chat icons) -->
+<div class="flex flex-col gap-2.5">
+<!-- 988 Suicide & Crisis Lifeline -->
+<a class="bg-white hover:bg-soft-blush/40 transition-colors border border-petal/70 rounded-2xl p-3.5 flex items-center justify-between shadow-xs active:scale-[0.99]" href="tel:988">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-10 h-10 rounded-full bg-crisis-red-light flex items-center justify-center shrink-0 text-crisis-red">
+<span class="material-symbols-outlined text-[20px]">phone_in_talk</span>
+</div>
+<div class="flex-1 min-w-0">
+<h4 class="text-sm font-semibold text-on-surface truncate">988 Suicide &amp; Crisis Lifeline</h4>
+<p class="text-xs text-muted truncate">Call or text 988 • Free, confidential, 24/7</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-muted text-[20px] shrink-0">chevron_right</span>
+</a>
+<!-- Crisis Text Line -->
+<a class="bg-white hover:bg-soft-blush/40 transition-colors border border-petal/70 rounded-2xl p-3.5 flex items-center justify-between shadow-xs active:scale-[0.99]" href="sms:741741">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-10 h-10 rounded-full bg-warm-linen flex items-center justify-center shrink-0 text-plum">
+<span class="material-symbols-outlined text-[20px]">chat_bubble_outline</span>
+</div>
+<div class="flex-1 min-w-0">
+<h4 class="text-sm font-semibold text-on-surface truncate">Crisis Text Line</h4>
+<p class="text-xs text-muted truncate">Text HOME to 741741</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-muted text-[20px] shrink-0">chevron_right</span>
+</a>
+<!-- In Immediate Danger? Call 911 -->
+<a class="bg-white hover:bg-crisis-red-light/30 transition-colors border border-petal/70 rounded-2xl p-3.5 flex items-center justify-between shadow-xs active:scale-[0.99]" href="tel:911">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-10 h-10 rounded-full bg-crisis-red-light flex items-center justify-center shrink-0 text-crisis-red">
+<span class="material-symbols-outlined text-[20px]">emergency</span>
+</div>
+<div class="flex-1 min-w-0">
+<h4 class="text-sm font-semibold text-on-surface truncate">In immediate danger? Call 911</h4>
+<p class="text-xs text-crisis-red font-medium truncate">Immediate emergency assistance</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-muted text-[20px] shrink-0">chevron_right</span>
+</a>
+<!-- Outside the US? Find a local helpline -->
+<a class="bg-white hover:bg-soft-blush/40 transition-colors border border-petal/70 rounded-2xl p-3.5 flex items-center justify-between shadow-xs active:scale-[0.99]" href="https://findahelpline.com/" target="_blank">
+<div class="flex items-center gap-3 min-w-0">
+<div class="w-10 h-10 rounded-full bg-warm-linen flex items-center justify-center shrink-0 text-rosewood">
+<span class="material-symbols-outlined text-[20px]">public</span>
+</div>
+<div class="flex-1 min-w-0">
+<h4 class="text-sm font-semibold text-on-surface truncate">Outside the US? Find a local helpline</h4>
+<p class="text-xs text-muted truncate">Free international support network</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-muted text-[20px] shrink-0">open_in_new</span>
+</a>
+</div>
+<!-- Primary Action & Back Link -->
+<div class="flex flex-col items-center gap-3 pt-2">
+<a class="w-full h-12 rounded-full bg-crisis-red hover:bg-[#9d3930] text-white text-sm font-semibold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-md" href="tel:988">
+<span class="material-symbols-outlined text-[20px]">call</span>
+<span class="">Talk to someone now</span>
+</a>
+<button class="text-xs font-semibold text-muted hover:text-on-surface underline underline-offset-4 py-1" onclick="switchView('devotional')">
+          Return to my journal
+        </button>
+</div>
+</section>
+</main>
+<!-- Interactive State & Tab Switcher Script -->
+<script>
+    function switchView(viewName) {
+      const views = ['devotional', 'nowplaying', 'crisis'];
+      views.forEach(v => {
+        const sec = document.getElementById('view-' + v);
+        const btn = document.getElementById('btn-' + v);
+        if (v === viewName) {
+          sec.classList.remove('hidden');
+          btn.className = "flex-1 py-1.5 px-2 rounded-full text-xs font-semibold tracking-wide transition-all text-center bg-plum text-white shadow-sm";
+        } else {
+          sec.classList.add('hidden');
+          btn.className = "flex-1 py-1.5 px-2 rounded-full text-xs font-medium tracking-wide transition-all text-center text-on-surface-variant hover:text-on-surface";
+        }
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function switchTab(tabName) {
+      const tabs = ['message', 'affirmations', 'prayer'];
+      tabs.forEach(t => {
+        const pane = document.getElementById('tab-pane-' + t);
+        const btn = document.getElementById('tab-btn-' + t);
+        if (t === tabName) {
+          pane.classList.remove('hidden');
+          btn.className = "flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all text-center bg-white text-plum shadow-xs";
+        } else {
+          pane.classList.add('hidden');
+          btn.className = "flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all text-center text-muted hover:text-on-surface";
+        }
+      });
+    }
+
+    function toggleWordsAccordion() {
+      const content = document.getElementById('accordion-content');
+      const arrow = document.getElementById('accordion-arrow');
+      if (content.classList.contains('hidden')) {
+        content.classList.remove('hidden');
+        arrow.style.transform = 'rotate(180deg)';
+      } else {
+        content.classList.add('hidden');
+        arrow.style.transform = 'rotate(0deg)';
+      }
+    }
+  </script>
+
+
+</body></html>

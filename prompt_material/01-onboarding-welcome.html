@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<meta content="mobile_blank" name="shell-type"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&amp;family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "warm-linen": "#FBF7F2",
+            "deep-plum": "#5B3A5E",
+            "soft-rose": "#D4A5A5",
+            "soft-blush": "#F5ECE8",
+            "charcoal": "#211D20",
+            "charcoal-muted": "#686166",
+            "plum-light": "#7D5281",
+            "plum-subtle": "#F2EAF1"
+          },
+          fontFamily: {
+            serif: ["Fraunces", "serif"],
+            sans: ["DM Sans", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    @layer base {
+      html, body {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        min-height: 100%;
+        background-color: #FBF7F2;
+      }
+      .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+      .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-warm-linen text-charcoal font-sans antialiased flex flex-col min-h-screen selection:bg-soft-rose selection:text-deep-plum">
+<main class="flex-1 flex flex-col relative w-full pt-safe pb-safe max-w-md mx-auto">
+<!-- Top Navigation Header with Step Switcher Pills & Dots -->
+<header class="px-5 pt-3 pb-4 flex flex-col gap-3 shrink-0 border-b border-[#ECE3DA]/60">
+<div class="flex items-center justify-between">
+<!-- Stepper Indicator Dots -->
+<div aria-label="Onboarding Progress" class="flex items-center space-x-1.5" id="step-dots" role="tablist">
+<button aria-label="Go to Step 1" class="h-2 w-7 rounded-full bg-deep-plum transition-all duration-300" id="dot-1" onclick="goToStep(1)"></button>
+<button aria-label="Go to Step 2" class="h-2 w-2 rounded-full bg-[#E5DCD4] transition-all duration-300" id="dot-2" onclick="goToStep(2)"></button>
+<button aria-label="Go to Step 3" class="h-2 w-2 rounded-full bg-[#E5DCD4] transition-all duration-300" id="dot-3" onclick="goToStep(3)"></button>
+</div>
+<span class="text-xs uppercase tracking-widest font-semibold text-charcoal-muted/80" id="step-counter-text">
+          1 of 3
+        </span>
+</div>
+<!-- Pill Tabs -->
+<nav aria-label="Steps" class="flex items-center bg-[#EDE4DB]/70 p-1 rounded-full text-xs font-medium space-x-1">
+<button class="flex-1 py-1.5 px-2 text-center rounded-full transition-all duration-200 bg-deep-plum text-white font-semibold shadow-xs" id="pill-1" onclick="goToStep(1)">
+          1: Welcome
+        </button>
+<button class="flex-1 py-1.5 px-2 text-center rounded-full transition-all duration-200 text-charcoal-muted hover:text-charcoal font-medium" id="pill-2" onclick="goToStep(2)">
+          2: Rhythm
+        </button>
+<button class="flex-1 py-1.5 px-2 text-center rounded-full transition-all duration-200 text-charcoal-muted hover:text-charcoal font-medium" id="pill-3" onclick="goToStep(3)">
+          3: Permissions
+        </button>
+</nav>
+</header>
+<!-- Content Area: 3 distinct switchable step frames -->
+<div class="flex-1 flex flex-col px-5 py-4 overflow-y-auto">
+<!-- STEP 1: WELCOME -->
+<section class="flex flex-col flex-1 justify-between transition-opacity duration-300" id="frame-1">
+<div class="flex flex-col">
+<!-- Gradient card with clean SVG line-art candle / halo prayer mark -->
+<div class="w-full rounded-3xl p-8 mb-6 text-center relative overflow-hidden shadow-sm" style="background: linear-gradient(145deg, #5B3A5E 0%, #8E5A7F 50%, #D4A5A5 100%);">
+<!-- Subtle ambient glow rings -->
+<div class="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-white/10 blur-xl pointer-events-none"></div>
+<div class="absolute -bottom-10 -left-10 w-40 h-40 rounded-full bg-soft-rose/30 blur-lg pointer-events-none"></div>
+<div class="relative z-10 flex flex-col items-center">
+<!-- Clean SVG Line-Art Mark: Candle Flame & Halo Prayer Ark -->
+<div class="w-20 h-20 rounded-2xl bg-white/15 backdrop-blur-md flex items-center justify-center p-4 mb-4 border border-white/20 shadow-inner">
+<svg class="w-12 h-12 text-white stroke-current" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 48 48">
+<!-- Flame / droplet halo -->
+<path d="M24 6 C24 6, 17 15, 17 21 C17 25 20 28 24 28 C28 28 31 25 31 21 C31 15 24 6 24 6 Z" fill="none" stroke="white"></path>
+<!-- Inner core spark -->
+<path d="M24 18 C24 18 21.5 22 21.5 24 C21.5 25.5 22.5 26.5 24 26.5 C25.5 26.5 26.5 25.5 26.5 24 C26.5 22 24 18 24 18 Z" fill="white" opacity="0.85" stroke="none"></path>
+<!-- Cupping sanctuary hands / gentle resting vessel arc -->
+<path d="M12 28 C12 36 17 40 24 40 C31 40 36 36 36 28" stroke="white" stroke-linecap="round"></path>
+<path d="M8 24 C8 24 10 32 18 35" opacity="0.6" stroke="white" stroke-linecap="round"></path>
+<path d="M40 24 C40 24 38 32 30 35" opacity="0.6" stroke="white" stroke-linecap="round"></path>
+</svg>
+</div>
+<!-- Brand Wordmark in Fraunces -->
+<h2 class="font-serif text-3xl font-normal tracking-normal text-white mb-1">
+                Gracehush
+              </h2>
+<span class="text-[11px] font-sans font-semibold uppercase tracking-[0.22em] text-white/80">
+                AUDIO SANCTUARY
+              </span>
+</div>
+</div>
+<!-- Editorial Headlines -->
+<div class="px-1 text-left space-y-3">
+<h1 class="font-serif text-3xl leading-[1.25] text-charcoal font-normal">
+              A quiet place for your heart.
+            </h1>
+<p class="font-sans text-[16px] leading-relaxed text-charcoal-muted">
+              Speak or write what you're carrying. Receive scripture, a spoken devotional, and gentle reminders through your day.
+            </p>
+</div>
+</div>
+<!-- Step 1 CTAs -->
+<div class="pt-8 pb-2 flex flex-col space-y-3">
+<button class="w-full h-13 py-3.5 px-6 rounded-full bg-deep-plum text-white font-sans font-medium text-[16px] shadow-sm hover:bg-plum-light active:scale-[0.98] transition-all flex items-center justify-center space-x-2" onclick="goToStep(2)">
+<span>Get Started</span>
+<span class="material-symbols-outlined text-lg">arrow_forward</span>
+</button>
+<a class="w-full py-2.5 text-center font-sans text-sm text-charcoal-muted hover:text-deep-plum font-medium transition-colors" href="#" onclick="alert('Proceeding to Sign In'); return false;">
+            I already have an account
+          </a>
+</div>
+</section>
+<!-- STEP 2: SET YOUR RHYTHM -->
+<section class="hidden flex-col flex-1 justify-between transition-opacity duration-300" id="frame-2">
+<div class="flex flex-col">
+<!-- Header -->
+<div class="px-1 mb-6 text-left">
+<span class="text-xs uppercase tracking-widest font-semibold text-deep-plum block mb-2">Step 2 · Daily Rhythm</span>
+<h2 class="font-serif text-3xl leading-snug text-charcoal mb-2 font-normal">
+              When would you like a gentle word?
+            </h2>
+<p class="font-sans text-[15px] leading-relaxed text-charcoal-muted">
+              Choose moments during your day to pause and receive encouragement.
+            </p>
+</div>
+<!-- Three Rhythm Schedule Rows -->
+<div class="space-y-3 mb-5">
+<!-- Morning: Sun icon -->
+<div class="p-4 rounded-2xl bg-white border border-[#EFE7DE] shadow-xs flex items-center justify-between">
+<div class="flex items-center space-x-3.5">
+<div class="w-11 h-11 rounded-full bg-soft-blush text-deep-plum flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[22px]">wb_sunny</span>
+</div>
+<div>
+<h3 class="font-sans font-semibold text-[15px] text-charcoal">Morning</h3>
+<span class="text-xs text-charcoal-muted">Dawn stillness &amp; focus</span>
+</div>
+</div>
+<!-- Editable Time Chip -->
+<button class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-warm-linen border border-[#E7DFD5] text-charcoal font-sans text-xs font-semibold hover:border-deep-plum/40 active:scale-95 transition-all shadow-2xs" onclick="cycleTime(this, ['7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM', '9:00 AM'])">
+<span>8:00 AM</span>
+<span class="material-symbols-outlined text-sm text-deep-plum">schedule</span>
+</button>
+</div>
+<!-- Afternoon: Cloud-sun icon -->
+<div class="p-4 rounded-2xl bg-white border border-[#EFE7DE] shadow-xs flex items-center justify-between">
+<div class="flex items-center space-x-3.5">
+<div class="w-11 h-11 rounded-full bg-soft-blush text-deep-plum flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[22px]">partly_cloudy_day</span>
+</div>
+<div>
+<h3 class="font-sans font-semibold text-[15px] text-charcoal">Afternoon</h3>
+<span class="text-xs text-charcoal-muted">Midday breather &amp; peace</span>
+</div>
+</div>
+<!-- Editable Time Chip -->
+<button class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-warm-linen border border-[#E7DFD5] text-charcoal font-sans text-xs font-semibold hover:border-deep-plum/40 active:scale-95 transition-all shadow-2xs" onclick="cycleTime(this, ['12:00 PM', '12:30 PM', '1:00 PM', '1:30 PM', '2:00 PM'])">
+<span>1:00 PM</span>
+<span class="material-symbols-outlined text-sm text-deep-plum">schedule</span>
+</button>
+</div>
+<!-- Evening: Moon icon -->
+<div class="p-4 rounded-2xl bg-white border border-[#EFE7DE] shadow-xs flex items-center justify-between">
+<div class="flex items-center space-x-3.5">
+<div class="w-11 h-11 rounded-full bg-soft-blush text-deep-plum flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[22px]">bedtime</span>
+</div>
+<div>
+<h3 class="font-sans font-semibold text-[15px] text-charcoal">Evening</h3>
+<span class="text-xs text-charcoal-muted">Rest &amp; surrender</span>
+</div>
+</div>
+<!-- Editable Time Chip -->
+<button class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-warm-linen border border-[#E7DFD5] text-charcoal font-sans text-xs font-semibold hover:border-deep-plum/40 active:scale-95 transition-all shadow-2xs" onclick="cycleTime(this, ['7:30 PM', '8:00 PM', '8:30 PM', '9:00 PM', '9:30 PM'])">
+<span>8:00 PM</span>
+<span class="material-symbols-outlined text-sm text-deep-plum">schedule</span>
+</button>
+</div>
+</div>
+<!-- Muted Helper Text -->
+<div class="text-center px-4 py-2">
+<p class="font-sans text-xs text-charcoal-muted">
+              You can change these anytime.
+            </p>
+</div>
+</div>
+<!-- Step 2 Navigation -->
+<div class="pt-6 pb-2 flex flex-col space-y-3">
+<button class="w-full h-13 py-3.5 px-6 rounded-full bg-deep-plum text-white font-sans font-medium text-[16px] shadow-sm hover:bg-plum-light active:scale-[0.98] transition-all flex items-center justify-center space-x-2" onclick="goToStep(3)">
+<span>Continue</span>
+<span class="material-symbols-outlined text-lg">arrow_forward</span>
+</button>
+<button class="w-full py-2 text-center font-sans text-sm text-charcoal-muted hover:text-charcoal font-medium" onclick="goToStep(1)">
+            Back
+          </button>
+</div>
+</section>
+<!-- STEP 3: PERMISSIONS PRIMER -->
+<section class="hidden flex-col flex-1 justify-between transition-opacity duration-300" id="frame-3">
+<div class="flex flex-col">
+<!-- Header -->
+<div class="px-1 mb-6 text-left">
+<span class="text-xs uppercase tracking-widest font-semibold text-deep-plum block mb-2">Step 3 · Privacy &amp; Sound</span>
+<h2 class="font-serif text-3xl leading-snug text-charcoal mb-2 font-normal">
+              Two small things to make Gracehush work
+            </h2>
+<p class="font-sans text-[15px] leading-relaxed text-charcoal-muted">
+              We treat your space and privacy with total reverence.
+            </p>
+</div>
+<!-- Permission Cards -->
+<div class="space-y-3.5 mb-5">
+<!-- Card 1: Microphone -->
+<div class="p-5 rounded-2xl bg-white border border-[#EFE7DE] shadow-xs flex items-start space-x-4">
+<div class="w-12 h-12 rounded-full bg-soft-blush text-deep-plum flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[24px]">mic</span>
+</div>
+<div class="flex-1">
+<h3 class="font-sans font-semibold text-[15px] text-charcoal mb-1">Microphone</h3>
+<p class="font-sans text-[13px] leading-relaxed text-charcoal-muted">
+                  So you can pray out loud. Your recording is used only to create your reflection.
+                </p>
+</div>
+</div>
+<!-- Card 2: Notifications -->
+<div class="p-5 rounded-2xl bg-white border border-[#EFE7DE] shadow-xs flex items-start space-x-4">
+<div class="w-12 h-12 rounded-full bg-soft-blush text-deep-plum flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[24px]">notifications</span>
+</div>
+<div class="flex-1">
+<h3 class="font-sans font-semibold text-[15px] text-charcoal mb-1">Notifications</h3>
+<p class="font-sans text-[13px] leading-relaxed text-charcoal-muted">
+                  For your three daily affirmations. Never ads or spam.
+                </p>
+</div>
+</div>
+</div>
+<!-- Privacy Pledge Badge -->
+<div class="flex items-center justify-center space-x-2 py-2 px-3 rounded-xl bg-[#F0E8DF]/60 text-charcoal-muted">
+<span class="material-symbols-outlined text-sm text-deep-plum">lock</span>
+<span class="font-sans text-xs tracking-tight">Private, confidential &amp; encrypted</span>
+</div>
+</div>
+<!-- Step 3 Navigation -->
+<div class="pt-6 pb-2 flex flex-col space-y-3">
+<button class="w-full h-13 py-3.5 px-6 rounded-full bg-deep-plum text-white font-sans font-medium text-[16px] shadow-sm hover:bg-plum-light active:scale-[0.98] transition-all flex items-center justify-center space-x-2" onclick="completeOnboarding()">
+<span>Allow &amp; Continue</span>
+<span class="material-symbols-outlined text-lg">check</span>
+</button>
+<button class="w-full py-2.5 text-center font-sans text-sm text-charcoal-muted hover:text-charcoal font-medium transition-colors" onclick="completeOnboarding()">
+            Maybe later
+          </button>
+</div>
+</section>
+</div>
+</main>
+<script>
+    function goToStep(step) {
+      for (let i = 1; i <= 3; i++) {
+        const frame = document.getElementById(`frame-${i}`);
+        const pill = document.getElementById(`pill-${i}`);
+        const dot = document.getElementById(`dot-${i}`);
+
+        if (i === step) {
+          frame.classList.remove('hidden');
+          frame.classList.add('flex');
+
+          // Active pill state
+          pill.className = 'flex-1 py-1.5 px-2 text-center rounded-full transition-all duration-200 bg-deep-plum text-white font-semibold shadow-xs';
+
+          // Active dot state
+          dot.className = 'h-2 w-7 rounded-full bg-deep-plum transition-all duration-300';
+        } else {
+          frame.classList.add('hidden');
+          frame.classList.remove('flex');
+
+          // Inactive pill state
+          pill.className = 'flex-1 py-1.5 px-2 text-center rounded-full transition-all duration-200 text-charcoal-muted hover:text-charcoal font-medium';
+
+          // Inactive dot state
+          dot.className = 'h-2 w-2 rounded-full bg-[#E5DCD4] transition-all duration-300';
+        }
+      }
+
+      // Update counter text
+      const counter = document.getElementById('step-counter-text');
+      if (counter) {
+        counter.textContent = `${step} of 3`;
+      }
+    }
+
+    function cycleTime(buttonEl, times) {
+      const span = buttonEl.querySelector('span');
+      if (!span) return;
+      const current = span.innerText.trim();
+      const currentIndex = times.indexOf(current);
+      const nextIndex = (currentIndex + 1) % times.length;
+      span.innerText = times[nextIndex];
+    }
+
+    function completeOnboarding() {
+      alert("Gracehush initialized. Welcome to your sanctuary.");
+    }
+  </script>
+</body></html>

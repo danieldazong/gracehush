@@ -1,0 +1,244 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+
+@import "nativewind/theme";
+
+/* Scan app code only; automatic detection would also pick up class names in prompts/ and docs. */
+@source "./src/**/*.{ts,tsx}";
+
+/* NativeWind inlines rem as 14 on native. Pin it to 16 so the Tailwind scale is the 4px / 8pt grid. */
+:root {
+  font-size: 16px;
+}
+
+@theme {
+  --color-plum: #5B3A5E;
+  --color-plum-deep: #3E2741;
+  --color-rose: #D4A5A5;
+  /* Darkened from the design's #9E5A62 (4.4:1 on blush and linen-deep) to 4.8:1 on both, 5.2 on linen. */
+  --color-rosewood: #96555D;
+  --color-terracotta: #C4704F;
+  --color-sage: #8FA58A;
+  --color-linen: #FBF7F2;
+  --color-linen-deep: #F1EDE8;
+  --color-blush: #F5ECE8;
+  --color-card: #FFFFFF;
+  --color-ink: #2E2A33;
+  /* Darkened from the design's #8A7F88 (3.3 to 3.8:1 on the surfaces it sits on) to 4.9 to 5.7:1. */
+  --color-mauve: #6E636D;
+  --color-petal: #EADFDB;
+  --color-crisis: #B4443A;
+
+  --color-anxious-bg: #F3E6EE;
+  --color-anxious-fg: #5B3A5E;
+  --color-weary-bg: #F0EAE6;
+  --color-weary-fg: #6B5D57;
+  --color-grateful-bg: #E8EFE6;
+  --color-grateful-fg: #4F6B4A;
+  --color-grieving-bg: #ECE6F0;
+  --color-grieving-fg: #4A3B5C;
+  --color-hopeful-bg: #F7E9DF;
+  --color-hopeful-fg: #9A4F31;
+
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-input: 12px;
+  --radius-card: 16px;
+  --radius-hero: 24px;
+  --radius-sheet: 24px;
+  --radius-full: 9999px;
+
+  --spacing-screen: 20px;
+  --spacing-screen-narrow: 16px;
+  --spacing-space-xl: 40px;
+
+  --font-fraunces: "Fraunces_400Regular";
+  --font-fraunces-medium: "Fraunces_500Medium";
+  --font-fraunces-semibold: "Fraunces_600SemiBold";
+  --font-fraunces-italic: "Fraunces_400Regular_Italic";
+  --font-dm: "DMSans_400Regular";
+  --font-dm-medium: "DMSans_500Medium";
+  --font-dm-semibold: "DMSans_600SemiBold";
+  --font-dm-bold: "DMSans_700Bold";
+}
+
+/* Type scale. @utility (not @layer) so the scale can be @apply'd by the components below. */
+@utility text-display {
+  @apply font-fraunces-semibold text-[32px] leading-[40px] tracking-[-0.32px];
+}
+
+@utility text-title {
+  @apply font-fraunces-semibold text-[28px] leading-[34px];
+}
+
+@utility text-headline-lg {
+  @apply font-fraunces text-[30px] leading-[38px];
+}
+
+@utility text-headline {
+  @apply font-fraunces-medium text-[24px] leading-[32px];
+}
+
+@utility text-section {
+  @apply font-fraunces-medium text-[20px] leading-[28px];
+}
+
+@utility text-scripture {
+  @apply font-fraunces-italic text-[17px] leading-[26px] tracking-[0.17px];
+}
+
+@utility text-scripture-ref {
+  @apply font-fraunces-semibold text-[17px] leading-[24px] text-rosewood;
+}
+
+@utility text-body-lg {
+  @apply font-dm text-[17px] leading-[26px];
+}
+
+@utility text-body {
+  @apply font-dm text-[15px] leading-[22px];
+}
+
+@utility text-body-sm {
+  @apply font-dm text-[13px] leading-[19px];
+}
+
+@utility text-body-muted {
+  @apply text-body text-mauve;
+}
+
+@utility text-label-lg {
+  @apply font-dm-semibold text-[15px] leading-[20px];
+}
+
+@utility text-label-md {
+  @apply font-dm-medium text-[13px] leading-[18px];
+}
+
+@utility text-timer {
+  @apply font-dm-medium text-[15px] leading-[20px];
+  font-variant: tabular-nums;
+}
+
+@utility eyebrow {
+  @apply font-dm-bold text-[11px] leading-[16px] uppercase tracking-[0.8px] text-rosewood;
+}
+
+/* Native has no reliable descendant styling, so variants are modifiers on each part. */
+@layer components {
+  .screen {
+    @apply flex-1 bg-linen;
+  }
+
+  .screen__content {
+    @apply px-screen max-[360px]:px-screen-narrow;
+  }
+
+  .card {
+    @apply rounded-card border border-petal bg-card p-4;
+  }
+
+  .card--blush {
+    @apply bg-blush;
+  }
+
+  .card--hero {
+    @apply rounded-hero overflow-hidden;
+  }
+
+  .btn-primary {
+    @apply min-h-12 flex-row items-center justify-center rounded-full bg-plum px-6;
+  }
+
+  .btn-primary__label {
+    @apply text-label-lg text-white;
+  }
+
+  .btn-ghost {
+    @apply min-h-12 flex-row items-center justify-center rounded-full border border-petal bg-card px-6;
+  }
+
+  .btn-ghost__label {
+    @apply text-label-lg text-ink;
+  }
+
+  .btn-critical {
+    @apply min-h-12 flex-row items-center justify-center rounded-full bg-crisis px-6;
+  }
+
+  .btn-critical__label {
+    @apply text-label-lg text-white;
+  }
+
+  .btn-text__label {
+    @apply text-label-lg text-ink;
+  }
+
+  .btn-text__label--rosewood {
+    @apply text-rosewood;
+  }
+
+  .chip {
+    @apply flex-row items-center justify-center rounded-full bg-linen-deep px-3 py-1;
+  }
+
+  .chip--terracotta {
+    @apply bg-terracotta/12;
+  }
+
+  .chip__label {
+    @apply text-label-md text-mauve;
+  }
+
+  /* hopeful-fg (#9A4F31), not terracotta: terracotta on its 12% tint is 3.0:1, hopeful-fg is 4.9:1. */
+  .chip__label--terracotta {
+    @apply text-hopeful-fg;
+  }
+
+  .segmented {
+    @apply flex-row rounded-full bg-linen-deep p-1;
+  }
+
+  .segmented__item {
+    @apply min-h-11 flex-1 items-center justify-center rounded-full py-2;
+  }
+
+  .segmented__item--active {
+    @apply bg-card;
+  }
+
+  .segmented__item--active-plum {
+    @apply bg-plum;
+  }
+
+  .segmented__label {
+    @apply text-label-md text-mauve;
+  }
+
+  .segmented__label--active {
+    @apply text-ink;
+  }
+
+  .segmented__label--active-plum {
+    @apply text-white;
+  }
+
+  .input {
+    @apply min-h-12 rounded-input border border-petal bg-card px-4 text-body text-ink;
+  }
+
+  .icon-tile {
+    @apply size-14 items-center justify-center rounded-card bg-blush;
+  }
+
+  .divider {
+    @apply h-px bg-petal;
+  }
+
+  .list-row {
+    @apply min-h-14 flex-row items-center gap-3;
+  }
+}
+
+/* Last, so utilities (bg-black, mt-4, ...) come after and override the component classes above. */
+@import "tailwindcss/utilities.css" source(none);

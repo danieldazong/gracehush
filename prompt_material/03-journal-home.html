@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&amp;family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&amp;family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "inverse-primary": "#e4b9e4",
+        "on-primary": "#ffffff",
+        "outline-variant": "#cfc3cc",
+        "secondary": "#7b5455",
+        "secondary-fixed": "#ffdad9",
+        "on-primary-fixed": "#2d0f31",
+        "background": "#fdf9f4",
+        "error-container": "#ffdad6",
+        "surface-container-low": "#f7f3ee",
+        "surface-container-highest": "#e6e2dd",
+        "on-secondary-fixed-variant": "#603d3e",
+        "primary": "#432446",
+        "on-tertiary-fixed": "#370e00",
+        "surface": "#fdf9f4",
+        "secondary-fixed-dim": "#ecbbba",
+        "on-error": "#ffffff",
+        "tertiary": "#571c03",
+        "primary-fixed-dim": "#e4b9e4",
+        "surface-dim": "#ddd9d5",
+        "inverse-surface": "#31302d",
+        "on-primary-fixed-variant": "#5c3b5f",
+        "on-tertiary-container": "#fa9c78",
+        "on-primary-container": "#d0a6d1",
+        "surface-container-lowest": "#ffffff",
+        "outline": "#7e747c",
+        "on-tertiary-fixed-variant": "#763317",
+        "on-surface": "#1c1c19",
+        "surface-container": "#f1ede8",
+        "inverse-on-surface": "#f4f0eb",
+        "on-secondary-fixed": "#2f1314",
+        "error": "#ba1a1a",
+        "on-error-container": "#93000a",
+        "on-surface-variant": "#4d444c",
+        "surface-container-high": "#ebe8e3",
+        "surface-tint": "#765278",
+        "on-tertiary": "#ffffff",
+        "tertiary-fixed": "#ffdbce",
+        "tertiary-container": "#743216",
+        "primary-container": "#5b3a5e",
+        "primary-fixed": "#ffd6fe",
+        "on-background": "#1c1c19",
+        "on-secondary": "#ffffff",
+        "on-secondary-container": "#795354",
+        "secondary-container": "#fdcbcb",
+        "tertiary-fixed-dim": "#ffb59a",
+        "surface-variant": "#e6e2dd",
+        "surface-bright": "#fdf9f4",
+        "deepplum": "#432446",
+        "deepplum-container": "#5b3a5e",
+        "rosewood": "#9E5A62",
+        "terracotta-chip": "#FBEFEA",
+        "terracotta-text": "#9A4F31",
+        "blush-offline": "#F5ECE8",
+        "sage-toast": "#E8EFE6",
+        "sage-text": "#3F5B3A"
+      },
+      borderRadius: {
+        "DEFAULT": "0.25rem",
+        "lg": "0.5rem",
+        "xl": "0.75rem",
+        "2xl": "1rem",
+        "3xl": "1.5rem",
+        "full": "9999px"
+      },
+      spacing: {
+        "margin": "1.25rem",
+        "margin-tablet": "2rem",
+        "space-xs": "0.25rem",
+        "space-lg": "1.5rem",
+        "gutter-tablet": "1.5rem",
+        "margin-desktop": "3rem",
+        "space-md": "1rem",
+        "gutter-desktop": "2rem",
+        "space-sm": "0.5rem",
+        "space-xl": "2.5rem",
+        "gutter": "1rem"
+      },
+      fontFamily: {
+        "fraunces": ["Fraunces", "serif"],
+        "body": ["DM Sans", "sans-serif"],
+        "label-sm": ["DM Sans", "sans-serif"],
+        "body-lg": ["DM Sans", "sans-serif"],
+        "headline-md": ["Fraunces", "serif"],
+        "label-lg": ["DM Sans", "sans-serif"],
+        "label-md": ["DM Sans", "sans-serif"],
+        "display-lg-mobile": ["Fraunces", "serif"],
+        "body-sm": ["DM Sans", "sans-serif"],
+        "display-lg": ["Fraunces", "serif"],
+        "headline-lg": ["Fraunces", "serif"],
+        "scripture-quote": ["Newsreader", "serif"],
+        "body-md": ["DM Sans", "sans-serif"],
+        "headline-sm": ["Fraunces", "serif"]
+      }
+    }
+  }
+};</script><style>@layer base { html, body { width: 100%; margin: 0; padding: 0; min-height: 100%; } .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); } .pt-safe { padding-top: env(safe-area-inset-top, 0px); } main > :first-child { margin-top: 0 !important; } main > :last-child { margin-bottom: 0 !important; } } ::-webkit-scrollbar { display: none; }</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style></head><body class="bg-surface text-on-surface antialiased flex flex-col min-h-screen selection:bg-secondary-fixed selection:text-on-secondary-fixed"><header class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-xl pt-safe border-b border-[#EADFDB]/60"><div class="h-16 px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><img alt="Gracehush Emblem" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1WnCRmaXp5QFs8JsU12MhgZ1QFbu98wowYSVGxf2JUDogSzSzsKjPGgBIi0_1ZeLvCUffJjiVHt7tjcKSpd6c4GYEheOaM2NROSocVG7AxYVhgDLdkkmS_9C6fO7QzcLG6DKQPBnIKzyAMYusZ6KPqtY8ts60WkVts9DVzWgyTts-dZg9stOuwkCAWnK8pLo14pcwm2O0hDCTAfEqzAlZNxUJWHHQZhDFvYvBKa5uEuLM1NbjawQ7WYOzdY"/><div class="flex flex-col"><span class="font-body text-[11px] text-secondary uppercase tracking-[0.22em] font-semibold leading-none">Gracehush</span><span class="font-fraunces text-[21px] text-[#432446] font-medium leading-tight tracking-tight">Journal</span></div></div><div class="flex items-center gap-2"><button aria-label="Serene sanctuary" class="w-10 h-10 rounded-full flex items-center justify-center text-secondary hover:bg-surface-container transition-colors"><span class="material-symbols-outlined text-[23px]">spa</span></button><button aria-label="Profile" class="w-8 h-8 rounded-full bg-[#432446] flex items-center justify-center shadow-sm"><span class="material-symbols-outlined text-white text-[18px]">person</span></button></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-36 bg-surface"><div class="flex flex-col w-full px-margin pb-8 space-y-5">
+<!-- Interactive Top Segmented Switcher Pill to preview: [Feed (Normal)] [Offline Sync] [Empty State] -->
+<div class="w-full flex items-center justify-between bg-surface-container-low p-1 rounded-full border border-[#EADFDB]">
+<button class="flex-1 py-1.5 px-2 rounded-full font-body text-xs font-semibold transition-all duration-200 bg-surface-container-lowest text-[#432446] shadow-[0_1px_3px_rgba(0,0,0,0.06)] flex items-center justify-center gap-1.5" id="tab-normal" onclick="switchState('normal')">
+<span class="material-symbols-outlined text-[15px]">auto_awesome</span>
+<span>Feed (Normal)</span>
+</button>
+<button class="flex-1 py-1.5 px-2 rounded-full font-body text-xs font-medium transition-all duration-200 text-outline hover:text-on-surface flex items-center justify-center gap-1.5" id="tab-offline" onclick="switchState('offline')">
+<span class="material-symbols-outlined text-[15px]">cloud_off</span>
+<span>Offline Sync</span>
+</button>
+<button class="flex-1 py-1.5 px-2 rounded-full font-body text-xs font-medium transition-all duration-200 text-outline hover:text-on-surface flex items-center justify-center gap-1.5" id="tab-empty" onclick="switchState('empty')">
+<span class="material-symbols-outlined text-[15px]">hourglass_empty</span>
+<span>Empty State</span>
+</button>
+</div>
+<!-- Header: "Good morning, Sarah" in Fraunces SemiBold + muted date line -->
+<header class="flex items-start justify-between pt-1 gap-2">
+<div class="flex flex-col">
+<h1 class="font-fraunces text-[28px] leading-[34px] font-semibold text-[#432446] tracking-tight">Good morning, Sarah</h1>
+<p class="font-body text-[13px] text-outline mt-0.5">Thursday, October 24</p>
+</div>
+<!-- Consistency chip (Terracotta #C4704F tint bg #FBEFEA, text #9A4F31): sun icon + "5 days of reflection" -->
+<div class="bg-[#FBEFEA] text-[#9A4F31] rounded-full px-3 py-1 text-[12px] font-body font-medium flex items-center gap-1.5 shrink-0 border border-[#F4DDD2] shadow-sm mt-1">
+<span class="material-symbols-outlined text-[15px] text-[#C4704F]" style="font-variation-settings: 'FILL' 1;">wb_sunny</span>
+<span>5 days of reflection</span>
+</div>
+</header>
+<!-- ==================== VIEW 1: NORMAL FEED ==================== -->
+<section class="flex flex-col space-y-5 transition-opacity duration-300" id="view-normal">
+<!-- "Today's Affirmation" card (White bg, rounded-2xl, border #EADFDB) -->
+<article class="bg-white rounded-2xl p-5 border border-[#EADFDB] shadow-sm relative overflow-hidden flex flex-col space-y-2.5">
+<div class="flex items-center justify-between">
+<span class="font-body text-[11px] font-bold uppercase tracking-[0.08em] text-secondary">MORNING AFFIRMATION</span>
+<span class="material-symbols-outlined text-outline hover:text-secondary text-[18px] transition-colors cursor-pointer">favorite</span>
+</div>
+<h2 class="font-fraunces text-[20px] font-medium text-on-surface leading-tight tracking-tight">You are held, not hurried</h2>
+<p class="font-body text-[14px] text-on-surface-variant leading-relaxed">
+        Give yourself permission to breathe slowly today. The burden you carry is already witnessed and held with gentle hands.
+      </p>
+<div class="pt-1 flex items-center gap-1.5 text-outline font-body text-[12px]">
+<span class="material-symbols-outlined text-[14px]">schedule</span>
+<span>8:00 AM • Tied to yesterday's prayer</span>
+</div>
+</article>
+<!-- Section "Your Reflections" (header with count "8 entries" and "Filter" button) -->
+<div class="flex items-center justify-between pt-1">
+<div class="flex items-baseline gap-2">
+<h2 class="font-fraunces text-[20px] text-on-surface font-semibold tracking-tight">Your Reflections</h2>
+<span class="font-body text-xs text-outline font-medium">8 entries</span>
+</div>
+<button class="font-body text-[13px] text-[#432446] font-medium flex items-center gap-1 hover:opacity-80 transition-opacity">
+<span>Filter</span>
+<span class="material-symbols-outlined text-[16px]">tune</span>
+</button>
+</div>
+<!-- Journal Cards Stack -->
+<div class="flex flex-col space-y-3.5">
+<!-- Card 1: Anxious -->
+<article class="bg-white rounded-2xl p-4 border border-[#EADFDB] shadow-sm flex flex-col space-y-2.5 transition-transform active:scale-[0.99]">
+<div class="flex items-center justify-between">
+<span class="font-body text-[12px] text-outline">Yesterday, 8:45 PM</span>
+<span class="bg-[#F3E6EE] text-[#5B3A5E] px-2.5 py-0.5 rounded-full font-body text-[11px] font-semibold tracking-wide">Anxious</span>
+</div>
+<p class="font-body text-[14.5px] text-on-surface line-clamp-2 leading-relaxed">
+          “Lord, work has been so overwhelming lately and I feel like I'm dropping every ball. Help me remember where my peace comes from...”
+        </p>
+<div class="flex items-center justify-between pt-0.5">
+<span class="font-fraunces text-[15px] text-[#9E5A62] font-medium italic">Philippians 4:6–7</span>
+<button aria-label="Listen to reflection" class="bg-[#432446] text-white rounded-full px-3 py-1 flex items-center gap-1.5 shadow-sm active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+<span class="font-body text-[12px] font-semibold">1:15</span>
+</button>
+</div>
+</article>
+<!-- Card 2: Weary -->
+<article class="bg-white rounded-2xl p-4 border border-[#EADFDB] shadow-sm flex flex-col space-y-2.5 transition-transform active:scale-[0.99]">
+<div class="flex items-center justify-between">
+<span class="font-body text-[12px] text-outline">Oct 21, 7:15 AM</span>
+<span class="bg-[#F0EAE6] text-[#6B5D57] px-2.5 py-0.5 rounded-full font-body text-[11px] font-semibold tracking-wide">Weary</span>
+</div>
+<p class="font-body text-[14.5px] text-on-surface line-clamp-2 leading-relaxed">
+          “Just feeling exhausted down to my bones this morning. Give me strength for the tasks today and quiet my restless thoughts...”
+        </p>
+<div class="flex items-center justify-between pt-0.5">
+<span class="font-fraunces text-[15px] text-[#9E5A62] font-medium italic">Matthew 11:28–30</span>
+<button aria-label="Listen to reflection" class="bg-[#432446] text-white rounded-full px-3 py-1 flex items-center gap-1.5 shadow-sm active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+<span class="font-body text-[12px] font-semibold">1:28</span>
+</button>
+</div>
+</article>
+<!-- Card 3: Grateful -->
+<article class="bg-white rounded-2xl p-4 border border-[#EADFDB] shadow-sm flex flex-col space-y-2.5 transition-transform active:scale-[0.99]">
+<div class="flex items-center justify-between">
+<span class="font-body text-[12px] text-outline">Oct 19, 9:20 PM</span>
+<span class="bg-[#E8EFE6] text-[#4F6B4A] px-2.5 py-0.5 rounded-full font-body text-[11px] font-semibold tracking-wide">Grateful</span>
+</div>
+<p class="font-body text-[14.5px] text-on-surface line-clamp-2 leading-relaxed">
+          “Thank you for the unexpected kindness from my sister today. It felt like cool water in the desert after such a dry week...”
+        </p>
+<div class="flex items-center justify-between pt-0.5">
+<span class="font-fraunces text-[15px] text-[#9E5A62] font-medium italic">Psalm 103:1–5</span>
+<button aria-label="Listen to reflection" class="bg-[#432446] text-white rounded-full px-3 py-1 flex items-center gap-1.5 shadow-sm active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+<span class="font-body text-[12px] font-semibold">0:58</span>
+</button>
+</div>
+</article>
+</div>
+</section>
+<!-- ==================== VIEW 2: OFFLINE SYNC STATE ==================== -->
+<section class="hidden flex flex-col space-y-4 transition-opacity duration-300" id="view-offline">
+<!-- Soft Blush #F5ECE8 banner with cloud-off icon at the top -->
+<div class="bg-[#F5ECE8] border border-[#E8DAD4] rounded-2xl p-4 shadow-sm flex items-start gap-3">
+<div class="w-8 h-8 rounded-full bg-[#EBD8D1] flex items-center justify-center shrink-0 mt-0.5">
+<span class="material-symbols-outlined text-[#7b5455] text-[19px]">cloud_off</span>
+</div>
+<div class="flex flex-col space-y-0.5">
+<span class="font-body text-[13.5px] font-semibold text-[#432446]">Offline Mode</span>
+<p class="font-body text-[13px] text-on-surface-variant leading-relaxed">
+        You're offline. 2 reflections are saved and will be prepared when you reconnect.
+      </p>
+</div>
+</div>
+<!-- Floating / inline Sage confirmation toast: "✓ All synced — Reflections up to date" -->
+<div class="bg-[#E8EFE6] border border-[#D5E3D2] rounded-full px-4 py-2.5 flex items-center justify-between shadow-sm">
+<div class="flex items-center gap-2">
+<span class="font-body text-[14px] text-[#3F5B3A] font-bold">✓</span>
+<span class="font-body text-[12.5px] text-[#3F5B3A] font-medium">All synced — Reflections up to date</span>
+</div>
+<button class="font-body text-[11.5px] text-[#3F5B3A] font-semibold uppercase tracking-wider hover:underline" onclick="simulateSyncToast()">Refresh</button>
+</div>
+<!-- Inline feedback toast triggered dynamically -->
+<div class="hidden bg-white border border-[#EADFDB] rounded-xl p-3 shadow-md flex items-center gap-2 transition-all" id="sync-toast">
+<span class="material-symbols-outlined text-[#432446] text-[18px] animate-spin">sync</span>
+<span class="font-body text-xs text-on-surface">Checking local storage... All audio notes secured offline.</span>
+</div>
+<!-- Unsynced card with muted chip "Waiting to sync" instead of scripture -->
+<article class="bg-white rounded-2xl p-4 border border-[#EADFDB] shadow-sm flex flex-col space-y-2.5">
+<div class="flex items-center justify-between">
+<span class="font-body text-[12px] text-outline">Just now • Audio saved</span>
+<span class="bg-[#F3E6EE] text-[#5B3A5E] px-2.5 py-0.5 rounded-full font-body text-[11px] font-semibold tracking-wide">Anxious</span>
+</div>
+<p class="font-body text-[14.5px] text-on-surface line-clamp-2 leading-relaxed">
+      “Voice note captured in quiet room. The uncertainty about our family decision has felt heavy all afternoon...”
+    </p>
+<div class="flex items-center justify-between pt-0.5">
+<!-- Muted chip "Waiting to sync" instead of scripture -->
+<span class="bg-surface-container text-outline px-2.5 py-1 rounded-full font-body text-[11px] font-medium flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[12px] animate-pulse">hourglass_top</span>
+      Waiting to sync
+    </span>
+<button aria-label="Listen preview" class="bg-surface-container text-on-surface-variant rounded-full px-3 py-1 flex items-center gap-1.5 shadow-sm">
+<span class="material-symbols-outlined text-[14px]">graphic_eq</span>
+<span class="font-body text-[12px] font-semibold">0:45</span>
+</button>
+</div>
+</article>
+<!-- Synced Prior Card -->
+<article class="bg-white rounded-2xl p-4 border border-[#EADFDB] shadow-sm flex flex-col space-y-2.5 opacity-90">
+<div class="flex items-center justify-between">
+<span class="font-body text-[12px] text-outline">Yesterday, 8:45 PM</span>
+<span class="bg-[#E8EFE6] text-[#4F6B4A] px-2.5 py-0.5 rounded-full font-body text-[11px] font-semibold tracking-wide">Grateful</span>
+</div>
+<p class="font-body text-[14.5px] text-on-surface line-clamp-2 leading-relaxed">
+      “Lord, work has been so overwhelming lately and I feel like I'm dropping every ball. Help me remember where my peace comes from...”
+    </p>
+<div class="flex items-center justify-between pt-0.5">
+<span class="font-fraunces text-[15px] text-[#9E5A62] font-medium italic">Philippians 4:6–7</span>
+<button aria-label="Listen to reflection" class="bg-[#432446] text-white rounded-full px-3 py-1 flex items-center gap-1.5 shadow-sm">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+<span class="font-body text-[12px] font-semibold">1:15</span>
+</button>
+</div>
+</article>
+</section>
+<!-- ==================== VIEW 3: EMPTY FEED STATE ==================== -->
+<section class="hidden flex flex-col items-center justify-center text-center py-12 px-space-md space-y-4 transition-opacity duration-300" id="view-empty">
+<!-- Gentle line illustration -->
+<div class="w-24 h-24 rounded-full bg-[#FBEFEA] flex items-center justify-center border border-[#F4DDD2] relative shadow-inner">
+<svg class="w-12 h-12 text-[#9A4F31]" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewbox="0 0 64 64">
+<path d="M32 10 C22 10 14 18 14 28 C14 41 26 49 32 54 C38 49 50 41 50 28 C50 18 42 10 32 10 Z" fill="#C4704F" opacity="0.25"></path>
+<path d="M32 20 L32 38"></path>
+<path d="M24 28 C24 33 27 36 32 36 C37 36 40 33 40 28"></path>
+<circle cx="32" cy="44" fill="currentColor" r="1.5"></circle>
+</svg>
+<div class="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-white border border-[#EADFDB] flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-[#7b5455] text-[15px]">spa</span>
+</div>
+</div>
+<!-- Empty state copy -->
+<div class="flex flex-col space-y-1.5 max-w-xs">
+<h3 class="font-fraunces text-[22px] font-semibold text-on-surface">No reflections yet</h3>
+<p class="font-body text-[14px] text-on-surface-variant leading-relaxed">
+      Tap the mic to voice your heart. Even half-formed prayers are welcomed here.
+    </p>
+</div>
+<!-- CTA button "Record your first prayer" -->
+<button class="bg-[#432446] text-white rounded-full px-6 py-3 font-body text-[14px] font-semibold shadow-md flex items-center gap-2 active:scale-95 transition-transform" onclick="switchState('normal')">
+<span class="material-symbols-outlined text-[19px]">mic</span>
+<span>Record your first prayer</span>
+</button>
+</section>
+<!-- State switcher JS logic -->
+<script>
+  function switchState(stateName) {
+    const views = ['normal', 'offline', 'empty'];
+    views.forEach(v => {
+      const el = document.getElementById('view-' + v);
+      const tab = document.getElementById('tab-' + v);
+      if (v === stateName) {
+        el.classList.remove('hidden');
+        tab.classList.remove('text-outline', 'font-medium');
+        tab.classList.add('bg-surface-container-lowest', 'text-[#432446]', 'shadow-[0_1px_3px_rgba(0,0,0,0.06)]', 'font-semibold');
+      } else {
+        el.classList.add('hidden');
+        tab.classList.remove('bg-surface-container-lowest', 'text-[#432446]', 'shadow-[0_1px_3px_rgba(0,0,0,0.06)]', 'font-semibold');
+        tab.classList.add('text-outline', 'font-medium');
+      }
+    });
+  }
+
+  function simulateSyncToast() {
+    const toast = document.getElementById('sync-toast');
+    toast.classList.remove('hidden');
+    setTimeout(() => {
+      toast.classList.add('hidden');
+    }, 2800);
+  }
+</script>
+</div></main>
+<!-- Floating dock above bottom tabs: smaller pill/circle pen button + large circular Deep Plum mic button with white microphone icon -->
+<aside aria-label="Quick Actions" class="fixed bottom-[5.25rem] right-margin z-40 pb-safe flex items-center gap-2.5 pointer-events-none">
+<button aria-label="Write Prayer Journal" class="pointer-events-auto w-10 h-10 rounded-full bg-white text-[#432446] border border-[#EADFDB] shadow-[0_4px_16px_rgba(46,42,51,0.1)] flex items-center justify-center active:scale-95 transition-transform hover:bg-[#FAF6F3]">
+<span class="material-symbols-outlined text-[19px]">edit_note</span>
+</button>
+<button aria-label="Record Audio Prayer" class="pointer-events-auto w-14 h-14 rounded-full bg-[#432446] text-white shadow-[0_8px_24px_rgba(67,36,70,0.38)] flex items-center justify-center active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[26px]">mic</span>
+</button>
+</aside>
+<!-- Bottom tab navigation bar (3 tabs: Journal [active Deep Plum], Prayers [inactive], Profile [inactive Mauve Gray]) -->
+<nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface/90 backdrop-blur-xl border-t border-[#EADFDB]/70" data-active-classes="text-[#432446] font-semibold"><div class="flex justify-around items-center h-16 px-space-md"><a aria-current="page" class="flex flex-col items-center justify-center gap-1 min-w-[56px] min-h-[44px] transition-colors text-[#432446] font-semibold" data-path="journal" href="#"><span class="material-symbols-outlined text-[22px]" style="font-variation-settings: 'FILL' 1;">menu_book</span><span class="font-body text-[11px] leading-none">Journal</span></a><a class="flex flex-col items-center justify-center gap-1 min-w-[56px] min-h-[44px] text-outline hover:text-on-surface transition-colors" data-path="prayers" href="#"><span class="material-symbols-outlined text-[22px]">volunteer_activism</span><span class="font-body text-[11px] leading-none">Prayers</span></a><a class="flex flex-col items-center justify-center gap-1 min-w-[56px] min-h-[44px] text-[#7e747c] hover:text-on-surface transition-colors" data-path="profile" href="#"><span class="material-symbols-outlined text-[22px]">person_outline</span><span class="font-body text-[11px] leading-none">Profile</span></a></div></nav></body></html>
