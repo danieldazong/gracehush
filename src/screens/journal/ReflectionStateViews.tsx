@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { copy } from "@/constants/copy";
 import { colors } from "@/constants/theme";
 
-const { states, crisis, footer } = copy.reflection;
+const { states, footer } = copy.reflection;
 
 // A calm message in the middle of the screen. A ScrollView, so it still scrolls at large text sizes.
 function CenteredScroll({ children }: { children: ReactNode }) {
@@ -65,26 +65,6 @@ export function ReflectionLoading() {
         <Skeleton height={280} />
       </View>
     </View>
-  );
-}
-
-// TEMP(13): replaced by CrisisSupportPanel
-// Only a calm message and a way back: no resources and no phone numbers yet, so this is not shippable
-// as it is. A crisis entry shows nothing else: no devotional, scripture, affirmations, audio, share,
-// prayer toggle or transcript.
-export function ReflectionCrisis({ onReturn }: { onReturn: () => void }) {
-  return (
-    <CenteredScroll>
-      <View className="w-full overflow-hidden rounded-card border border-petal bg-blush p-5">
-        <View className="absolute inset-y-0 left-0 w-1 bg-crisis" />
-        <Text accessibilityRole="header" className="pl-2 text-headline text-ink">
-          {crisis.title}
-        </Text>
-      </View>
-      <View className="mt-6">
-        <PrimaryButton label={crisis.return} onPress={onReturn} />
-      </View>
-    </CenteredScroll>
   );
 }
 

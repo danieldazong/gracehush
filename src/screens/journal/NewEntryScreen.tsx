@@ -146,7 +146,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
       navigation.replace("Reflection", { entryId: result.entryId });
     } else if (result.code === "LIMIT_REACHED") {
       leaving.current = true;
-      // TODO(22): the server returns entryId with LIMIT_REACHED; step 16 passes it to the Paywall
+      // TODO(22): the server returns entryId with LIMIT_REACHED; pass it as { source: "limit", entryId }
       navigation.replace("Paywall", { source: "limit" });
     } else {
       submitting.current = false;

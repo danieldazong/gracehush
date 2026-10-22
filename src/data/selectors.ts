@@ -71,6 +71,28 @@ export function getPrayerCounts(prayers: Prayer[]): {
   return { active: prayers.length - answered, answered, total: prayers.length };
 }
 
+// Open prayers, the one that has waited longest first. Filtering copies the list, so the sort never touches the input.
+export function selectActivePrayers(prayers: Prayer[]): Prayer[] {
+  return prayers
+    .filter((prayer) => !prayer.isAnswered)
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+
+// Answered prayers, the latest answer first. One with no answer date sorts by when it was created.
+export function selectAnsweredPrayers(prayers: Prayer[]): Prayer[] {
+  const answeredTime = (prayer: Prayer) => Date.parse(prayer.answeredAt ?? prayer.createdAt);
+  return prayers
+    .filter((prayer) => prayer.isAnswered)
+    .sort((a, b) => answeredTime(b) - answeredTime(a));
+}
+
+// What Profile's "Offline Reflections" row shows. An entry that exists only on this device is pending, every
+// other one is synced. TODO(24): step 24 counts the outbox instead.
+export function getSyncSummary(entries: JournalEntry[]): { synced: number; pending: number } {
+  const pending = entries.filter((entry) => entry.isLocalOnly).length;
+  return { synced: entries.length - pending, pending };
+}
+
 // Whole local calendar days, never negative: a prayer started yesterday at 11 PM is 1 day old at 1 AM.
 export function getDaysSince(iso: string, now: Date): number {
   return Math.max(0, calendarDaysBetween(new Date(iso), now)) || 0;

@@ -1,5 +1,5 @@
 import { copy } from "@/constants/copy";
-import type { EmotionKey } from "@/types";
+import type { EmotionKey, Prayer } from "@/types";
 
 const HEADLINE_EMOTIONS: readonly EmotionKey[] = [
   "anxious",
@@ -119,6 +119,12 @@ export function quoteVerse(text: string): string {
   return "“".repeat(missingOpens) + text + "”".repeat(missingCloses);
 }
 
+// The prayer's own title, or "Prayer from Oct 2" when it has none. A title is never made up from the transcript.
+export function getPrayerTitle(prayer: Pick<Prayer, "title" | "createdAt">): string {
+  const title = prayer.title.trim();
+  return title === "" ? copy.prayers.card.untitled(formatShortDate(prayer.createdAt)) : title;
+}
+
 // "08:00" or "08:00:00" to "8:00 AM". Anything else comes back unchanged.
 export function formatTime12(hhmm: string): string {
   const match = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(hhmm);
@@ -130,9 +136,23 @@ export function formatLongDate(now: Date): string {
   return now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
 
+// "October 20, 2026" from a calendar date "2026-10-20". The date is read as a local one: new Date("2026-10-20")
+// is UTC midnight, which is the day before in the Americas. Anything that is not YYYY-MM-DD comes back unchanged.
+export function formatCalendarDate(isoDate: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!match) return isoDate;
+  const local = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return local.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
 // "October 2026"
 export function formatMonthYear(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+// "Monday". The usage reset is a local midnight, so it prints the same weekday in every time zone.
+export function formatWeekday(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { weekday: "long" });
 }
 
 interface NameParts {
@@ -151,6 +171,15 @@ export function getDisplayName({ firstName, email }: NameParts): string | null {
   const word = /^[^._+\-\d]*/.exec(email.slice(0, at))?.[0] ?? "";
   if (word.replace(/[^a-z]/gi, "").length < 2) return null;
   return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+// The name line of the Profile header: first and last name when Clerk has both, else the first name, else the
+// one getDisplayName finds in the email. A last name is never used alone, and an email address never comes back.
+export function getFullName({ firstName, lastName, email }: NameParts): string | null {
+  const first = firstName?.trim();
+  const last = lastName?.trim();
+  if (first && last) return `${first} ${last}`;
+  return getDisplayName({ firstName: first, email });
 }
 
 export function getInitials({ firstName, lastName, email }: NameParts): string | null {

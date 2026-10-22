@@ -1,5 +1,3 @@
-import { DateTimePicker } from "@expo/ui/community/datetime-picker";
-import { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { useFocusEffect } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Image } from "expo-image";
@@ -9,7 +7,6 @@ import { useCallback, useRef, useState } from "react";
 import {
   Animated,
   BackHandler,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -21,9 +18,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
+import { openAndroidTimeDialog, ReminderTimePicker } from "@/components/ReminderTimePicker";
 import { copy } from "@/constants/copy";
 import { images } from "@/constants/images";
-import { colors, gradients, radii, shadows, spacing } from "@/constants/theme";
+import { colors, gradients, radii, shadows } from "@/constants/theme";
 import type { RootStackParamList } from "@/navigation/types";
 import { getNotificationPermission, requestNotificationPermission } from "@/services/notifications";
 import { getMicPermission, requestMicPermission } from "@/services/recorder";
@@ -60,16 +58,6 @@ const permissionCards = [
   { icon: icons.microphone, ...permissions.microphone },
   { icon: icons.notifications, ...permissions.notifications },
 ];
-
-// The picker needs a Date; only its time of day is used.
-function toDate(value: string): Date {
-  const [hours = 0, minutes = 0] = value.split(":").map(Number);
-  return new Date(2000, 0, 1, hours, minutes);
-}
-
-function toTimeString(date: Date): string {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
 
 type OnboardingScreenProps = NativeStackScreenProps<RootStackParamList, "Onboarding">;
 
@@ -113,18 +101,9 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
     }, [step, goToStep]),
   );
 
-  function updateTime(slot: SlotKey, date: Date) {
-    setReminder(slot, toTimeString(date));
-  }
-
   function openPicker(slot: SlotKey) {
     if (Platform.OS === "android") {
-      DateTimePickerAndroid.open({
-        value: toDate(reminders[slot]),
-        mode: "time",
-        is24Hour: false,
-        onValueChange: (_event, date) => updateTime(slot, date),
-      });
+      openAndroidTimeDialog(reminders[slot], (hhmm) => setReminder(slot, hhmm));
       return;
     }
     setEditingSlot(slot);
@@ -344,28 +323,14 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
         </Animated.View>
       </View>
 
-      <Modal visible={editingSlot !== null} transparent animationType="fade" onRequestClose={closePicker}>
-        <View className="flex-1 justify-end bg-ink/40">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={rhythm.done}
-            className="flex-1"
-            onPress={closePicker}
-          />
-          <SafeAreaView edges={["bottom"]} style={styles.sheet}>
-            {editingSlot ? (
-              <DateTimePicker
-                value={toDate(reminders[editingSlot])}
-                mode="time"
-                display="spinner"
-                themeVariant="light"
-                onValueChange={(_event, date) => updateTime(editingSlot, date)}
-              />
-            ) : null}
-            <PrimaryButton label={rhythm.done} onPress={closePicker} />
-          </SafeAreaView>
-        </View>
-      </Modal>
+      <ReminderTimePicker
+        slot={editingSlot}
+        value={reminders[editingSlot ?? "morning"]}
+        onChange={(hhmm) => {
+          if (editingSlot) setReminder(editingSlot, hhmm);
+        }}
+        onClose={closePicker}
+      />
     </SafeAreaView>
   );
 }
@@ -376,12 +341,4 @@ const styles = StyleSheet.create({
   scrollContent: { paddingTop: 16 },
   hero: { alignItems: "center", borderRadius: radii.hero, padding: 32 },
   logo: { width: 48, height: 48 },
-  sheet: {
-    backgroundColor: colors.blush,
-    borderTopLeftRadius: radii.sheet,
-    borderTopRightRadius: radii.sheet,
-    paddingHorizontal: spacing.screen,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
 });

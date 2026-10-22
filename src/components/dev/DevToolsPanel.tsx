@@ -9,18 +9,36 @@ import {
   getUsage,
   listEntries,
   listPrayers,
+  setMockSubscriptionTier,
 } from "@/data/journalRepository";
-import type { MockScenario, MockSubmitOutcome } from "@/data/mock/scenario";
+import { supabaseEnv } from "@/constants/env";
+import {
+  countVisibleProfileRows,
+  getLastProfileError,
+  selectProfileRow,
+} from "@/data/profileRemote";
+import type {
+  MockPurchaseOutcome,
+  MockScenario,
+  MockSubmitOutcome,
+  ProfileSource,
+} from "@/data/mock/scenario";
 import {
   getAffirmationForSlot,
   getCurrentSlot,
   getPrayerCounts,
   getReflectionDays,
 } from "@/data/selectors";
-import type { MainTabScreenProps } from "@/navigation/types";
+import type { MainTabScreenProps, RootStackParamList } from "@/navigation/types";
+import { signOutCleanup } from "@/services/account";
+import {
+  checkSessionToken,
+  getSupabaseUserId,
+  type SessionTokenCheck,
+} from "@/services/supabaseClient";
 import { useDevStore } from "@/store/devStore";
 import { useOnboardingStore } from "@/store/onboardingStore";
-import type { JournalEntry } from "@/types";
+import type { JournalEntry, PermissionResult, SubscriptionTier } from "@/types";
 import {
   formatDuration,
   formatEntryTimestamp,
@@ -35,6 +53,30 @@ import {
 
 const SCENARIOS: MockScenario[] = ["default", "empty", "offline"];
 const SUBMIT_OUTCOMES: MockSubmitOutcome[] = ["ready", "crisis", "failed", "limit"];
+const PLANS: SubscriptionTier[] = ["free", "trial", "pro"];
+const PROFILE_SOURCES: ProfileSource[] = ["supabase", "mock"];
+const TOKEN_LABELS: Record<SessionTokenCheck, string> = {
+  ok: "has role = authenticated",
+  "no-role-claim": "NO role claim: activate the Supabase integration in Clerk",
+  "no-session": "none",
+  unreadable: "could not read it (offline?)",
+};
+// What the next mock purchase answers; it goes back to "success" after each one.
+const PURCHASE_OUTCOMES: { value: MockPurchaseOutcome; label: string }[] = [
+  { value: "success", label: "success" },
+  { value: "cancelled", label: "cancelled" },
+  { value: "pending", label: "pending" },
+  { value: "failed", label: "failed" },
+  { value: "not-allowed", label: "not allowed" },
+  { value: "already-owned", label: "already owned" },
+];
+// "real" is the actual notification permission; the others override what Profile reads (see devStore).
+const NOTIFICATION_STATUSES: (PermissionResult | "real")[] = [
+  "real",
+  "granted",
+  "denied",
+  "undetermined",
+];
 // An id no entry has, to reach Reflection's not-found view.
 const MISSING_ENTRY_ID = "entry-missing-dev";
 
@@ -63,10 +105,10 @@ function getReflectionTargets(entries: JournalEntry[]): ReflectionTarget[] {
 
 async function loadDataCheck(
   scenario: MockScenario,
-): Promise<{ lines: string[]; targets: ReflectionTarget[] }> {
+): Promise<{ lines: string[]; targets: ReflectionTarget[]; tier: SubscriptionTier }> {
   const now = new Date();
   const [profile, usage, entries, prayers, affirmations] = await Promise.all([
-    getProfile(),
+    getProfile().catch(() => null), // a failure here is shown by the Supabase check, not by this list
     getUsage(),
     listEntries(),
     listPrayers(),
@@ -76,7 +118,7 @@ async function loadDataCheck(
   const countStatus = (status: string) => entries.filter((entry) => entry.status === status).length;
   const scriptures = entries.flatMap((entry) => (entry.scripture ? [entry.scripture] : []));
   const prayerCounts = getPrayerCounts(prayers);
-  const slot = getCurrentSlot(now, profile.reminders);
+  const slot = getCurrentSlot(now, profile?.reminders ?? useOnboardingStore.getState().reminders);
   const affirmation = getAffirmationForSlot(affirmations, slot);
   const first = ready[0];
   const name = (email: string | null) => getDisplayName({ firstName: null, email }) ?? "none";
@@ -99,10 +141,31 @@ async function loadDataCheck(
           ].join(" · ")
         : "none"
     }`,
-    `format: ${formatDuration(75000)} · ${formatDuration(58000)} · ${formatTime12("08:00")} · ${formatTime12("13:00")} · ${formatMonthYear(profile.createdAt)}`,
+    `format: ${formatDuration(75000)} · ${formatDuration(58000)} · ${formatTime12("08:00")} · ${formatTime12("13:00")} · ${profile ? formatMonthYear(profile.createdAt) : "no profile"}`,
     `names: ${getDisplayName({ firstName: "Sarah", email: null })} | ${getInitials({ firstName: "Sarah", lastName: "Johnson", email: null })}, ${name("sarah.j92@example.com")} (from sarah.j92@example.com), ${name("x92@example.com")} (from x92@example.com)`,
   ];
-  return { lines, targets: getReflectionTargets(entries) };
+  return { lines, targets: getReflectionTargets(entries), tier: usage.tier };
+}
+
+// What the Supabase check shows on screen: yes or no and a code, never an id, a token or a row.
+async function runSupabaseCheck(source: ProfileSource): Promise<string[]> {
+  const signedIn = getSupabaseUserId() !== null;
+  const lines = [
+    `Supabase keys in .env.local: ${supabaseEnv.status === "ok" ? "yes" : "no"}`,
+    `profile source: ${source}`,
+    `signed in: ${signedIn ? "yes" : "no"}`,
+  ];
+  if (supabaseEnv.status !== "ok" || !signedIn) return lines;
+  lines.push(`Clerk token: ${TOKEN_LABELS[await checkSessionToken()]}`);
+  const found = await selectProfileRow();
+  lines.push(
+    `profile row: ${found.ok ? (found.data === null ? "not found" : "found") : `error ${found.code}`}`,
+  );
+  // Row level security: this must say 1 (or 0 before the row exists) even when the table holds other accounts.
+  const visible = await countVisibleProfileRows();
+  lines.push(`rows this user can see: ${visible.ok ? visible.data : `error ${visible.code}`}`);
+  lines.push(`last error: ${getLastProfileError() ?? "none"}`);
+  return lines;
 }
 
 type DevButtonProps = {
@@ -152,21 +215,73 @@ function DevToolsContent() {
   const setNextSubmitOutcome = useDevStore((state) => state.setNextSubmitOutcome);
   const nextReflectionLoadFails = useDevStore((state) => state.nextReflectionLoadFails);
   const setNextReflectionLoadFails = useDevStore((state) => state.setNextReflectionLoadFails);
+  const nextCrisisLinkFails = useDevStore((state) => state.nextCrisisLinkFails);
+  const setNextCrisisLinkFails = useDevStore((state) => state.setNextCrisisLinkFails);
+  const nextPrayerMutationFails = useDevStore((state) => state.nextPrayerMutationFails);
+  const setNextPrayerMutationFails = useDevStore((state) => state.setNextPrayerMutationFails);
+  const mockProfileVersion = useDevStore((state) => state.mockProfileVersion);
+  const bumpMockProfileVersion = useDevStore((state) => state.bumpMockProfileVersion);
+  const notificationStatusOverride = useDevStore((state) => state.notificationStatusOverride);
+  const setNotificationStatusOverride = useDevStore((state) => state.setNotificationStatusOverride);
+  const nextPurchaseOutcome = useDevStore((state) => state.nextPurchaseOutcome);
+  const setNextPurchaseOutcome = useDevStore((state) => state.setNextPurchaseOutcome);
+  const trialEligible = useDevStore((state) => state.trialEligible);
+  const setTrialEligible = useDevStore((state) => state.setTrialEligible);
+  const restoreFindsPurchase = useDevStore((state) => state.restoreFindsPurchase);
+  const setRestoreFindsPurchase = useDevStore((state) => state.setRestoreFindsPurchase);
+  const offeringUnavailable = useDevStore((state) => state.offeringUnavailable);
+  const setOfferingUnavailable = useDevStore((state) => state.setOfferingUnavailable);
+  const chosenProfileSource = useDevStore((state) => state.profileSource);
+  const setProfileSource = useDevStore((state) => state.setProfileSource);
+  // Without a Supabase address in .env.local the mock is what the app really uses (getProfileSource).
+  const profileSource: ProfileSource = supabaseEnv.status === "ok" ? chosenProfileSource : "mock";
   const [lines, setLines] = useState<string[]>([]);
   const [targets, setTargets] = useState<ReflectionTarget[]>([]);
+  const [tier, setTier] = useState<SubscriptionTier | null>(null);
+  const [supabaseLines, setSupabaseLines] = useState<string[]>([]);
+  const [checking, setChecking] = useState(false);
+  // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
+  const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
+  const crisisEntryId = targets.find((target) => target.label === "Crisis")?.entryId ?? null;
 
+  // Reloads when the mock plan changes too, so the "plan:" line and the selected plan button follow.
   useEffect(() => {
     let cancelled = false;
     loadDataCheck(scenario).then((next) => {
       if (!cancelled) {
         setLines(next.lines);
         setTargets(next.targets);
+        setTier(next.tier);
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [scenario]);
+  }, [scenario, mockProfileVersion]);
+
+  function changePlan(next: SubscriptionTier) {
+    setMockSubscriptionTier(next);
+    bumpMockProfileVersion();
+  }
+
+  // Profile and this panel reload through the mock profile version, as for a mock plan change.
+  function changeProfileSource(next: ProfileSource) {
+    setProfileSource(next);
+    setSupabaseLines([]);
+    bumpMockProfileVersion();
+  }
+
+  async function checkSupabase() {
+    setChecking(true);
+    setSupabaseLines(await runSupabaseCheck(profileSource));
+    setChecking(false);
+  }
+
+  // The session goes first, and the cleanup before it, as in Profile's own Sign out.
+  async function signOutDev() {
+    await signOutCleanup();
+    await signOut();
+  }
 
   function openReflection(entryId: string | null) {
     if (entryId) navigation.navigate("Reflection", { entryId });
@@ -176,10 +291,20 @@ function DevToolsContent() {
     if (entryId) navigation.navigate("NowPlaying", { entryId });
   }
 
+  function openPaywall(params: RootStackParamList["Paywall"]) {
+    navigation.navigate("Paywall", params);
+  }
+
+  // A paywall toggle also tells Profile to reload, so its plan card's button label follows.
+  function setPaywallFlag(set: (value: boolean) => void, value: boolean) {
+    set(value);
+    bumpMockProfileVersion();
+  }
+
   // The session goes first: while it is live, RootNavigator marks onboarding completed again.
   // clearStorage removes only the onboarding key, never AsyncStorage as a whole.
   async function resetOnboardingDev() {
-    await signOut();
+    await signOutDev();
     resetOnboarding();
     useOnboardingStore.persist.clearStorage();
   }
@@ -266,11 +391,134 @@ function DevToolsContent() {
           onPress={() => setNextReflectionLoadFails(true)}
         />
         <DevButton
-          label="Open paywall (dev)"
-          onPress={() => navigation.navigate("Paywall", { source: "profile" })}
+          label="Fail next crisis link (dev)"
+          selected={nextCrisisLinkFails}
+          onPress={() => setNextCrisisLinkFails(true)}
         />
-        {/* TODO(31): full sign-out cleanup */}
-        <DevButton label="Sign out (dev)" onPress={() => signOut()} />
+        {/* One flag for every mock write: a prayer change, a profile save, a data export and an account deletion. */}
+        <DevButton
+          label="Fail next save (dev)"
+          selected={nextPrayerMutationFails}
+          onPress={() => setNextPrayerMutationFails(true)}
+        />
+        <View className="gap-2">
+          <Text className="text-center text-body-sm text-mauve">Profile source (dev)</Text>
+          <View className="flex-row flex-wrap justify-center gap-2">
+            {PROFILE_SOURCES.map((name) => (
+              <DevButton
+                key={name}
+                label={name}
+                accessibilityLabel={`Profile source ${name} (dev)`}
+                selected={name === profileSource}
+                onPress={() => changeProfileSource(name)}
+              />
+            ))}
+          </View>
+          {supabaseEnv.status !== "ok" ? (
+            <Text className="text-center text-body-sm text-mauve">
+              No Supabase address in .env.local, so the profile uses the mock.
+            </Text>
+          ) : null}
+          <View className="items-center gap-2">
+            <DevButton label="Supabase check (dev)" disabled={checking} onPress={checkSupabase} />
+            {supabaseLines.map((line) => (
+              <Text key={line} className="text-center text-body-sm text-ink">
+                {line}
+              </Text>
+            ))}
+          </View>
+        </View>
+        <View className="gap-2">
+          <Text className="text-center text-body-sm text-mauve">Mock plan (dev)</Text>
+          <View className="flex-row flex-wrap justify-center gap-2">
+            {PLANS.map((name) => (
+              <DevButton
+                key={name}
+                label={name}
+                accessibilityLabel={`Mock plan ${name} (dev)`}
+                selected={name === tier}
+                onPress={() => changePlan(name)}
+              />
+            ))}
+          </View>
+        </View>
+        <View className="gap-2">
+          <Text className="text-center text-body-sm text-mauve">Notifications (dev)</Text>
+          <View className="flex-row flex-wrap justify-center gap-2">
+            {NOTIFICATION_STATUSES.map((name) => (
+              <DevButton
+                key={name}
+                label={name}
+                accessibilityLabel={`Notification status ${name} (dev)`}
+                selected={(notificationStatusOverride ?? "real") === name}
+                onPress={() => setNotificationStatusOverride(name === "real" ? null : name)}
+              />
+            ))}
+          </View>
+        </View>
+        <View className="gap-2">
+          <Text className="text-center text-body-sm text-mauve">Paywall (dev)</Text>
+          <View className="flex-row flex-wrap justify-center gap-2">
+            <DevButton
+              label="Profile"
+              accessibilityLabel="Open paywall from Profile (dev)"
+              onPress={() => openPaywall({ source: "profile" })}
+            />
+            <DevButton
+              label="Limit"
+              accessibilityLabel="Open paywall from the limit (dev)"
+              onPress={() => openPaywall({ source: "limit" })}
+            />
+            <DevButton
+              label="Limit + entry"
+              accessibilityLabel="Open paywall from the limit with an entry (dev)"
+              disabled={readyEntryId === null}
+              onPress={() => {
+                if (readyEntryId) openPaywall({ source: "limit", entryId: readyEntryId });
+              }}
+            />
+            <DevButton
+              label="Crisis entry"
+              accessibilityLabel="Open paywall for a crisis entry (dev)"
+              disabled={crisisEntryId === null}
+              onPress={() => {
+                if (crisisEntryId) openPaywall({ source: "limit", entryId: crisisEntryId });
+              }}
+            />
+          </View>
+        </View>
+        <View className="gap-2">
+          <Text className="text-center text-body-sm text-mauve">Next purchase (dev)</Text>
+          <View className="flex-row flex-wrap justify-center gap-2">
+            {PURCHASE_OUTCOMES.map(({ value, label }) => (
+              <DevButton
+                key={value}
+                label={label}
+                accessibilityLabel={`Next purchase ${label} (dev)`}
+                selected={value === nextPurchaseOutcome}
+                onPress={() => setNextPurchaseOutcome(value)}
+              />
+            ))}
+          </View>
+        </View>
+        <View className="flex-row flex-wrap justify-center gap-2">
+          <DevButton
+            label="Trial eligible (dev)"
+            selected={trialEligible}
+            onPress={() => setPaywallFlag(setTrialEligible, !trialEligible)}
+          />
+          <DevButton
+            label="Restore finds purchase (dev)"
+            selected={restoreFindsPurchase}
+            onPress={() => setPaywallFlag(setRestoreFindsPurchase, !restoreFindsPurchase)}
+          />
+          <DevButton
+            label="Plans unavailable (dev)"
+            selected={offeringUnavailable}
+            onPress={() => setPaywallFlag(setOfferingUnavailable, !offeringUnavailable)}
+          />
+        </View>
+        <DevButton label="Sign out (dev)" onPress={signOutDev} />
         <DevButton label="Reset onboarding (dev)" onPress={resetOnboardingDev} />
         <Text className="text-center text-body-sm text-mauve">
           To re-test permission prompts, delete the app or reset permissions in device settings.

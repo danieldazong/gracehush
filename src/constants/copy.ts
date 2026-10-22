@@ -1,5 +1,8 @@
 import type { AmbientSound, PlaybackRate, TimeSlot } from "@/types";
 
+// "1 day", "7 days". The paywall's trial lines and disclosures share it.
+const daysLabel = (days: number) => (days === 1 ? "1 day" : `${days} days`);
+
 export const copy = {
   onboarding: {
     stepCounter: (step: number, total: number) => `${step} of ${total}`,
@@ -390,11 +393,38 @@ export const copy = {
         retry: "Try again",
       },
     },
-    // TEMP(13): replaced by CrisisSupportPanel
-    crisis: {
-      title:
-        "It sounds like you’re going through something really heavy. You don’t have to carry this alone.",
-      return: "Return to my journal",
+  },
+  // The Reflection crisis view and Support Resources (step 13). No number and no URL in here: they are in
+  // constants/crisisResources.ts. Never a claim about confidentiality, cost or what a service will do.
+  crisis: {
+    // The design’s words (AGENTS.md Crisis Safety Rules).
+    title:
+      "It sounds like you’re going through something really heavy. You don’t have to carry this alone.",
+    body: "You can reach a trained counselor any time, day or night.",
+    talkNow: "Talk to someone now",
+    talkNowHint: "Calls the 988 Suicide and Crisis Lifeline",
+    moreWays: "More ways to get help",
+    listLabel: "Ways to reach someone",
+    note: {
+      eyebrow: "About this reflection",
+      body: "We’ve paused the devotional and affirmations for this entry so you can focus on getting support. Reaching out for help is not a lack of faith. God often meets us through the people around us.",
+    },
+    words: "What you shared",
+    resources: {
+      title: "Support Resources",
+      close: "Close support resources",
+      intro: "Ways to reach a real person, any time of day.",
+      footer: (date: string) =>
+        `Gracehush is not a crisis service. Resources last checked ${date}. Message and data rates may apply when you text.`,
+    },
+    // Shown when the phone cannot open a link (no phone app, no messaging app).
+    fallback: {
+      title: "Your phone couldn’t open this.",
+      call: "Dial this number from your phone app.",
+      text: "Send a text to this number from your messaging app.",
+      textWithBody: (body: string) => `Send “${body}” to this number from your messaging app.`,
+      web: "Open this address in your browser.",
+      close: "Close",
     },
   },
   ambient: {
@@ -441,5 +471,353 @@ export const copy = {
     },
     // Shown in development only: it is true only with real audio (the guard is in NowPlayingScreen).
     devFooter: "Audio keeps playing when you close this screen.",
+  },
+  prayers: {
+    title: "Sanctuary Prayers",
+    // Sentence case: the eyebrow style uppercases it.
+    recorded: (count: number) => (count === 1 ? "1 petition recorded" : `${count} petitions recorded`),
+    tabs: {
+      label: "Prayer lists",
+      active: "Active",
+      answered: "Answered",
+      // The spoken label of a tab carries its count.
+      activeA11y: (count: number) => (count === 1 ? "Active, 1 prayer" : `Active, ${count} prayers`),
+      answeredA11y: (count: number) =>
+        count === 1 ? "Answered, 1 prayer" : `Answered, ${count} prayers`,
+    },
+    loading: "Loading your prayers",
+    error: {
+      message: "We couldn’t load your prayers.",
+      retry: "Try again",
+    },
+    empty: {
+      active: {
+        title: "No open prayers right now.",
+        // TODO(29): true once Reflection’s prayer request toggle saves the prayer here
+        body: "When you pray about something, you can keep it here and watch for God’s answer.",
+      },
+      answered: {
+        title: "Answered prayers will gather here.",
+        body: "When a prayer is answered, mark it so you can remember His faithfulness.",
+      },
+    },
+    banner: {
+      lead: "Look how faithful He has been — ",
+      count: (count: number) => (count === 1 ? "1 answered prayer." : `${count} answered prayers.`),
+      caption: "Recorded in your sanctuary journey",
+    },
+    // The banner under the tabs. It stays until the next tab change or refresh: it never dismisses on a timer.
+    notice: {
+      marked: "Marked as answered.",
+      view: "View in Answered",
+      failed: "We couldn’t save that change.",
+    },
+    card: {
+      untitled: (date: string) => `Prayer from ${date}`,
+      days: (days: number) => (days <= 0 ? "Today" : days === 1 ? "1 day" : `${days} days`),
+      markAnswered: "Mark Answered",
+      markAnsweredLabel: (title: string) => `Mark answered, ${title}`,
+      openHint: "Opens the reflection",
+      answered: "Answered",
+      answeredOn: (date: string) => `Answered on ${date}`,
+      afterDays: (days: number) =>
+        days <= 0 ? "The same day" : days === 1 ? "After 1 day" : `After ${days} days`,
+      // Curly quotes around the user's own words (not a verse: that goes through quoteVerse).
+      note: (text: string) => `“${text}”`,
+      addNote: "Add a gratitude note",
+      addNoteLabel: (title: string) => `Add a gratitude note, ${title}`,
+      more: (title: string) => `More options, ${title}`,
+      // One spoken summary for a card: the parts it shows, in reading order, without the empty ones, each
+      // ending in a full stop (a part that already ends in one, such as a quoted note, keeps its own).
+      a11y: (parts: (string | null)[]) =>
+        parts
+          .filter((part): part is string => Boolean(part))
+          .map((part) => (/[.!?”]$/.test(part) ? part : `${part}.`))
+          .join(" "),
+    },
+    menu: {
+      editNote: "Edit gratitude note",
+      moveBack: "Move back to Active",
+      cancel: "Cancel",
+    },
+    moveBack: {
+      title: "Move this prayer back to Active?",
+      body: "Its answered date and note will be removed.",
+      confirm: "Move back",
+      cancel: "Keep as answered",
+    },
+    sheet: {
+      eyebrow: "Testimony of grace",
+      markTitle: "How was this prayer answered?",
+      noteTitle: "Your gratitude note",
+      dateLabel: "Date answered",
+      dateA11y: (date: string, relative: string | null) =>
+        `Date answered, ${date}${relative ? `, ${relative}` : ""}`,
+      dateHint: "Opens a date picker",
+      noteLabel: "Note of gratitude (optional)",
+      noteA11y: "Note of gratitude",
+      notePlaceholder:
+        "Write a note of gratitude… How did you see God’s faithfulness in this situation?",
+      counter: (count: number, max: number) =>
+        `${count.toLocaleString("en-US")} / ${max.toLocaleString("en-US")}`,
+      save: "Save Answered Prayer",
+      saveNote: "Save note",
+      notYet: "Not yet — keep in active prayers",
+      cancel: "Cancel",
+    },
+    discard: {
+      title: "Discard this note?",
+      body: "What you’ve written won’t be saved.",
+      confirm: "Discard",
+      cancel: "Keep writing",
+    },
+    // Why a change did not go through. The sheet picks one by the result's code, and the repository
+    // carries the same words.
+    errors: {
+      save: "We couldn’t save this. Please try again.",
+      date: "Choose a day between when you prayed and today.",
+    },
+  },
+  // Profile & Settings (step 15). Row titles are Title Case as in the design, subtitles and dialog buttons are
+  // sentence case, and the group labels are stored in sentence case (the eyebrow style uppercases them).
+  profile: {
+    loading: "Loading your profile",
+    account: {
+      friend: "Friend",
+      memberSince: (date: string) => `Member since ${date}`,
+    },
+    plan: {
+      freeTitle: "Gracehush Free",
+      proTitle: "Gracehush Pro",
+      badgeActive: "Active plan",
+      badgeTrial: "Free trial",
+      usage: (used: number, limit: number) => `${used} of ${limit} audio devotionals used this week`,
+      resets: (weekday: string) => `Resets ${weekday}`,
+      unlimited: "Unlimited audio devotionals.",
+      upsell: {
+        chip: "Premium",
+        body: "Unlimited audio devotionals, whenever you need them.",
+        // The button says "Upgrade to Pro" when the store would not offer this user a free trial (isTrialEligible).
+        actionTrial: "Start free trial",
+        actionUpgrade: "Upgrade to Pro",
+      },
+      manage: "Manage subscription",
+      restore: "Restore purchases",
+      restored: "Your purchase is restored.",
+      restoreNone: "We didn’t find a previous purchase for this account.",
+      restoreError: "We couldn’t restore your purchases. Please try again.",
+    },
+    groups: {
+      preferences: "Preferences",
+      notifications: "Notifications & storage",
+      privacy: "Privacy & account",
+      about: "About",
+    },
+    // "Daily Reminders, Morning 8:00 AM • Afternoon 1:00 PM • Evening 8:00 PM". The caller formats the times.
+    rowLabel: (title: string, summary: string) => `${title}, ${summary}`,
+    reminders: {
+      title: "Daily Reminders",
+      // The space before AM or PM is a non-breaking one, so a long summary wraps between times and never
+      // leaves "3:00" and "PM" on two lines.
+      summary: (times: { name: string; time: string }[]) =>
+        times.map(({ name, time }) => `${name} ${time.replace(" ", " ")}`).join(" • "),
+      // The bullets are read aloud as "bullet", so the spoken label uses commas.
+      spoken: (times: { name: string; time: string }[]) =>
+        times.map(({ name, time }) => `${name} ${time}`).join(", "),
+      timezone: (zone: string) => `Times use your phone’s time zone (${zone}).`,
+      showHint: "Shows the times",
+      hideHint: "Hides the times",
+    },
+    ambient: {
+      title: "Ambient Soundscape",
+      // The volume is left out while the sound is off (percent is null): "Soft Rain, 50% volume" or "Off".
+      summary: (label: string, percent: number | null) =>
+        percent === null ? label : `${label}, ${percent}% volume`,
+      helper: "This is the sound your next devotional starts with.",
+      showHint: "Shows the sounds",
+      hideHint: "Hides the sounds",
+    },
+    affirmations: {
+      title: "Daily Affirmations",
+      subtitle: "A notification at each reminder time.",
+    },
+    notifications: {
+      deniedTitle: "Notifications are off for Gracehush.",
+      deniedBody: "Turn them on in Settings to receive your affirmations.",
+      openSettings: "Open Settings",
+      undeterminedTitle: "Allow notifications to receive your affirmations.",
+      allow: "Allow notifications",
+    },
+    sync: {
+      title: "Offline Reflections",
+      status: (synced: number, pending: number) => `${synced} synced, ${pending} pending`,
+      label: (synced: number, pending: number) =>
+        `Offline Reflections, ${synced} synced, ${pending} pending`,
+    },
+    privacy: {
+      exportTitle: "Export Journal",
+      exportSubtitle: "Download a copy of your entries and prayers.",
+      deleteTitle: "Delete Account",
+      deleteSubtitle: "Permanently remove your account and data.",
+      // TEMP(31): "Your export is ready." and a Download button
+      exportRequested: "Export requested.",
+    },
+    about: {
+      support: "Support & Helpline Resources",
+      help: "Help & Feedback",
+      helpHint: "Opens your email app",
+      privacyPolicy: "Privacy Policy",
+      terms: "Terms of Use",
+      pageHint: "Opens in a browser",
+      signOut: "Sign Out",
+    },
+    // One ConfirmDialog serves all of these (the delete one in two steps), so each is a set of strings.
+    dialogs: {
+      signOut: {
+        // TODO(24): the body says how many reflections on this phone have not been sent yet, when there are any
+        title: "Sign out of Gracehush?",
+        body: "Your journal stays safe in your account.",
+        confirm: "Sign out",
+        cancel: "Stay",
+      },
+      export: {
+        // TODO(31): true once step 31 builds the download link
+        title: "Export your journal?",
+        body: "We’ll prepare a copy of your entries, prayers and affirmations. You’ll get a link to download it.",
+        confirm: "Prepare export",
+        cancel: "Not now",
+      },
+      deleteFirst: {
+        title: "Delete your account?",
+        body: "This permanently deletes your journal entries, recordings, devotionals, prayers and affirmations. This can’t be undone.",
+        confirm: "Continue",
+        cancel: "Keep my account",
+        exportFirst: "Export my journal first",
+        subscriptionWarning:
+          "Deleting your account doesn’t cancel your subscription. Cancel it in your App Store or Google Play settings first.",
+      },
+      deleteFinal: {
+        title: "Are you sure?",
+        body: "Your sanctuary and everything in it will be removed.",
+        confirm: "Delete forever",
+        cancel: "Keep my account",
+      },
+    },
+    footer: {
+      // With no version (a build that does not report one) the line is only the scripture credit.
+      line: (version: string | null) =>
+        version
+          ? `Gracehush v${version} • Scripture quotes from Berean Standard Bible (BSB).`
+          : "Scripture quotes from Berean Standard Bible (BSB).",
+      blessing: "Peace be with your spirit.",
+    },
+    errors: {
+      load: "We couldn’t load your profile.",
+      retry: "Try again",
+      save: "We couldn’t save that change.",
+      export: "We couldn’t prepare your export. Please try again.",
+      delete: "We couldn’t delete your account. Please try again.",
+      signOut: "We couldn’t sign you out. Please try again.",
+      link: "We couldn’t open that page.",
+      email: (address: string) =>
+        `We couldn’t open your email app. You can write to us at ${address}.`,
+      subscription: "We couldn’t open your subscription settings.",
+    },
+  },
+  // The Paywall (step 16). Every price, percentage, trial length and count is built from the offering or from a
+  // helper (utils/pricing.ts), never typed here. Nothing on it claims what the app cannot keep: cancelling happens
+  // in the App Store or Google Play, and a failed purchase points to Restore purchases.
+  paywall: {
+    loading: "Loading plans",
+    restore: "Restore purchases",
+    hero: {
+      title: "Go deeper with Gracehush Pro",
+      subtitle: "A calm, unhurried space for your daily walk with God.",
+    },
+    // One row per feature that AGENTS.md defines as Pro (Subscription Rules). V1 has one. To advertise another,
+    // first make it a real gate there, then add its row here.
+    features: [
+      {
+        title: "Unlimited audio devotionals",
+        helper: (freePerWeek: number) => `Free plans include ${freePerWeek} a week.`,
+      },
+    ],
+    // The banner above the hero when the free limit sent the user here.
+    limit: {
+      used: (limit: number) =>
+        limit === 1
+          ? "You’ve used your free devotional this week."
+          : `You’ve used your ${limit} free devotionals this week.`,
+      resets: (weekday: string) => `They reset ${weekday}.`,
+      saved: "Your reflection is saved.",
+    },
+    plan: {
+      groupLabel: "Plans",
+      title: { annual: "Yearly Access", monthly: "Monthly Access" },
+      // Under the price: "$59.99" over "/ year".
+      perPeriod: (period: string) => `/ ${period}`,
+      perMonth: (price: string) => `${price} / month, billed yearly`,
+      billedMonthly: "Billed monthly.",
+      save: (percent: number) => `Save ${percent}%`,
+      trialFree: (days: number) => `${daysLabel(days)} free`,
+      // Spoken: "per", not a slash. The state is left out, because the platform speaks "radio button" and
+      // "checked" or "unchecked" itself.
+      a11y: (title: string, price: string, period: string, trialDays: number | null) =>
+        `${title}, ${price} per ${period}${trialDays === null ? "" : `, ${daysLabel(trialDays)} free`}`,
+    },
+    cta: {
+      trial: (days: number) => `Start ${days}-day free trial`,
+      subscribe: (priceString: string, period: string) => `Subscribe for ${priceString}/${period}`,
+    },
+    // `price` and `period` are the billing price and period, not the trial: the trial is `days`. The exact wording
+    // is a store-review matter (Apple 3.1.2, Google's subscription policy): check it before a release.
+    disclosure: {
+      trialIos: (days: number, price: string, period: string) =>
+        `Free for ${daysLabel(days)}, then ${price} per ${period}. Renews automatically until canceled. To avoid being charged, cancel at least 24 hours before the trial ends in your App Store settings.`,
+      trialAndroid: (days: number, price: string, period: string) =>
+        `Free for ${daysLabel(days)}, then ${price} per ${period}. Renews automatically until canceled. To avoid being charged, cancel in Google Play before the trial ends.`,
+      paidIos: (price: string, period: string) =>
+        `${price} per ${period}. Renews automatically until canceled. Cancel at least 24 hours before it renews in your App Store settings.`,
+      paidAndroid: (price: string, period: string) =>
+        `${price} per ${period}. Renews automatically until canceled. Cancel anytime in Google Play.`,
+    },
+    legal: {
+      terms: "Terms of Use",
+      privacy: "Privacy Policy",
+      separator: "•",
+      openError: "We couldn’t open that page.",
+    },
+    later: "Maybe later",
+    done: {
+      title: "Welcome to Gracehush Pro.",
+      body: "Your devotionals are unlimited.",
+      bodyTrial: "Your free trial has started. Your devotionals are unlimited.",
+      action: "Continue",
+    },
+    member: {
+      title: "You’re already a Pro member.",
+      bodyTrial: "Your free trial is active.",
+      bodyPro: "Thank you for being part of Gracehush.",
+      manage: "Manage subscription",
+      manageError: "We couldn’t open your subscription settings.",
+      close: "Close",
+    },
+    unavailable: {
+      title: "Plans aren’t available right now.",
+      body: "Please check your connection and try again.",
+      retry: "Try again",
+      close: "Close",
+    },
+    // Lines under the button. Each stays until the next action, never on a timer. A cancelled purchase has none.
+    notices: {
+      // TODO(30): the customer-info listener makes "We’ll unlock Pro as soon as it’s confirmed" true
+      pending: "Your purchase is pending approval. We’ll unlock Pro as soon as it’s confirmed.",
+      error:
+        "We couldn’t complete your purchase. Please try again. If you think you were charged, choose Restore purchases.",
+      notAllowed: "Purchases are turned off on this device.",
+      restoreNone: "We didn’t find a previous purchase for this account.",
+      restoreError: "We couldn’t restore your purchases. Please try again.",
+    },
+    days: daysLabel,
   },
 };

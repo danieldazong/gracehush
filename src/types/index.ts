@@ -25,10 +25,14 @@ export type PrayerCategory =
   | "PROVISION"
   | "GUIDANCE";
 
-// Used by every repository write added in steps 14, 15, 17, 25 and 29. Step 17 adds "UNAUTHORIZED".
+// Used by every repository write added in steps 14, 15, 17, 25 and 29.
 export type RepoResult<T> =
   | { ok: true; data: T }
-  | { ok: false; code: "NOT_FOUND" | "INVALID" | "NETWORK" | "UNKNOWN"; message: string };
+  | {
+      ok: false;
+      code: "NOT_FOUND" | "INVALID" | "NETWORK" | "UNAUTHORIZED" | "UNKNOWN";
+      message: string;
+    };
 
 // App models. Plain JSON (step 24 caches them as JSON): ISO strings for dates, null instead of
 // undefined, and no Date, Map or function values.
@@ -43,6 +47,12 @@ export interface UserProfile {
   ambientVolume: number; // 0–1
   affirmationsEnabled: boolean;
 }
+
+// What updateProfile can change (step 15). The reminder times are not here: they live in the onboarding store,
+// and the profile sync (step 17) keeps them in step with users_profile.
+export type ProfilePatch = Partial<
+  Pick<UserProfile, "affirmationsEnabled" | "ambientSound" | "ambientVolume">
+>;
 
 export interface Scripture {
   reference: string; // e.g. "Philippians 4:6–7"
@@ -80,6 +90,9 @@ export interface Prayer {
   answeredNote: string | null;
 }
 
+// What marking a prayer answered needs (step 14). `answeredDate` is a local calendar day, "YYYY-MM-DD".
+export type MarkAnsweredInput = { prayerId: string; answeredDate: string; note: string | null };
+
 // scripture, devotional and prayer are null for crisis, pending, uploading, processing and failed
 // entries. A crisis entry never has affirmations.
 export interface JournalEntry {
@@ -105,6 +118,37 @@ export interface PlanUsage {
   limit: number | null; // null for unlimited
   resetsAt: string;
 }
+
+// The paywall (step 16). Shaped like RevenueCat's package and product so step 30 maps the SDK one to one:
+// `id` is the package identifier, `priceString` is the store's localized price and `price` is only for sums.
+export type PackageKind = "annual" | "monthly";
+export type IntroOffer = { kind: "free_trial"; periodDays: number };
+export type PlanPackage = {
+  id: string;
+  kind: PackageKind;
+  productId: string;
+  priceString: string;
+  price: number;
+  currencyCode: string;
+  periodLabel: "year" | "month";
+  pricePerMonthString: string | null; // the SDK's own per-month string, when it has one
+  introOffer: IntroOffer | null;
+};
+export type Offering = { id: string; packages: PlanPackage[] };
+
+export type PurchaseErrorCode =
+  | "CANCELLED"
+  | "PENDING"
+  | "NETWORK"
+  | "NOT_ALLOWED"
+  | "ALREADY_OWNED"
+  | "UNKNOWN";
+export type PurchaseResult =
+  | { ok: true; tier: "trial" | "pro" }
+  | { ok: false; code: PurchaseErrorCode; message: string };
+export type RestoreResult =
+  | { ok: true; restored: boolean; tier: SubscriptionTier }
+  | { ok: false; code: "NETWORK" | "UNKNOWN"; message: string };
 
 // Keep in sync with supabase/functions/process-entry/contracts.ts (step 19)
 export type AudioMimeType = "audio/mp4" | "audio/m4a" | "audio/x-m4a" | "audio/aac";
@@ -160,3 +204,28 @@ export type PlaybackRate = 0.8 | 1 | 1.2;
 // `subtitle` is "Gracehush • Philippians 4:6–7", the same string step 26 puts on the lock screen.
 export type PlaybackTrack = { entryId: string; title: string; subtitle: string; durationMs: number };
 export type AmbientDefault = Pick<UserProfile, "ambientSound" | "ambientVolume">;
+
+// Crisis support (step 13). The data is in constants/crisisResources.ts.
+export type CrisisActionKind = "call" | "text" | "web";
+export type CrisisIcon = "call" | "text" | "emergency" | "web";
+export type CrisisGroupId = "lifeline" | "other";
+
+// One way to reach help: a row on the Reflection crisis view and on Support Resources.
+export type CrisisResource = {
+  id: string;
+  title: string; // the service
+  detail: string; // what a tap does, one short line
+  group: CrisisGroupId; // the heading it sits under on Support Resources
+  // What the row says under its group heading, where the heading already names the service. Falls back to
+  // title and detail.
+  grouped?: { title: string; detail: string };
+  icon: CrisisIcon;
+  kind: CrisisActionKind;
+  value: string; // the number or the URL
+  body?: string; // SMS prefill, text only
+  urgent: boolean; // the crisis-red tile: only the lifeline call and 911
+  onReflection: boolean; // on the Reflection crisis view (all of them are on Support Resources)
+  accessibilityLabel: string; // says what the tap does
+};
+
+export type CrisisAction = Pick<CrisisResource, "kind" | "value" | "body">;

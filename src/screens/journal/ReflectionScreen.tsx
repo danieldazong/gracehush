@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { CrisisSupportPanel } from "@/components/crisis/CrisisSupportPanel";
 import { FadeIn } from "@/components/FadeIn";
 import { Icon } from "@/components/Icon";
 import { MiniPlayerCard } from "@/components/MiniPlayerCard";
@@ -29,7 +30,6 @@ import type { Affirmation, Devotional, JournalEntry, Scripture, TimeSlot, UserPr
 import { formatEntryDate, getValidationHeadline, quoteVerse } from "@/utils/format";
 
 import {
-  ReflectionCrisis,
   ReflectionError,
   ReflectionFailed,
   ReflectionLoading,
@@ -270,8 +270,15 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
   } else if (state.status === "error") {
     body = <ReflectionError onRetry={state.retry} onReturn={returnToJournal} />;
   } else if (state.entry.isCrisis) {
-    // Checked before the status: a crisis entry is a finished one in the data, and step 13 relies on this order.
-    body = <ReflectionCrisis onReturn={returnToJournal} />;
+    // Checked before the status: a crisis entry is a finished one in the data, so it has to win over the
+    // status checks below. The panel is given the transcript and nothing else of the entry.
+    body = (
+      <CrisisSupportPanel
+        transcript={state.entry.transcript}
+        onOpenResources={() => navigation.navigate("CrisisResources", { source: "reflection" })}
+        onReturn={returnToJournal}
+      />
+    );
   } else if (
     state.entry.status === "pending" ||
     state.entry.status === "uploading" ||
@@ -298,7 +305,10 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
       <ReflectionHeader
-        date={state.status === "ready" ? formatEntryDate(state.entry.createdAt) : null}
+        // No date on the crisis view: it means nothing to someone in distress and makes the screen feel clinical.
+        date={
+          state.status === "ready" && !state.entry.isCrisis ? formatEntryDate(state.entry.createdAt) : null
+        }
         onBack={goBack}
       />
       {body}

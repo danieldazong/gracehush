@@ -7,6 +7,7 @@ import { useEffect } from "react";
 
 import { colors } from "@/constants/theme";
 import { SignInScreen } from "@/screens/auth/SignInScreen";
+import { CrisisResourcesScreen } from "@/screens/journal/CrisisResourcesScreen";
 import { NewEntryScreen } from "@/screens/journal/NewEntryScreen";
 import { NowPlayingScreen } from "@/screens/journal/NowPlayingScreen";
 import { ReflectionScreen } from "@/screens/journal/ReflectionScreen";
@@ -51,7 +52,7 @@ export function RootNavigator() {
   return (
     <Stack.Navigator screenOptions={screenOptions}>
       {isSignedIn ? (
-        // MainTabs comes first, so it is the initial route. The four screens above it hide the tab
+        // MainTabs comes first, so it is the initial route. The five screens above it hide the tab
         // bar and the dock by covering them.
         <>
           <Stack.Screen name="MainTabs" component={MainTabs} />
@@ -66,7 +67,16 @@ export function RootNavigator() {
             component={NowPlayingScreen}
             options={{ presentation: "modal", animation: "slide_from_bottom" }}
           />
-          <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: "modal" }} />
+          <Stack.Screen
+            name="CrisisResources"
+            component={CrisisResourcesScreen}
+            options={{ presentation: "modal", animation: "slide_from_bottom" }}
+          />
+          <Stack.Screen
+            name="Paywall"
+            component={PaywallScreen}
+            options={{ presentation: "modal", animation: "slide_from_bottom" }}
+          />
         </>
       ) : (
         <>

@@ -34,6 +34,9 @@ type PlayerState = {
   setAmbientVolume: (volume: number) => void;
   // A full reset, for sign-out (step 15).
   stop: () => void;
+  // Profile calls it after a successful ambient save (step 15): the next load of a different devotional copies
+  // the profile's ambient choice again. It changes no state, so nothing that is playing changes.
+  reseedAmbient: () => void;
 };
 
 const TICK_MS = 250;
@@ -41,8 +44,9 @@ const TICK_MS = 250;
 // One interval for the whole app, running only while playing.
 let timer: ReturnType<typeof setInterval> | null = null;
 let lastTickAt = 0;
-// The ambient choice is copied from the profile by the first load after the app starts (or after stop()).
-// Later loads keep the session's choice: a listener's speed and sound belong to the session, not to a devotional.
+// The ambient choice is copied from the profile by the first load after the app starts (or after stop(), or after
+// reseedAmbient() when Profile saved a new default). Later loads keep the session's choice: a listener's speed
+// and sound belong to the session, not to a devotional.
 let ambientSeeded = false;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -158,6 +162,10 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       ambientSound: "off",
       ambientVolume: 0.5,
     });
+  },
+
+  reseedAmbient: () => {
+    ambientSeeded = false;
   },
 }));
 

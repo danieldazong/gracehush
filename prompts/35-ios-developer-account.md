@@ -30,6 +30,7 @@ Check that these are true. If any is not, stop and tell me which.
 2. **Interactive commands are mine.** You never run `eas login`, `eas init`, `eas device:create`, `eas env:*` or the iOS `eas build`, because they need my logins. You prepare everything and print the exact commands for me.
 3. **Build budget.** Expo's pricing docs currently say the free plan has about 15 iOS and 15 Android builds a month, in a low-priority queue. Build for iOS once, and again only when native config or a native package changes. Run `npx expo-doctor` and `npx expo export --platform ios` first, so a build never fails for a reason you could have caught.
 4. **Commit first.** EAS packs the project from git (respecting `.gitignore`). Show me `git status --short` and ask me to approve a commit before the build. Never commit without my approval, and never commit `.env.local`, `/android`, `/ios` or `node_modules` (all gitignored).
+5. **The release gate is not for this build.** This development build installs only on my own iPhone, so it may still contain the mocks (`TEMP(NN)` markers) and the placeholder constants. A build that anyone else can install (a Play Console upload on any track, TestFlight, the App Store) is release work and waits until `grep -rnE "TEMP\(|TODO: real" src` prints nothing (AGENTS.md, "Before a store build"). Do not start such a build, and do not add a preview or production profile to `eas.json` for one, until I say the gate is clean.
 
 ## Steps
 

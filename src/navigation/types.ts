@@ -15,7 +15,12 @@ export type RootStackParamList = {
   NewEntry: { mode: "speak" | "write" };
   Reflection: { entryId: string };
   NowPlaying: { entryId: string };
-  Paywall: { source: "profile" | "limit" };
+  // Nothing reads `source` in V1 (no analytics: a crisis view sends no events). It stays because step 15's
+  // Profile row passes "profile".
+  CrisisResources: { source: "reflection" | "profile" };
+  // `entryId` is the reflection the free limit stopped. When it is a crisis entry the Paywall replaces itself
+  // with Reflection: crisis support is never paywalled.
+  Paywall: { source: "profile" | "limit"; entryId?: string };
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> = NativeStackScreenProps<

@@ -11,8 +11,12 @@ interface OnboardingState {
   completedAt: string | null; // ISO
   reminders: Record<TimeSlot, string>; // "HH:mm", 24-hour
   permissionsPromptedAt: string | null; // ISO, set once the permission prompts were shown
-  remindersSyncedAt: string | null; // ISO, set by step 17 after saving the reminders to users_profile
+  remindersSyncedAt: string | null; // ISO, set when the times last matched users_profile (step 17)
+  remindersDirty: boolean; // an edit the server has not seen yet (step 17)
   setReminder: (slot: TimeSlot, hhmm: string) => void;
+  markRemindersSynced: () => void; // the server has these times
+  applyServerReminders: (times: Record<TimeSlot, string>) => void; // the server's times replace this device's
+  discardUnsyncedReminders: () => void; // sign out: an unsent edit belongs to the account that made it
   completeOnboarding: () => void; // idempotent
   markPermissionsPrompted: () => void;
   resetOnboarding: () => void; // dev only
@@ -26,6 +30,7 @@ type OnboardingPersisted = Pick<
   | "reminders"
   | "permissionsPromptedAt"
   | "remindersSyncedAt"
+  | "remindersDirty"
 >;
 
 const HHMM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -55,6 +60,7 @@ function getInitialData(): OnboardingPersisted {
     reminders: { ...DEFAULT_REMINDERS },
     permissionsPromptedAt: null,
     remindersSyncedAt: null,
+    remindersDirty: false,
   };
 }
 
@@ -76,8 +82,22 @@ export const useOnboardingStore = create<OnboardingState>()(
         set((state) => ({
           reminders: { ...state.reminders, [slot]: hhmm },
           remindersSyncedAt: null,
+          remindersDirty: true,
         }));
       },
+      markRemindersSynced: () =>
+        set({ remindersDirty: false, remindersSyncedAt: new Date().toISOString() }),
+      applyServerReminders: (times) =>
+        set((state) => ({
+          reminders: {
+            morning: isHHmm(times.morning) ? times.morning : state.reminders.morning,
+            afternoon: isHHmm(times.afternoon) ? times.afternoon : state.reminders.afternoon,
+            evening: isHHmm(times.evening) ? times.evening : state.reminders.evening,
+          },
+          remindersDirty: false,
+          remindersSyncedAt: new Date().toISOString(),
+        })),
+      discardUnsyncedReminders: () => set({ remindersDirty: false }),
       completeOnboarding: () => {
         if (get().hasCompletedOnboarding) {
           return;
@@ -94,7 +114,7 @@ export const useOnboardingStore = create<OnboardingState>()(
     }),
     {
       name: "gracehush.onboarding",
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => safeStorage),
       partialize: (state): OnboardingPersisted => ({
         hasCompletedOnboarding: state.hasCompletedOnboarding,
@@ -102,10 +122,19 @@ export const useOnboardingStore = create<OnboardingState>()(
         reminders: state.reminders,
         permissionsPromptedAt: state.permissionsPromptedAt,
         remindersSyncedAt: state.remindersSyncedAt,
+        remindersDirty: state.remindersDirty,
       }),
-      // Version 1 is the only shape and `merge` validates every field, so there is nothing to migrate.
-      // Steps 17 and 34 bump the version and extend this.
-      migrate: (persisted: unknown) => persisted as OnboardingPersisted,
+      // `merge` validates every field. Version 2 (step 17) added remindersDirty. Before it nothing synced the times, so
+      // a time that differs from the default was changed on this device and the server has not seen it. Step 34 extends this.
+      migrate: (persisted: unknown, version: number) => {
+        const saved: Record<string, unknown> = isRecord(persisted) ? persisted : {};
+        if (version >= 2) return saved as OnboardingPersisted;
+        const savedReminders: Record<string, unknown> = isRecord(saved.reminders) ? saved.reminders : {};
+        const changed = (Object.keys(DEFAULT_REMINDERS) as TimeSlot[]).some(
+          (slot) => isHHmm(savedReminders[slot]) && savedReminders[slot] !== DEFAULT_REMINDERS[slot],
+        );
+        return { ...saved, remindersDirty: changed && saved.remindersSyncedAt == null } as OnboardingPersisted;
+      },
       // zustand's default merge is shallow: one bad reminder slot would replace the whole object.
       merge: (persisted: unknown, current: OnboardingState): OnboardingState => {
         const saved: Record<string, unknown> = isRecord(persisted) ? persisted : {};
@@ -123,6 +152,7 @@ export const useOnboardingStore = create<OnboardingState>()(
           },
           permissionsPromptedAt: toTimestamp(saved.permissionsPromptedAt),
           remindersSyncedAt: toTimestamp(saved.remindersSyncedAt),
+          remindersDirty: saved.remindersDirty === true,
         };
       },
       // With safeStorage this should never fire: it is the last line of defence.

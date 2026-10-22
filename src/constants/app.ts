@@ -26,6 +26,10 @@ export const TEXT_COUNTER_FROM = 4_500;
 // keeps) and the component share it without the hook importing a component.
 export const WAVEFORM_BAR_COUNT = 9;
 
+// Prayers (step 14). A gratitude note is at most this long, and its counter shows from GRATITUDE_COUNTER_FROM.
+export const MAX_GRATITUDE_NOTE_LENGTH = 1_000;
+export const GRATITUDE_COUNTER_FROM = 900;
+
 // The player (step 12). Back and forward skip this far; the speed chips and the ambient chips show these,
 // in this order.
 export const SKIP_MS = 15_000;
@@ -36,3 +40,14 @@ export const AMBIENT_SOUNDS: readonly AmbientSound[] = [
   "gentle-piano",
   "morning-birds",
 ];
+
+// Profile (step 15). Step 16 reads these three URL constants by name.
+// Checked 2026-10-21: both addresses load (Apple's goes to the Apple ID sign-in, Google's to the Google sign-in).
+export const MANAGE_SUBSCRIPTION_URL = {
+  ios: "https://apps.apple.com/account/subscriptions",
+  android: "https://play.google.com/store/account/subscriptions",
+} as const; // TODO(30): use RevenueCat's managementURL when available
+// Apple and Google both require the two policy pages to be reachable inside the app.
+export const PRIVACY_POLICY_URL = "https://example.com/TODO-privacy"; // TODO: real URL before release
+export const TERMS_URL = "https://example.com/TODO-terms"; // TODO: real URL before release
+export const SUPPORT_EMAIL = "support@example.com"; // TODO: real address before release

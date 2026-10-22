@@ -17,10 +17,13 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { SupabaseAuthBridge } from "@/components/SupabaseAuthBridge";
+import { supabaseEnv } from "@/constants/env";
 import { fonts } from "@/constants/theme";
 import { useStoreHydrated } from "@/hooks/useStoreHydrated";
 import { RootNavigator } from "@/navigation/RootNavigator";
 import { useOnboardingStore } from "@/store/onboardingStore";
+import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -29,6 +32,7 @@ const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 function AppShell() {
   const { isLoaded } = useAuth();
   const hydrated = useStoreHydrated(useOnboardingStore);
+  const prefsHydrated = useStoreHydrated(useProfilePrefsStore);
   const [loaded, error] = useFonts({
     [fonts.fraunces]: Fraunces_400Regular,
     [fonts.frauncesMedium]: Fraunces_500Medium,
@@ -40,22 +44,24 @@ function AppShell() {
     [fonts.dmBold]: DMSans_700Bold,
   });
 
-  // The fonts, Clerk and the saved onboarding state load in parallel. Waiting for all three means the
-  // navigator first renders with everything known: a signed-in user never sees Onboarding flash by, and
-  // a finished onboarding never shows Welcome.
+  // The fonts, Clerk and the two saved stores load in parallel. Waiting for all of them means the
+  // navigator first renders with everything known: a signed-in user never sees Onboarding flash by, a
+  // finished onboarding never shows Welcome, and the profile sync never writes to a store that is
+  // still loading (step 17).
   useEffect(() => {
-    if ((loaded || error) && isLoaded && hydrated) {
+    if ((loaded || error) && isLoaded && hydrated && prefsHydrated) {
       SplashScreen.hideAsync();
     }
-  }, [loaded, error, isLoaded, hydrated]);
+  }, [loaded, error, isLoaded, hydrated, prefsHydrated]);
 
   // Nothing is rendered while waiting: the splash screen is still visible.
-  if ((!loaded && !error) || !hydrated) {
+  if ((!loaded && !error) || !hydrated || !prefsHydrated) {
     return null;
   }
 
   return (
     <SafeAreaProvider>
+      <SupabaseAuthBridge />
       <NavigationContainer>
         <RootNavigator />
       </NavigationContainer>
@@ -69,6 +75,16 @@ export default function App() {
     throw new Error(
       "Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY. Add it to .env.local (see .env.example) and restart Expo with `npx expo start -c`.",
     );
+  }
+
+  // A wrong Supabase value always stops the app (a secret key in an EXPO_PUBLIC_ variable would ship inside it).
+  // A missing one stops a release build only: in development the profile falls back to the mock, so the app runs
+  // before the Supabase project exists (getProfileSource).
+  if (supabaseEnv.status === "invalid" || (supabaseEnv.status === "missing" && !__DEV__)) {
+    throw new Error(supabaseEnv.message);
+  }
+  if (__DEV__ && supabaseEnv.status === "missing") {
+    console.info(`[supabase] ${supabaseEnv.message} Until then the profile uses the mock.`);
   }
 
   return (
