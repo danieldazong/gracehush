@@ -1,24 +1,22 @@
 # GraceHush
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Platform: Mobile](https://img.shields.io/badge/Platform-iOS%20%7C%20Android-green.svg)
-![Build: Passing](https://img.shields.io/badge/Build-Passing-brightgreen.svg)
+![Status: Production](https://img.shields.io/badge/Status-Production-success.svg)
 
-GraceHush is a mobile application created to cultivate intentional quiet time, daily reflection, and mindfulness. It provides users with a serene, distraction-free environment to record personal journals, meditate on spiritual affirmations, and track daily reflections.
+A modern, responsive mobile journaling and meditation application engineered to cultivate quiet time, personal reflection, and spiritual mindfulness. Designed with a clean user experience, distraction-free typography, and optimized cross-platform performance.
 
----
+
 
 ## 📌 Project Overview
+This repository contains the complete source code and assets for the GraceHush mobile application. The objective of this project is to provide users, project managers, and prospective stakeholders with a calm digital space to track devotional habits, meditate on curated scripture and affirmations, and record private reflections securely.
 
-In a fast-paced digital environment, GraceHush offers a calm space for contemplative habits. The application emphasizes clean visual design, low cognitive friction, and robust local/cloud data persistence.
+### Key Highlights
+- **Responsive Layout:** Adaptive design tested across iOS and Android mobile and tablet viewports.
+- **Thoughtful Features:** Interactive daily reflection cards, guided affirmations, streak tracking, and private journal logs.
+- **Performance Focused:** Minimalist asset bundling, fast startup times, and smooth gesture-driven screen transitions.
+- **Structured Information Architecture:** Clear separation between daily feeds, devotional libraries, user profile settings, and persistent journal entries.
 
-### Key Features
-* **Daily Journaling:** Private entries with local persistence and encrypted remote backup.
-* **Curated Reflections & Affirmations:** Daily scripture verses, thoughtful prompts, and devotional cards.
-* **Habit & Streak Tracking:** Visual indicators to encourage consistent devotional and reflective routines.
-* **Distraction-Free UI:** Minimalist typography, dark mode support, and smooth screen transitions.
 
----
 
 ## 🛠 Tech Stack
 
@@ -27,107 +25,63 @@ In a fast-paced digital environment, GraceHush offers a calm space for contempla
 | **Framework** | React Native / Expo |
 | **Routing / Navigation** | Expo Router |
 | **Styling** | NativeWind / Tailwind CSS |
-| **State & Storage** | React Context / Zustand, AsyncStorage |
-| **Backend & Auth** | Supabase / Clerk (or Firebase) |
-| **Language** | TypeScript / JavaScript |
+| **State & Storage** | Zustand / React Context, AsyncStorage |
+| **Backend & Services** | Supabase (or RESTful API) |
+| **Version Control** | Git & GitHub |
 
 
 
 ## 📁 Repository Structure
 
+```text
+├── assets/          # Static assets (icons, brand artwork, background audio, typography)
+├── components/      # Modular UI components (ReflectionCard, AudioPlayer, AffirmationModal)
+├── styles/          # Global theme tokens, typography rules, and NativeWind configs
+├── app/             # Application entry points, tab layouts, and navigation screens
+├── README.md        # Project documentation and setup guidelines
+└── package.json     # Project dependencies, build scripts, and metadata
 
-├── app/                  # App routes, screens, and layout definitions (Expo Router)
-├── assets/               # Images, fonts, and icon sets
-├── components/           # Reusable UI elements (Buttons, Cards, Modals)
-├── constants/            # Theme tokens, typography, and configuration values
-├── hooks/                # Custom React hooks
-├── services/             # Backend clients, API routing, and storage adapters
-├── .env.example          # Sample environment variable definitions
-├── app.json              # Expo application manifest
-├── package.json          # Package dependencies and scripts
-└── README.md             # Project documentation
-
+```
 
 ## 🚀 Getting Started
 
-Follow these steps to run GraceHush locally in your development environment.
+Follow these instructions to run a copy of the project locally for development or testing purposes.
 
 ### Prerequisites
 
-* [Node.js](https://nodejs.org/) (v18.x or later)
-* [Git](https://git-scm.com/)
-* [Expo Go](https://expo.dev/go) installed on your physical mobile device, or a configured iOS Simulator / Android Emulator.
+* A modern web browser or mobile emulator (iOS Simulator / Android Emulator)
+* [Node.js](https://nodejs.org/) installed (v18.x or later recommended, if using package managers)
+* [Git](https://git-scm.com/) installed on your local machine
+* [Expo Go](https://expo.dev/go) app installed on your physical mobile device
 
-### Installation & Setup
+### Installation & Local Setup
 
 1. **Clone the repository:**
 
-git clone [https://github.com/danieldazong/gracehush-app.git](https://github.com/danieldazong/gracehush-app.git)
-cd gracehush-app
+git clone https://github.com/danieldazong/gracehush.git
+cd gracehush
 
-
-
-
-2. **Install project dependencies:**
+2. **Install dependencies** *(if using an npm-based project)*:
 
 npm install
-# or
-yarn install
 
-
-
-3. **Configure Environment Variables:**
-Copy the example environment configuration file to create your local `.env`:
-
-cp .env.example .env
-
-
-
-
-> **Security Notice:** Never commit actual API keys, service credentials, or production tokens to source control. Populate `.env` with placeholder/sandbox keys only.
-
-
-4. **Start the development server:**
+3. **Run the local development server:**
 
 npx expo start
 
+*Scan the terminal QR code using Expo Go (Android) or the Camera app (iOS), or press `a` for Android Emulator / `i` for iOS Simulator.*
 
+4. **Build for production:**
 
-5. **Run on a device or emulator:**
-* Scan the terminal QR code with the **Expo Go** app (Android) or the default Camera app (iOS).
-* Press `a` in the terminal to launch on an Android Emulator.
-* Press `i` in the terminal to launch on an iOS Simulator.
+npx eas build --platform all
 
-
-
----
-
-## 🔒 Security & Environment Configuration
-
-Ensure your `.gitignore` contains the following entries to prevent accidental credential leaks:
-
-gitignore
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# Keystores & release certificates
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-## 📬 Contact & Contributions
-
-* **Author:** Daniel Dazong
-* **GitHub:** [@danieldazong](https://www.google.com/search?q=https://github.com/danieldazong)
-
- 
 ## 📬 Contact & Connect
 
 * **Developer:** Daniel Dazong
 * **LinkedIn:** https://www.linkedin.com/in/danieldazong
 * **GitHub:** https://github.com/danieldazong
 * **Email:** danieldazong08@gmail.com
+
+```
+
+```
