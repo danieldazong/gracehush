@@ -60,3 +60,38 @@ export async function checkSessionToken(): Promise<SessionTokenCheck> {
     return "unreadable";
   }
 }
+
+export type SessionTokenFacts = {
+  issuerHost: string | null;
+  sid: boolean;
+  azp: boolean;
+  sts: string | null;
+};
+
+// For the dev panel: what the Clerk token carries, so the Edge Function's CLERK_ISSUER secret can be checked against a
+// real token. It returns the issuer's host (the public address of the Clerk instance), whether the sid and azp claims
+// exist and the session status, never a value that identifies anyone.
+export async function describeSessionToken(): Promise<SessionTokenFacts | null> {
+  if (session === null) return null;
+  try {
+    const token = await session.getToken();
+    const payload = token ? readJwtPayload(token) : null;
+    if (payload === null) return null;
+    let issuerHost: string | null = null;
+    if (typeof payload.iss === "string") {
+      try {
+        issuerHost = new URL(payload.iss).host;
+      } catch {
+        // An issuer that is not a URL is reported as none.
+      }
+    }
+    return {
+      issuerHost,
+      sid: typeof payload.sid === "string",
+      azp: typeof payload.azp === "string",
+      sts: typeof payload.sts === "string" ? payload.sts : null,
+    };
+  } catch {
+    return null;
+  }
+}

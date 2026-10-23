@@ -33,6 +33,14 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Supabase CLI state, and the Edge Functions' secrets (the committed .env.example holds names only)
+supabase/.temp/
+supabase/.branches/
+supabase/functions/.env
+supabase/functions/.env.*
+!supabase/functions/.env.example
+deno.lock
+
 # typescript
 *.tsbuildinfo
 

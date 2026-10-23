@@ -1,0 +1,151 @@
+{
+  "translation": {
+    "id": "BSB"
+  },
+  "book": {
+    "id": "PSA"
+  },
+  "numberOfVerses": 6,
+  "chapter": {
+    "number": 23,
+    "content": [
+      {
+        "type": "verse",
+        "number": 1,
+        "text": "The LORD is my shepherd;\nI shall not want.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 24,
+            "level": 1
+          },
+          {
+            "start": 25,
+            "end": 42,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 2,
+        "text": "He makes me lie down in green pastures;\nHe leads me beside quiet waters.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 39,
+            "level": 1
+          },
+          {
+            "start": 40,
+            "end": 72,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 3,
+        "text": "He restores my soul;\nHe guides me in the paths of righteousness\nfor the sake of His name.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 20,
+            "level": 1
+          },
+          {
+            "start": 21,
+            "end": 63,
+            "level": 2
+          },
+          {
+            "start": 64,
+            "end": 89,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 4,
+        "text": "Even though I walk through the valley of the shadow of death,\nI will fear no evil,\nfor You are with me;\nYour rod and Your staff, they comfort me.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 61,
+            "level": 1
+          },
+          {
+            "start": 62,
+            "end": 82,
+            "level": 2
+          },
+          {
+            "start": 83,
+            "end": 103,
+            "level": 1
+          },
+          {
+            "start": 104,
+            "end": 145,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 5,
+        "text": "You prepare a table before me\nin the presence of my enemies.\nYou anoint my head with oil;\nmy cup overflows.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 29,
+            "level": 1
+          },
+          {
+            "start": 30,
+            "end": 60,
+            "level": 2
+          },
+          {
+            "start": 61,
+            "end": 89,
+            "level": 1
+          },
+          {
+            "start": 90,
+            "end": 107,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 6,
+        "text": "Surely goodness and mercy will follow me\nall the days of my life,\nand I will dwell in the house of the LORD\nforever.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 40,
+            "level": 1
+          },
+          {
+            "start": 41,
+            "end": 65,
+            "level": 2
+          },
+          {
+            "start": 66,
+            "end": 107,
+            "level": 1
+          },
+          {
+            "start": 108,
+            "end": 116,
+            "level": 2
+          }
+        ]
+      }
+    ]
+  }
+}

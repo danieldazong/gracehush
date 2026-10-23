@@ -11,6 +11,7 @@ import {
   listPrayers,
   setMockSubscriptionTier,
 } from "@/data/journalRepository";
+import { runProcessEntryCheck } from "@/components/dev/processEntryCheck";
 import { supabaseEnv } from "@/constants/env";
 import {
   countVisibleProfileRows,
@@ -33,11 +34,13 @@ import type { MainTabScreenProps, RootStackParamList } from "@/navigation/types"
 import { signOutCleanup } from "@/services/account";
 import {
   checkSessionToken,
+  describeSessionToken,
   getSupabaseUserId,
   type SessionTokenCheck,
 } from "@/services/supabaseClient";
 import { useDevStore } from "@/store/devStore";
 import { useOnboardingStore } from "@/store/onboardingStore";
+import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 import type { JournalEntry, PermissionResult, SubscriptionTier } from "@/types";
 import {
   formatDuration,
@@ -157,13 +160,29 @@ async function runSupabaseCheck(source: ProfileSource): Promise<string[]> {
   ];
   if (supabaseEnv.status !== "ok" || !signedIn) return lines;
   lines.push(`Clerk token: ${TOKEN_LABELS[await checkSessionToken()]}`);
+  // The issuer shown here is what the Edge Function's CLERK_ISSUER secret must be (step 19).
+  const facts = await describeSessionToken();
+  if (facts) {
+    const yes = (value: boolean) => (value ? "yes" : "no");
+    lines.push(
+      `token issuer: ${facts.issuerHost ?? "none"} | sid ${yes(facts.sid)} | azp ${yes(facts.azp)} | sts ${facts.sts ?? "none"}`,
+    );
+  }
   const found = await selectProfileRow();
   lines.push(
     `profile row: ${found.ok ? (found.data === null ? "not found" : "found") : `error ${found.code}`}`,
   );
+  // The columns step 18 added: a database without them has not had the v1 migration applied.
+  if (found.ok && found.data !== null) {
+    lines.push(`settings columns: ${"ambient_sound" in found.data ? "yes" : "NO: apply the step 18 migration"}`);
+  }
   // Row level security: this must say 1 (or 0 before the row exists) even when the table holds other accounts.
   const visible = await countVisibleProfileRows();
   lines.push(`rows this user can see: ${visible.ok ? visible.data : `error ${visible.code}`}`);
+  // Settings changed on this device that the server has not confirmed yet (names only, never values).
+  const userId = getSupabaseUserId();
+  const unsent = userId === null ? [] : Object.keys(useProfilePrefsStore.getState().byUser[userId]?.unsent ?? {});
+  lines.push(`unsent settings: ${unsent.length === 0 ? "none" : unsent.join(", ")}`);
   lines.push(`last error: ${getLastProfileError() ?? "none"}`);
   return lines;
 }
@@ -240,6 +259,8 @@ function DevToolsContent() {
   const [tier, setTier] = useState<SubscriptionTier | null>(null);
   const [supabaseLines, setSupabaseLines] = useState<string[]>([]);
   const [checking, setChecking] = useState(false);
+  const [processLines, setProcessLines] = useState<string[]>([]);
+  const [processChecking, setProcessChecking] = useState(false);
   // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
   const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
   const crisisEntryId = targets.find((target) => target.label === "Crisis")?.entryId ?? null;
@@ -275,6 +296,14 @@ function DevToolsContent() {
     setChecking(true);
     setSupabaseLines(await runSupabaseCheck(profileSource));
     setChecking(false);
+  }
+
+  // Calls the deployed process-entry function with made-up text; each line appears as its case finishes.
+  async function checkProcessEntry() {
+    setProcessChecking(true);
+    setProcessLines([]);
+    await runProcessEntryCheck((line) => setProcessLines((current) => [...current, line]));
+    setProcessChecking(false);
   }
 
   // The session goes first, and the cleanup before it, as in Profile's own Sign out.
@@ -423,6 +452,18 @@ function DevToolsContent() {
             <DevButton label="Supabase check (dev)" disabled={checking} onPress={checkSupabase} />
             {supabaseLines.map((line) => (
               <Text key={line} className="text-center text-body-sm text-ink">
+                {line}
+              </Text>
+            ))}
+          </View>
+          <View className="items-center gap-2">
+            <DevButton
+              label="Process-entry check (dev)"
+              disabled={processChecking}
+              onPress={checkProcessEntry}
+            />
+            {processLines.map((line, index) => (
+              <Text key={`${index}-${line}`} className="text-center text-body-sm text-ink">
                 {line}
               </Text>
             ))}

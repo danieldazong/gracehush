@@ -1,0 +1,721 @@
+[
+  {
+    "name": "ready, written by this function: reference only, a tracked prayer, one favourite affirmation",
+    "row": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "user_id": "user_a",
+      "client_entry_id": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+      "created_at": "2026-10-22T10:00:00.000Z",
+      "updated_at": "2026-10-22T10:00:41.000Z",
+      "input_type": "audio",
+      "transcript": "I have been carrying a lot this week.",
+      "audio_path": "user_a/raw/3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b.m4a",
+      "processing_status": "ready",
+      "error_code": null,
+      "is_crisis": false,
+      "dominant_emotion": "anxious",
+      "scripture_reference": "Philippians 4:6–7",
+      "scripture_text": null,
+      "scripture_verified": false,
+      "devotional_title": "Peace in the Waiting",
+      "devotional_script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+      "closing_prayer": "Lord, we bring you this week.",
+      "devotional_audio_path": null,
+      "devotional_duration_ms": null,
+      "is_active_prayer": true,
+      "is_answered": false,
+      "answered_at": null,
+      "answered_notes": null,
+      "prayer_title": "Peace for the week",
+      "prayer_category": "INNER PEACE",
+      "prayer_summary": "Peace and steadiness for a heavy week."
+    },
+    "affirmations": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "morning",
+        "headline": "You are held",
+        "affirmation_text": "Begin the day knowing you are held.",
+        "is_delivered": false,
+        "is_favorite": true,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "afternoon",
+        "headline": "Rest is allowed",
+        "affirmation_text": "Pause and breathe.",
+        "is_delivered": false,
+        "is_favorite": false,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "evening",
+        "headline": "It is enough",
+        "affirmation_text": "You did what you could today.",
+        "is_delivered": false,
+        "is_favorite": false,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      }
+    ],
+    "expected": {
+      "entry": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "clientEntryId": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+        "createdAt": "2026-10-22T10:00:00.000Z",
+        "updatedAt": "2026-10-22T10:00:41.000Z",
+        "inputType": "audio",
+        "transcript": "I have been carrying a lot this week.",
+        "dominantEmotion": "anxious",
+        "status": "ready",
+        "isCrisis": false,
+        "scripture": {
+          "reference": "Philippians 4:6–7",
+          "text": null,
+          "translation": "BSB",
+          "verified": false
+        },
+        "devotional": {
+          "title": "Peace in the Waiting",
+          "script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+          "closingPrayer": "Lord, we bring you this week.",
+          "audioPath": null,
+          "durationMs": null
+        },
+        "prayer": {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "title": "Peace for the week",
+          "category": "INNER PEACE",
+          "summary": "Peace and steadiness for a heavy week.",
+          "scriptureReference": "Philippians 4:6–7",
+          "createdAt": "2026-10-22T10:00:00.000Z",
+          "isAnswered": false,
+          "answeredAt": null,
+          "answeredNote": null
+        },
+        "failureCode": null,
+        "isLocalOnly": false
+      },
+      "affirmations": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "morning",
+          "headline": "You are held",
+          "text": "Begin the day knowing you are held.",
+          "isFavorite": true
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "afternoon",
+          "headline": "Rest is allowed",
+          "text": "Pause and breathe.",
+          "isFavorite": false
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "evening",
+          "headline": "It is enough",
+          "text": "You did what you could today.",
+          "isFavorite": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "ready after steps 20 and 22: verified text, audio path and length",
+    "row": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "user_id": "user_a",
+      "client_entry_id": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+      "created_at": "2026-10-22T10:00:00.000Z",
+      "updated_at": "2026-10-22T10:00:41.000Z",
+      "input_type": "text",
+      "transcript": "I have been carrying a lot this week.",
+      "audio_path": null,
+      "processing_status": "ready",
+      "error_code": null,
+      "is_crisis": false,
+      "dominant_emotion": "anxious",
+      "scripture_reference": "Philippians 4:6–7",
+      "scripture_text": "Do not be anxious about anything.",
+      "scripture_verified": true,
+      "devotional_title": "Peace in the Waiting",
+      "devotional_script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+      "closing_prayer": "Lord, we bring you this week.",
+      "devotional_audio_path": "user_a/devotionals/11111111-1111-4111-8111-111111111111.mp3",
+      "devotional_duration_ms": 74500,
+      "is_active_prayer": false,
+      "is_answered": false,
+      "answered_at": null,
+      "answered_notes": null,
+      "prayer_title": null,
+      "prayer_category": null,
+      "prayer_summary": null
+    },
+    "affirmations": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "morning",
+        "headline": "You are held",
+        "affirmation_text": "Begin the day knowing you are held.",
+        "is_delivered": false,
+        "is_favorite": true,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "afternoon",
+        "headline": "Rest is allowed",
+        "affirmation_text": "Pause and breathe.",
+        "is_delivered": false,
+        "is_favorite": false,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "evening",
+        "headline": "It is enough",
+        "affirmation_text": "You did what you could today.",
+        "is_delivered": false,
+        "is_favorite": false,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      }
+    ],
+    "expected": {
+      "entry": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "clientEntryId": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+        "createdAt": "2026-10-22T10:00:00.000Z",
+        "updatedAt": "2026-10-22T10:00:41.000Z",
+        "inputType": "text",
+        "transcript": "I have been carrying a lot this week.",
+        "dominantEmotion": "anxious",
+        "status": "ready",
+        "isCrisis": false,
+        "scripture": {
+          "reference": "Philippians 4:6–7",
+          "text": "Do not be anxious about anything.",
+          "translation": "BSB",
+          "verified": true
+        },
+        "devotional": {
+          "title": "Peace in the Waiting",
+          "script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+          "closingPrayer": "Lord, we bring you this week.",
+          "audioPath": "user_a/devotionals/11111111-1111-4111-8111-111111111111.mp3",
+          "durationMs": 74500
+        },
+        "prayer": null,
+        "failureCode": null,
+        "isLocalOnly": false
+      },
+      "affirmations": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "morning",
+          "headline": "You are held",
+          "text": "Begin the day knowing you are held.",
+          "isFavorite": true
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "afternoon",
+          "headline": "Rest is allowed",
+          "text": "Pause and breathe.",
+          "isFavorite": false
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "evening",
+          "headline": "It is enough",
+          "text": "You did what you could today.",
+          "isFavorite": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "crisis: only the flag and the words",
+    "row": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "user_id": "user_a",
+      "client_entry_id": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+      "created_at": "2026-10-22T10:00:00.000Z",
+      "updated_at": "2026-10-22T10:00:41.000Z",
+      "input_type": "audio",
+      "transcript": "I have been carrying a lot this week.",
+      "audio_path": "user_a/raw/3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b.m4a",
+      "processing_status": "ready",
+      "error_code": null,
+      "is_crisis": true,
+      "dominant_emotion": null,
+      "scripture_reference": null,
+      "scripture_text": null,
+      "scripture_verified": false,
+      "devotional_title": null,
+      "devotional_script": null,
+      "closing_prayer": null,
+      "devotional_audio_path": null,
+      "devotional_duration_ms": null,
+      "is_active_prayer": false,
+      "is_answered": false,
+      "answered_at": null,
+      "answered_notes": null,
+      "prayer_title": null,
+      "prayer_category": null,
+      "prayer_summary": null
+    },
+    "affirmations": [],
+    "expected": {
+      "entry": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "clientEntryId": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+        "createdAt": "2026-10-22T10:00:00.000Z",
+        "updatedAt": "2026-10-22T10:00:41.000Z",
+        "inputType": "audio",
+        "transcript": "I have been carrying a lot this week.",
+        "dominantEmotion": null,
+        "status": "ready",
+        "isCrisis": true,
+        "scripture": null,
+        "devotional": null,
+        "prayer": null,
+        "failureCode": null,
+        "isLocalOnly": false
+      },
+      "affirmations": []
+    }
+  },
+  {
+    "name": "failed: the code is kept, nothing else is shown",
+    "row": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "user_id": "user_a",
+      "client_entry_id": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+      "created_at": "2026-10-22T10:00:00.000Z",
+      "updated_at": "2026-10-22T10:00:41.000Z",
+      "input_type": "text",
+      "transcript": "I have been carrying a lot this week.",
+      "audio_path": null,
+      "processing_status": "failed",
+      "error_code": "AI_UNAVAILABLE",
+      "is_crisis": false,
+      "dominant_emotion": null,
+      "scripture_reference": null,
+      "scripture_text": null,
+      "scripture_verified": false,
+      "devotional_title": null,
+      "devotional_script": null,
+      "closing_prayer": null,
+      "devotional_audio_path": null,
+      "devotional_duration_ms": null,
+      "is_active_prayer": false,
+      "is_answered": false,
+      "answered_at": null,
+      "answered_notes": null,
+      "prayer_title": null,
+      "prayer_category": null,
+      "prayer_summary": null
+    },
+    "affirmations": [],
+    "expected": {
+      "entry": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "clientEntryId": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+        "createdAt": "2026-10-22T10:00:00.000Z",
+        "updatedAt": "2026-10-22T10:00:41.000Z",
+        "inputType": "text",
+        "transcript": "I have been carrying a lot this week.",
+        "dominantEmotion": null,
+        "status": "failed",
+        "isCrisis": false,
+        "scripture": null,
+        "devotional": null,
+        "prayer": null,
+        "failureCode": "AI_UNAVAILABLE",
+        "isLocalOnly": false
+      },
+      "affirmations": []
+    }
+  },
+  {
+    "name": "an answered prayer carries its date and note",
+    "row": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "user_id": "user_a",
+      "client_entry_id": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+      "created_at": "2026-10-22T10:00:00.000Z",
+      "updated_at": "2026-10-22T10:00:41.000Z",
+      "input_type": "audio",
+      "transcript": "I have been carrying a lot this week.",
+      "audio_path": "user_a/raw/3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b.m4a",
+      "processing_status": "ready",
+      "error_code": null,
+      "is_crisis": false,
+      "dominant_emotion": "anxious",
+      "scripture_reference": "Philippians 4:6–7",
+      "scripture_text": null,
+      "scripture_verified": false,
+      "devotional_title": "Peace in the Waiting",
+      "devotional_script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+      "closing_prayer": "Lord, we bring you this week.",
+      "devotional_audio_path": null,
+      "devotional_duration_ms": null,
+      "is_active_prayer": false,
+      "is_answered": true,
+      "answered_at": "2026-10-23T12:00:00.000Z",
+      "answered_notes": "Thank you, Lord.",
+      "prayer_title": "Peace for the week",
+      "prayer_category": "INNER PEACE",
+      "prayer_summary": "Peace and steadiness for a heavy week."
+    },
+    "affirmations": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "morning",
+        "headline": "You are held",
+        "affirmation_text": "Begin the day knowing you are held.",
+        "is_delivered": false,
+        "is_favorite": true,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "afternoon",
+        "headline": "Rest is allowed",
+        "affirmation_text": "Pause and breathe.",
+        "is_delivered": false,
+        "is_favorite": false,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "evening",
+        "headline": "It is enough",
+        "affirmation_text": "You did what you could today.",
+        "is_delivered": false,
+        "is_favorite": false,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      }
+    ],
+    "expected": {
+      "entry": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "clientEntryId": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+        "createdAt": "2026-10-22T10:00:00.000Z",
+        "updatedAt": "2026-10-22T10:00:41.000Z",
+        "inputType": "audio",
+        "transcript": "I have been carrying a lot this week.",
+        "dominantEmotion": "anxious",
+        "status": "ready",
+        "isCrisis": false,
+        "scripture": {
+          "reference": "Philippians 4:6–7",
+          "text": null,
+          "translation": "BSB",
+          "verified": false
+        },
+        "devotional": {
+          "title": "Peace in the Waiting",
+          "script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+          "closingPrayer": "Lord, we bring you this week.",
+          "audioPath": null,
+          "durationMs": null
+        },
+        "prayer": {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "title": "Peace for the week",
+          "category": "INNER PEACE",
+          "summary": "Peace and steadiness for a heavy week.",
+          "scriptureReference": "Philippians 4:6–7",
+          "createdAt": "2026-10-22T10:00:00.000Z",
+          "isAnswered": true,
+          "answeredAt": "2026-10-23T12:00:00.000Z",
+          "answeredNote": "Thank you, Lord."
+        },
+        "failureCode": null,
+        "isLocalOnly": false
+      },
+      "affirmations": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "morning",
+          "headline": "You are held",
+          "text": "Begin the day knowing you are held.",
+          "isFavorite": true
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "afternoon",
+          "headline": "Rest is allowed",
+          "text": "Pause and breathe.",
+          "isFavorite": false
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "evening",
+          "headline": "It is enough",
+          "text": "You did what you could today.",
+          "isFavorite": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "unverified scripture never shows its text, even when the row holds some",
+    "row": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "user_id": "user_a",
+      "client_entry_id": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+      "created_at": "2026-10-22T10:00:00.000Z",
+      "updated_at": "2026-10-22T10:00:41.000Z",
+      "input_type": "audio",
+      "transcript": "I have been carrying a lot this week.",
+      "audio_path": "user_a/raw/3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b.m4a",
+      "processing_status": "ready",
+      "error_code": null,
+      "is_crisis": false,
+      "dominant_emotion": "anxious",
+      "scripture_reference": "Philippians 4:6–7",
+      "scripture_text": "words that were never confirmed",
+      "scripture_verified": false,
+      "devotional_title": "Peace in the Waiting",
+      "devotional_script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+      "closing_prayer": "Lord, we bring you this week.",
+      "devotional_audio_path": null,
+      "devotional_duration_ms": null,
+      "is_active_prayer": false,
+      "is_answered": false,
+      "answered_at": null,
+      "answered_notes": null,
+      "prayer_title": null,
+      "prayer_category": null,
+      "prayer_summary": null
+    },
+    "affirmations": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "morning",
+        "headline": "You are held",
+        "affirmation_text": "Begin the day knowing you are held.",
+        "is_delivered": false,
+        "is_favorite": true,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "afternoon",
+        "headline": "Rest is allowed",
+        "affirmation_text": "Pause and breathe.",
+        "is_delivered": false,
+        "is_favorite": false,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "evening",
+        "headline": "It is enough",
+        "affirmation_text": "You did what you could today.",
+        "is_delivered": false,
+        "is_favorite": false,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      }
+    ],
+    "expected": {
+      "entry": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "clientEntryId": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+        "createdAt": "2026-10-22T10:00:00.000Z",
+        "updatedAt": "2026-10-22T10:00:41.000Z",
+        "inputType": "audio",
+        "transcript": "I have been carrying a lot this week.",
+        "dominantEmotion": "anxious",
+        "status": "ready",
+        "isCrisis": false,
+        "scripture": {
+          "reference": "Philippians 4:6–7",
+          "text": null,
+          "translation": "BSB",
+          "verified": false
+        },
+        "devotional": {
+          "title": "Peace in the Waiting",
+          "script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+          "closingPrayer": "Lord, we bring you this week.",
+          "audioPath": null,
+          "durationMs": null
+        },
+        "prayer": null,
+        "failureCode": null,
+        "isLocalOnly": false
+      },
+      "affirmations": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "morning",
+          "headline": "You are held",
+          "text": "Begin the day knowing you are held.",
+          "isFavorite": true
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "afternoon",
+          "headline": "Rest is allowed",
+          "text": "Pause and breathe.",
+          "isFavorite": false
+        },
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000003",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "evening",
+          "headline": "It is enough",
+          "text": "You did what you could today.",
+          "isFavorite": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "values the app does not know are cleared, not passed on",
+    "row": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "user_id": "user_a",
+      "client_entry_id": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+      "created_at": "2026-10-22T10:00:00.000Z",
+      "updated_at": "2026-10-22T10:00:41.000Z",
+      "input_type": "voice",
+      "transcript": "I have been carrying a lot this week.",
+      "audio_path": "user_a/raw/3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b.m4a",
+      "processing_status": "ready",
+      "error_code": "SOMETHING_NEW",
+      "is_crisis": false,
+      "dominant_emotion": "overwhelmed",
+      "scripture_reference": "Philippians 4:6–7",
+      "scripture_text": null,
+      "scripture_verified": false,
+      "devotional_title": "Peace in the Waiting",
+      "devotional_script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+      "closing_prayer": "Lord, we bring you this week.",
+      "devotional_audio_path": null,
+      "devotional_duration_ms": null,
+      "is_active_prayer": true,
+      "is_answered": false,
+      "answered_at": null,
+      "answered_notes": null,
+      "prayer_title": "T",
+      "prayer_category": "MONEY",
+      "prayer_summary": "S"
+    },
+    "affirmations": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+        "user_id": "user_a",
+        "entry_id": "11111111-1111-4111-8111-111111111111",
+        "time_slot": "night",
+        "headline": "You are held",
+        "affirmation_text": "Begin the day knowing you are held.",
+        "is_delivered": false,
+        "is_favorite": true,
+        "scheduled_for": null,
+        "created_at": "2026-10-22T10:00:00.000Z"
+      }
+    ],
+    "expected": {
+      "entry": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "clientEntryId": "3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b",
+        "createdAt": "2026-10-22T10:00:00.000Z",
+        "updatedAt": "2026-10-22T10:00:41.000Z",
+        "inputType": "text",
+        "transcript": "I have been carrying a lot this week.",
+        "dominantEmotion": "overwhelmed",
+        "status": "ready",
+        "isCrisis": false,
+        "scripture": {
+          "reference": "Philippians 4:6–7",
+          "text": null,
+          "translation": "BSB",
+          "verified": false
+        },
+        "devotional": {
+          "title": "Peace in the Waiting",
+          "script": "First paragraph of the devotional.\n\nSecond paragraph of the devotional.",
+          "closingPrayer": "Lord, we bring you this week.",
+          "audioPath": null,
+          "durationMs": null
+        },
+        "prayer": {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "title": "T",
+          "category": null,
+          "summary": "S",
+          "scriptureReference": "Philippians 4:6–7",
+          "createdAt": "2026-10-22T10:00:00.000Z",
+          "isAnswered": false,
+          "answeredAt": null,
+          "answeredNote": null
+        },
+        "failureCode": null,
+        "isLocalOnly": false
+      },
+      "affirmations": [
+        {
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+          "entryId": "11111111-1111-4111-8111-111111111111",
+          "slot": "morning",
+          "headline": "You are held",
+          "text": "Begin the day knowing you are held.",
+          "isFavorite": true
+        }
+      ]
+    }
+  }
+]

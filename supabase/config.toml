@@ -1,0 +1,12 @@
+# Supabase CLI settings for deploying the Edge Functions of the hosted project. There is no local stack on this machine
+# (no Docker), so this file holds only what `supabase functions deploy` reads.
+project_id = "gracehush"
+
+[functions.process-entry]
+# The platform's JWT check only accepts tokens signed by Supabase. The app sends Clerk's session token, so the check is
+# off and _shared/auth.ts verifies the token against Clerk's keys on every request instead.
+verify_jwt = false
+
+[functions.confirm-scripture]
+# The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false

@@ -1,0 +1,129 @@
+{
+  "translation": {
+    "id": "BSB"
+  },
+  "book": {
+    "id": "PSA"
+  },
+  "numberOfVerses": 5,
+  "chapter": {
+    "number": 127,
+    "content": [
+      {
+        "type": "verse",
+        "number": 1,
+        "text": "Unless the LORD builds the house,\nits builders labor in vain;\nunless the LORD protects the city,\nits watchmen stand guard in vain.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 33,
+            "level": 1
+          },
+          {
+            "start": 34,
+            "end": 61,
+            "level": 2
+          },
+          {
+            "start": 62,
+            "end": 96,
+            "level": 1
+          },
+          {
+            "start": 97,
+            "end": 130,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 2,
+        "text": "In vain you rise early\nand stay up late,\ntoiling for bread to eat—\nfor He gives sleep to His beloved.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 22,
+            "level": 1
+          },
+          {
+            "start": 23,
+            "end": 40,
+            "level": 2
+          },
+          {
+            "start": 41,
+            "end": 66,
+            "level": 1
+          },
+          {
+            "start": 67,
+            "end": 101,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 3,
+        "text": "Children are indeed a heritage from the LORD,\nand the fruit of the womb is His reward.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 45,
+            "level": 1
+          },
+          {
+            "start": 46,
+            "end": 86,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 4,
+        "text": "Like arrows in the hand of a warrior,\nso are children born in one’s youth.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 37,
+            "level": 1
+          },
+          {
+            "start": 38,
+            "end": 74,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 5,
+        "text": "Blessed is the man\nwhose quiver is full of them.\nHe will not be put to shame\nwhen he confronts the enemies at the gate.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 18,
+            "level": 1
+          },
+          {
+            "start": 19,
+            "end": 48,
+            "level": 2
+          },
+          {
+            "start": 49,
+            "end": 76,
+            "level": 1
+          },
+          {
+            "start": 77,
+            "end": 119,
+            "level": 2
+          }
+        ]
+      }
+    ]
+  }
+}

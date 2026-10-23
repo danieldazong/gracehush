@@ -189,6 +189,21 @@ export interface ProcessEntryError {
 // A crisis entry comes back with `affirmations: []`. Steps 19, 21 and 22 add fields (the 402 body, signed audio URL).
 export type ProcessEntryResponse = { entry: JournalEntry; affirmations: Affirmation[] };
 
+// confirm-scripture (step 20): asked again for the passage of a reflection whose text could not be read when it was made.
+// The answer is the entry's passage as it now stands: verified with its text, still unverified, or null when the entry has
+// none (a crisis entry, one still being prepared, or a reference that turned out not to exist). Step 25 calls it.
+export type ConfirmScriptureRequest = { entryId: string };
+export type ConfirmScriptureResponse = { scripture: Scripture | null };
+export type ConfirmScriptureErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "NOT_FOUND"
+  | "METHOD_NOT_ALLOWED"
+  | "INTERNAL";
+export interface ConfirmScriptureError {
+  error: { code: ConfirmScriptureErrorCode; message: string; requestId: string };
+}
+
 // New Entry (step 10). Steps 23 and 25 swap the mock recorder and the mock submit without changing these.
 export type RecorderStatus = { isRecording: boolean; durationMs: number; metering: number }; // metering 0..1
 export type RecordingResult = { uri: string; durationMs: number; mimeType: AudioMimeType };

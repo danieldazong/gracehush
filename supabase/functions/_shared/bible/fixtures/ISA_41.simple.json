@@ -1,0 +1,117 @@
+{
+  "translation": {
+    "id": "BSB"
+  },
+  "book": {
+    "id": "ISA"
+  },
+  "numberOfVerses": 29,
+  "chapter": {
+    "number": 41,
+    "content": [
+      {
+        "type": "verse",
+        "number": 8,
+        "text": "“But you, O Israel, My servant,\nJacob, whom I have chosen,\ndescendant of Abraham My friend—",
+        "poem": [
+          {
+            "start": 0,
+            "end": 31,
+            "level": 1
+          },
+          {
+            "start": 32,
+            "end": 58,
+            "level": 2
+          },
+          {
+            "start": 59,
+            "end": 91,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 9,
+        "text": "I brought you from the ends of the earth\nand called you from its farthest corners.\nI said, ‘You are My servant.’\nI have chosen and not rejected you.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 40,
+            "level": 1
+          },
+          {
+            "start": 41,
+            "end": 82,
+            "level": 2
+          },
+          {
+            "start": 83,
+            "end": 112,
+            "level": 1
+          },
+          {
+            "start": 113,
+            "end": 148,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 10,
+        "text": "Do not fear, for I am with you;\ndo not be afraid, for I am your God.\nI will strengthen you; I will surely help you;\nI will uphold you with My righteous right hand.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 31,
+            "level": 1
+          },
+          {
+            "start": 32,
+            "end": 68,
+            "level": 2
+          },
+          {
+            "start": 69,
+            "end": 115,
+            "level": 1
+          },
+          {
+            "start": 116,
+            "end": 163,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 11,
+        "text": "Behold, all who rage against you\nwill be ashamed and disgraced;\nthose who contend with you\nwill be reduced to nothing and will perish.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 32,
+            "level": 1
+          },
+          {
+            "start": 33,
+            "end": 63,
+            "level": 2
+          },
+          {
+            "start": 64,
+            "end": 90,
+            "level": 1
+          },
+          {
+            "start": 91,
+            "end": 134,
+            "level": 2
+          }
+        ]
+      }
+    ]
+  }
+}

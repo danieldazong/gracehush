@@ -1,0 +1,72 @@
+import type { AudioMimeType, EmotionKey, PrayerCategory, TimeSlot } from "./contracts.ts";
+
+// The text and recording limits mirror src/constants/app.ts (MAX_TEXT_LENGTH, MIN_TEXT_LENGTH, MIN_RECORDING_MS,
+// MAX_RECORDING_MS). Keep them in sync.
+export const MAX_TEXT_LENGTH = 5_000;
+export const MIN_TEXT_LENGTH = 10;
+export const MIN_RECORDING_MS = 3_000;
+export const MAX_RECORDING_MS = 300_000;
+export const RECORDING_GRACE_MS = 2_000;
+
+export const MAX_BODY_BYTES = 64 * 1024;
+
+// Gemini takes 20 MB for the whole request, and base64 makes a file a third bigger: 15 MiB of audio is exactly 20 MiB
+// of base64 before the prompt is added. 12 MiB leaves room. Five minutes of AAC is well under 6 MiB.
+export const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
+export const MAX_TRANSCRIPT_LENGTH = 20_000;
+
+// The most entries one user may start in the window below. Counted from journal_entries, so it survives restarts.
+export const RATE_LIMIT_MAX = 10;
+export const RATE_LIMIT_WINDOW_MS = 10 * 60_000;
+
+// The model calls of one request must end this long after the request started. The platform stops a function at 150 s
+// (free plan), and step 22's speech needs about 40 s of that.
+export const GEMINI_DEADLINE_MS = 90_000;
+
+// A row that has been "processing" for longer than this belongs to a request that died, and may be claimed again.
+// Longer than the platform's 150 s wall clock, so a request that is still running is never taken over.
+export const CLAIM_LEASE_MS = 3 * 60_000;
+
+export const AUDIO_MIME_TYPES = [
+  "audio/mp4",
+  "audio/m4a",
+  "audio/x-m4a",
+  "audio/aac",
+] as const satisfies readonly AudioMimeType[];
+
+// Gemini's audio page lists audio/m4a for M4A and not audio/mp4 or audio/x-m4a, so that is what is always sent.
+export const GEMINI_AUDIO_MIME = "audio/m4a";
+
+export const EMOTIONS = [
+  "anxious",
+  "weary",
+  "grateful",
+  "grieving",
+  "hopeful",
+] as const satisfies readonly EmotionKey[];
+
+export const PRAYER_CATEGORIES = [
+  "FAMILY & HEALING",
+  "VOCATION & CALLING",
+  "INNER PEACE",
+  "RELATIONSHIPS",
+  "PROVISION",
+  "GUIDANCE",
+] as const satisfies readonly PrayerCategory[];
+
+export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const satisfies readonly TimeSlot[];
+
+// What the model is allowed to write. Out of range counts as invalid (nothing is truncated).
+export const LIMITS = {
+  title: { maxChars: 60 },
+  devotional: { minWords: 80, maxWords: 260 },
+  closingPrayer: { minWords: 10, maxWords: 100 },
+  affirmationHeadline: { maxWords: 8, maxChars: 80 },
+  affirmationText: { maxWords: 30, maxChars: 300 },
+  prayerTitle: { maxChars: 60 },
+  prayerSummary: { maxChars: 120 },
+} as const;
+
+// The largest chapter and verse numbers in the Bible (Psalm 150, Psalm 119:176). The model's passage is checked against
+// the real book table by the Bible code (_shared/bible); these only keep an absurd number out of the log and the prompt.
+export const SCRIPTURE_NUMBER_LIMITS = { chapter: 150, verse: 176 } as const;

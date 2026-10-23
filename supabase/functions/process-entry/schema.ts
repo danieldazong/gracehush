@@ -1,0 +1,98 @@
+import { USFM_BOOK_IDS } from "../_shared/bible/books.ts";
+import { EMOTIONS, PRAYER_CATEGORIES, TIME_SLOTS } from "./constants.ts";
+
+// The response schema for the Gemini call (response_format.schema). It uses only what Google's structured output
+// page lists as supported: types, a "null" in a type array for a nullable property, enum, required, items and
+// maxItems. minLength and maxLength are ignored by the server, so every limit is checked again in output.ts.
+// A nullable enum is not on that list, so prayer.category uses the string "NONE" instead of null.
+
+type JsonSchema = Record<string, unknown>;
+
+const text = (description: string): JsonSchema => ({ type: "string", description });
+const nullableText = (description: string): JsonSchema => ({ type: ["string", "null"], description });
+
+// Where a passage is: the book as a USFM id from the one list in _shared/bible/books.ts (so the enum and the code that
+// checks it cannot disagree), the chapter and the verses. Used inside the reflection and alone for a replacement.
+const passageProperties = (): Record<string, JsonSchema> => ({
+  book_id: {
+    type: "string",
+    enum: [...USFM_BOOK_IDS],
+    description: "The USFM id of the book, such as PHP for Philippians, PSA for Psalms or 1CO for 1 Corinthians.",
+  },
+  chapter: { type: "integer" },
+  verse_start: { type: "integer" },
+  verse_end: { type: "integer", description: "Equal to verse_start for a single verse." },
+});
+
+const PASSAGE_REQUIRED = ["book_id", "chapter", "verse_start", "verse_end"];
+
+// The small schema for asking for a different passage (the reply to a passage that does not exist).
+export function buildScriptureSchema(): JsonSchema {
+  return { type: "object", properties: passageProperties(), required: PASSAGE_REQUIRED };
+}
+
+export function buildSchema(kind: "text" | "audio"): JsonSchema {
+  // Property order is the order the model writes them in: the transcript comes first for audio.
+  const audioOnly: Record<string, JsonSchema> = kind === "audio"
+    ? {
+      no_speech: { type: "boolean", description: "True when the audio has no intelligible speech." },
+      transcript: text("The exact words that were spoken."),
+    }
+    : {};
+
+  return {
+    type: "object",
+    properties: {
+      ...audioOnly,
+      is_crisis: {
+        type: "boolean",
+        description: "True when the entry suggests suicide or self-harm risk, intent to harm others, or danger now.",
+      },
+      dominant_emotion: { type: "string", enum: [...EMOTIONS], description: "The core feeling in the entry." },
+      reflection_title: nullableText("A title of at most 60 characters. Null when is_crisis is true."),
+      scripture: {
+        type: ["object", "null"],
+        description: "Where the chosen Berean Standard Bible passage is. Null when is_crisis is true.",
+        properties: passageProperties(),
+        required: PASSAGE_REQUIRED,
+      },
+      devotional_text: nullableText("About 140 to 200 words of plain text. Null when is_crisis is true."),
+      closing_prayer: nullableText("About 30 to 60 words, without Amen. Null when is_crisis is true."),
+      prayer: {
+        type: "object",
+        properties: {
+          is_active_prayer: { type: "boolean" },
+          title: text("At most 60 characters, or an empty string."),
+          summary: text("At most 120 characters, or an empty string."),
+          category: { type: "string", enum: [...PRAYER_CATEGORIES, "NONE"] },
+        },
+        required: ["is_active_prayer", "title", "summary", "category"],
+      },
+      affirmations: {
+        type: "array",
+        maxItems: 3,
+        description: "One per time of day. Empty when is_crisis is true.",
+        items: {
+          type: "object",
+          properties: {
+            time_slot: { type: "string", enum: [...TIME_SLOTS] },
+            headline: text("At most 8 words."),
+            text: text("At most 30 words."),
+          },
+          required: ["time_slot", "headline", "text"],
+        },
+      },
+    },
+    required: [
+      ...(kind === "audio" ? ["no_speech", "transcript"] : []),
+      "is_crisis",
+      "dominant_emotion",
+      "reflection_title",
+      "scripture",
+      "devotional_text",
+      "closing_prayer",
+      "prayer",
+      "affirmations",
+    ],
+  };
+}
