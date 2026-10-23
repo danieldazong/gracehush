@@ -31,19 +31,12 @@ export function buildScriptureSchema(): JsonSchema {
   return { type: "object", properties: passageProperties(), required: PASSAGE_REQUIRED };
 }
 
-export function buildSchema(kind: "text" | "audio"): JsonSchema {
-  // Property order is the order the model writes them in: the transcript comes first for audio.
-  const audioOnly: Record<string, JsonSchema> = kind === "audio"
-    ? {
-      no_speech: { type: "boolean", description: "True when the audio has no intelligible speech." },
-      transcript: text("The exact words that were spoken."),
-    }
-    : {};
-
+// The reflection's schema. The call only ever sees text (the crisis screening has already transcribed a recording and
+// judged it), so there is no transcript and no no_speech here. is_crisis stays: it is the last of the three layers.
+export function buildSchema(): JsonSchema {
   return {
     type: "object",
     properties: {
-      ...audioOnly,
       is_crisis: {
         type: "boolean",
         description: "True when the entry suggests suicide or self-harm risk, intent to harm others, or danger now.",
@@ -84,7 +77,6 @@ export function buildSchema(kind: "text" | "audio"): JsonSchema {
       },
     },
     required: [
-      ...(kind === "audio" ? ["no_speech", "transcript"] : []),
       "is_crisis",
       "dominant_emotion",
       "reflection_title",

@@ -258,35 +258,47 @@ export async function saveReadyEntry(
 }
 
 // A crisis entry keeps only is_crisis and what the person said. Every devotional, scripture and prayer column is
-// cleared in the same statement, which is what the table's crisis checks require, and its affirmations are removed.
+// cleared in the same statement, which is what the table's crisis checks require, and its affirmations are removed
+// (a retry of an entry that was once saved as a reflection starts from none). Nothing about why it is a crisis is kept:
+// no category, no source, no phrase.
+//
+// If any part of this fails, the whole thing is a plain 500 with the reason crisis_save_failed and the caller never
+// falls back to a devotional: the person can send the same entry again.
+//
+// TODO(22): a crisis entry never counts toward the free-tier limit, so the weekly count must skip is_crisis rows.
+// TODO(28): never schedule affirmations for a crisis entry (it has none, and the phone must not make any up).
 export async function saveCrisisEntry(
   admin: SupabaseClient,
   userId: string,
   entryId: string,
   transcript: string | null,
 ): Promise<EntryRow> {
-  await replaceAffirmations(admin, userId, entryId, []);
-  const { data, error } = await admin.from("journal_entries").update({
-    is_crisis: true,
-    transcript,
-    dominant_emotion: null,
-    devotional_title: null,
-    devotional_script: null,
-    closing_prayer: null,
-    devotional_audio_path: null,
-    devotional_duration_ms: null,
-    scripture_reference: null,
-    scripture_text: null,
-    scripture_verified: false,
-    is_active_prayer: false,
-    prayer_title: null,
-    prayer_category: null,
-    prayer_summary: null,
-    processing_status: "ready",
-    error_code: null,
-  }).eq("id", entryId).eq("user_id", userId).select();
-  if (error) throw dbFailure("save_crisis", error);
-  const rows = data as EntryRow[];
-  if (rows.length !== 1) throw new AppError("INTERNAL", "db:save_crisis:no_row");
-  return rows[0];
+  try {
+    await replaceAffirmations(admin, userId, entryId, []);
+    const { data, error } = await admin.from("journal_entries").update({
+      is_crisis: true,
+      transcript,
+      dominant_emotion: null,
+      devotional_title: null,
+      devotional_script: null,
+      closing_prayer: null,
+      devotional_audio_path: null,
+      devotional_duration_ms: null,
+      scripture_reference: null,
+      scripture_text: null,
+      scripture_verified: false,
+      is_active_prayer: false,
+      prayer_title: null,
+      prayer_category: null,
+      prayer_summary: null,
+      processing_status: "ready",
+      error_code: null,
+    }).eq("id", entryId).eq("user_id", userId).select();
+    if (error) throw dbFailure("save_crisis", error);
+    const rows = data as EntryRow[];
+    if (rows.length !== 1) throw new AppError("INTERNAL", "db:save_crisis:no_row");
+    return rows[0];
+  } catch {
+    throw new AppError("INTERNAL", "crisis_save_failed");
+  }
 }

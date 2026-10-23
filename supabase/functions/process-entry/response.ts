@@ -30,7 +30,6 @@ const ERROR_CODES: readonly StoredErrorCode[] = [
   "TOO_SHORT",
   "AUDIO_NOT_FOUND",
   "NO_SPEECH",
-  "CONTENT_BLOCKED",
   "RATE_LIMITED",
   "INTERNAL",
   "AI_UNAVAILABLE",

@@ -2,7 +2,7 @@ import { hydrateScripture } from "../_shared/bible/hydrate.ts";
 import type { ScriptureRef } from "../_shared/bible/reference.ts";
 import { AppError } from "../_shared/errors.ts";
 import type { ScriptureOutcome } from "../_shared/log.ts";
-import { type GeminiStats, generate } from "./gemini.ts";
+import { GeminiBlocked, type GeminiStats, generate } from "./gemini.ts";
 import { parseScripturePick } from "./output.ts";
 import { buildReplacementInstruction, buildReplacementTurn } from "./prompt.ts";
 import { buildScriptureSchema } from "./schema.ts";
@@ -80,7 +80,9 @@ export async function resolveScripture(args: ResolveArgs): Promise<ResolvedScrip
       maxOutputTokens: REPLACEMENT_MAX_OUTPUT_TOKENS,
     }, args.stats);
   } catch (error) {
-    if (error instanceof AppError) return { outcome: "dropped", reference: null, text: null, verified: false, bibleMs };
+    if (error instanceof AppError || error instanceof GeminiBlocked) {
+      return { outcome: "dropped", reference: null, text: null, verified: false, bibleMs };
+    }
     throw error;
   }
 

@@ -10,11 +10,22 @@ import { OutputInvalid } from "./output.ts";
 
 export const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
 
-// Two attempts at most for the reflection, shared by transport failures and by a reply that fails output.ts, plus one
-// attempt for a replacement passage (scripture.ts), and one overall deadline for all of them: the platform stops a
-// function at 150 s, and step 22's speech needs room after these calls.
-export const MAX_ATTEMPTS = 2;
-export const timing = { attemptTimeoutMs: 45_000, retryBackoffMs: 1_500, minAttemptMs: 8_000 };
+// Four attempts at most for a call (the crisis screening's and the reflection's; a replacement passage makes one, see
+// scripture.ts), and one overall deadline for all of them: the platform stops a function at 150 s, and step 22's speech
+// needs room after these calls. A service that is busy, down or slow is tried again after a pause that doubles each time,
+// about 2, 4 and 8 s with a little jitter, which is what Google's troubleshooting page asks for 429 and 5xx answers
+// (ai.google.dev/gemini-api/docs/troubleshooting, read on 2026-10-23). A reply that fails output.ts comes from a service
+// that works, so it is asked for once more, at once, and no further.
+export const MAX_ATTEMPTS = 4;
+export const MAX_INVALID_REPLIES = 2;
+export const timing = { attemptTimeoutMs: 45_000, retryBackoffMs: 2_000, minAttemptMs: 8_000 };
+
+// The pause before the retry that follows the `failures`th busy failure (1, 2, 3, ...): retryBackoffMs doubled each
+// time, up to a quarter either way, so that requests that failed together do not all come back together. `random` is a
+// number in [0, 1).
+export function backoffMs(failures: number, random: number): number {
+  return Math.round(timing.retryBackoffMs * 2 ** (failures - 1) * (0.75 + random * 0.5));
+}
 
 // The reply (thinking included) never needs more than this; it also caps what one runaway reply can cost.
 const MAX_OUTPUT_TOKENS = 8_192;
@@ -25,11 +36,17 @@ export type GeminiInput =
 
 export type GeminiUsage = { input: number; output: number; thought: number };
 
-export type GeminiStats = { attempts: number; ms: number; usage: GeminiUsage };
+// `fallbackAttempts` counts the attempts that went to the fallback model (they are also counted in `attempts`).
+export type GeminiStats = { attempts: number; fallbackAttempts: number; ms: number; usage: GeminiUsage };
 
 export function newStats(): GeminiStats {
-  return { attempts: 0, ms: 0, usage: { input: 0, output: 0, thought: 0 } };
+  return { attempts: 0, fallbackAttempts: 0, ms: 0, usage: { input: 0, output: 0, thought: 0 } };
 }
+
+// One entry of a request's safety_settings: a harm category and the threshold at which it blocks (ai.google.dev/
+// gemini-api/docs/safety-settings, read on 2026-10-23). The API accepts exactly the five categories the crisis screening
+// lists (screen.ts) and refuses any other value with HTTP 400 invalid_request.
+export type SafetySetting = { type: string; threshold: string };
 
 export function buildRequestBody(args: {
   model: string;
@@ -38,6 +55,7 @@ export function buildRequestBody(args: {
   input: GeminiInput;
   schema: Record<string, unknown>;
   maxOutputTokens?: number;
+  safetySettings?: SafetySetting[];
 }): Record<string, unknown> {
   const { input } = args;
   return {
@@ -53,6 +71,8 @@ export function buildRequestBody(args: {
       thinking_level: args.thinkingLevel,
       max_output_tokens: args.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
     },
+    // Only a request that asks for it carries safety settings; the others keep Google's defaults.
+    ...(args.safetySettings ? { safety_settings: args.safetySettings } : {}),
     // The default (true) keeps the request and the reply on Google's servers for up to 55 days. A private prayer is
     // not stored.
     store: false,
@@ -60,6 +80,18 @@ export function buildRequestBody(args: {
 }
 
 type Failure = "blocked" | "transient" | "fatal";
+
+// A safety filter refused the request or the reply. It is not an error to show anyone: the crisis screening and the
+// generation stage both treat it as a possible crisis (a person in distress is exactly who trips these filters), and the
+// passage lookup treats it as "no passage". `reason` is a log-safe category.
+export class GeminiBlocked extends Error {
+  readonly reason: string;
+  constructor(reason: string) {
+    super(reason);
+    this.name = "GeminiBlocked";
+    this.reason = reason;
+  }
+}
 
 export class GeminiCallError extends Error {
   readonly failure: Failure;
@@ -194,8 +226,8 @@ async function callOnce(apiKey: string, body: string, timeoutMs: number) {
       });
       raw = await response.text();
     } catch {
-      // A dropped connection and our own timeout both land here.
-      throw new GeminiCallError("transient", "gemini_network");
+      // Our own timeout, or a dropped connection: the log tells them apart.
+      throw new GeminiCallError("transient", controller.signal.aborted ? "gemini_timeout" : "gemini_network");
     }
     let json: unknown = null;
     try {
@@ -225,45 +257,74 @@ export type GenerateArgs<T> = {
   maxAttempts?: number;
   // A lower cap than the reflection's, for a request whose answer is a few numbers.
   maxOutputTokens?: number;
+  // Replaces timing.attemptTimeoutMs for this call (the crisis screening ends its attempts sooner).
+  attemptTimeoutMs?: number;
+  safetySettings?: SafetySetting[];
+  // GEMINI_FALLBACK_MODEL, when it is set: every second attempt goes to it. Under heavy demand one model answers 503s
+  // while another answers (seen on the free tier on 2026-10-23), so a retry on a second model gets through more often.
+  fallbackModel?: string;
 };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Calls Gemini until `validate` accepts a reply, at most MAX_ATTEMPTS times (or `maxAttempts`). `stats` is filled in as it
-// goes, so the log line has the attempt count and the tokens even when this throws; a second call with the same `stats`
-// adds to the first one's counts.
+// Calls Gemini until `validate` accepts a reply, at most MAX_ATTEMPTS times (or `maxAttempts`) and never past
+// `deadlineAt`. `stats` is filled in as it goes, so the log line has the attempt count and the tokens even when this
+// throws; a second call with the same `stats` adds to the first one's counts. A request a safety filter blocks throws
+// GeminiBlocked at once and is never retried, a request Google refuses (a 4xx that is not a block) is not retried, and
+// every failure ends as AI_UNAVAILABLE with the reason of the last attempt.
 export async function generate<T>(args: GenerateArgs<T>, stats: GeminiStats): Promise<T> {
+  const fallbackModel = args.fallbackModel || null;
   const body = JSON.stringify(buildRequestBody(args));
+  // Built only when an attempt needs it: a recording's body can be 16 MB.
+  let fallbackBody: string | undefined;
   const started = Date.now();
   const maxAttempts = args.maxAttempts ?? MAX_ATTEMPTS;
   let last = new AppError("AI_UNAVAILABLE", "gemini_budget");
+  let busyFailures = 0;
+  let invalidReplies = 0;
 
   try {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const remaining = args.deadlineAt - Date.now();
       if (remaining < timing.minAttemptMs) break;
+      const model = fallbackModel !== null && attempt % 2 === 0 ? fallbackModel : args.model;
+      // A fallback that names the main model changes nothing, and is not counted.
+      const onFallback = model !== args.model;
       stats.attempts += 1;
+      if (onFallback) stats.fallbackAttempts += 1;
 
+      let pause = 0;
       try {
-        const result = await callOnce(args.apiKey, body, Math.min(timing.attemptTimeoutMs, remaining));
+        const result = await callOnce(
+          args.apiKey,
+          onFallback ? (fallbackBody ??= JSON.stringify(buildRequestBody({ ...args, model }))) : body,
+          Math.min(args.attemptTimeoutMs ?? timing.attemptTimeoutMs, remaining),
+        );
         stats.usage.input += result.usage.input;
         stats.usage.output += result.usage.output;
         stats.usage.thought += result.usage.thought;
         return args.validate(result.text);
       } catch (error) {
         if (error instanceof GeminiCallError) {
-          if (error.failure === "blocked") throw new AppError("CONTENT_BLOCKED", error.reason);
+          if (error.failure === "blocked") throw new GeminiBlocked(error.reason);
           last = new AppError("AI_UNAVAILABLE", error.reason);
           if (error.failure === "fatal") break;
+          busyFailures += 1;
+          pause = backoffMs(busyFailures, Math.random());
         } else if (error instanceof OutputInvalid) {
           last = new AppError("AI_UNAVAILABLE", `output_invalid:${error.reason}`);
+          invalidReplies += 1;
+          if (invalidReplies >= MAX_INVALID_REPLIES) break;
         } else {
           throw error;
         }
       }
-      if (attempt < maxAttempts) await sleep(timing.retryBackoffMs);
+      if (attempt === maxAttempts) break;
+      // A pause that would leave too little time for another attempt ends the call now, instead of waiting for nothing.
+      if (args.deadlineAt - Date.now() - pause < timing.minAttemptMs) break;
+      if (pause > 0) await sleep(pause);
     }
     throw last;
   } finally {

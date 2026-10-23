@@ -1,13 +1,6 @@
 import { isUsfmBookId } from "../_shared/bible/books.ts";
 import type { ScriptureRef } from "../_shared/bible/reference.ts";
-import {
-  EMOTIONS,
-  LIMITS,
-  MAX_TRANSCRIPT_LENGTH,
-  PRAYER_CATEGORIES,
-  SCRIPTURE_NUMBER_LIMITS,
-  TIME_SLOTS,
-} from "./constants.ts";
+import { EMOTIONS, LIMITS, PRAYER_CATEGORIES, SCRIPTURE_NUMBER_LIMITS, TIME_SLOTS } from "./constants.ts";
 import type { EmotionKey, PrayerCategory, TimeSlot } from "./contracts.ts";
 
 // The schema guarantees the shape, not the meaning. This checks the model's JSON again, cleans the text the person will
@@ -30,8 +23,6 @@ function fail(reason: string): never {
 
 export type ReadyReflection = {
   kind: "ready";
-  // What the model heard, for audio entries. A written entry keeps the person's own text instead.
-  transcript: string | null;
   emotion: EmotionKey;
   title: string;
   // Where the passage is. Whether it exists in the Berean Standard Bible is decided afterwards (scripture.ts), not here.
@@ -42,10 +33,9 @@ export type ReadyReflection = {
   affirmations: { slot: TimeSlot; headline: string; text: string }[];
 };
 
-export type Reflection =
-  | { kind: "no_speech" }
-  | { kind: "crisis"; transcript: string | null }
-  | ReadyReflection;
+// The model's own is_crisis flag is the last of the three layers (the crisis screening is the first two). The words of a
+// crisis entry are the screening's, so the flag carries nothing else.
+export type Reflection = { kind: "crisis" } | ReadyReflection;
 
 export function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -167,8 +157,8 @@ function readAffirmations(value: unknown): ReadyReflection["affirmations"] {
   return TIME_SLOTS.map((slot) => bySlot.get(slot)!);
 }
 
-// `text` is the model's reply. `kind` is the kind of entry it answered.
-export function parseReflection(text: string, kind: "text" | "audio"): Reflection {
+// `text` is the model's reply.
+export function parseReflection(text: string): Reflection {
   let data: unknown;
   try {
     data = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -178,19 +168,8 @@ export function parseReflection(text: string, kind: "text" | "audio"): Reflectio
   if (!isRecord(data)) fail("shape");
   if (typeof data.is_crisis !== "boolean") fail("is_crisis");
 
-  let transcript: string | null = null;
-  let noSpeech = false;
-  if (kind === "audio") {
-    if (typeof data.no_speech !== "boolean" || typeof data.transcript !== "string") fail("audio_fields");
-    if (data.transcript.length > MAX_TRANSCRIPT_LENGTH) fail("transcript_long");
-    noSpeech = data.no_speech;
-    transcript = data.transcript.trim() || null;
-  }
-
-  // Crisis wins over everything else the model said, and over a contradicting no_speech.
-  if (data.is_crisis) return { kind: "crisis", transcript };
-  if (noSpeech) return { kind: "no_speech" };
-  if (kind === "audio" && transcript === null) fail("transcript_empty");
+  // Crisis wins over everything else the model said.
+  if (data.is_crisis) return { kind: "crisis" };
 
   const emotion = (EMOTIONS as readonly string[]).find((item) => item === data.dominant_emotion) as
     | EmotionKey
@@ -219,7 +198,6 @@ export function parseReflection(text: string, kind: "text" | "audio"): Reflectio
 
   return {
     kind: "ready",
-    transcript,
     emotion,
     title,
     scripture,

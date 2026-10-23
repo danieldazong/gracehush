@@ -197,6 +197,7 @@ export async function handle(req: Request): Promise<Response> {
       geminiMs: 0,
       totalMs: Date.now() - context.startedAt,
       attempts: 0,
+      fallbackAttempts: 0,
       model: null,
       promptVersion: null,
       tokensIn: null,
@@ -204,6 +205,10 @@ export async function handle(req: Request): Promise<Response> {
       tokensThought: null,
       scripture: context.scripture,
       bibleMs: context.bibleMs,
+      screen: null,
+      screenMs: 0,
+      screenAttempts: 0,
+      crisisSource: null,
     };
     writeLog(line);
   }

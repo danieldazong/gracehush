@@ -111,8 +111,16 @@ export type World = {
   affirmations: Row[];
   storage: Map<string, Uint8Array>;
   requests: Recorded[];
+  // The reflection's requests (and a replacement passage's) and their replies. The crisis screening's requests are kept
+  // apart, so a test can say how many of each were made; a screening request is told apart by the `risk` in its schema.
   geminiCalls: Recorded[];
   geminiQueue: GeminiReply[];
+  // When this is empty a screening request is answered "clear" (see defaultScreenReply), so a test only queues what it
+  // is about.
+  screenCalls: Recorded[];
+  screenQueue: GeminiReply[];
+  // Every model request in the order it was made: "screening" or "reflection" (a replacement passage is a reflection).
+  callOrder: ("screening" | "reflection")[];
   bible: Map<string, BibleReply>;
   bibleCalls: Recorded[];
   logs: string[];
@@ -337,6 +345,19 @@ export function geminiError(
   return { kind: "json", status, body };
 }
 
+// The crisis screening's request is the only one whose schema has a `risk`.
+function isScreeningRequest(json: unknown): boolean {
+  const body = json as { response_format?: { schema?: { properties?: Record<string, unknown> } } } | null;
+  const properties = body?.response_format?.schema?.properties;
+  return properties !== undefined && "risk" in properties;
+}
+
+// What the screening answers when a test has not queued a reply: clear. A recording is "heard" as SPOKEN.
+function defaultScreenReply(json: unknown): GeminiReply {
+  const audio = Array.isArray((json as { input?: unknown } | null)?.input);
+  return geminiOk(screenOutput(audio ? { transcript: SPOKEN } : {}));
+}
+
 // The real chapter from _shared/bible/fixtures, or a 404 when there is none (the API answers 404 for a chapter it lacks).
 function bibleFixture(key: string): BibleReply {
   try {
@@ -368,6 +389,9 @@ export function installWorld(): World {
     requests: [],
     geminiCalls: [],
     geminiQueue: [],
+    screenCalls: [],
+    screenQueue: [],
+    callOrder: [],
     bible: new Map(),
     bibleCalls: [],
     logs: [],
@@ -432,8 +456,11 @@ export function installWorld(): World {
     if (url.origin === ISSUER) return jsonResponse(200, { keys: [publicJwk] });
 
     if (url.host === GEMINI_HOST) {
-      world.geminiCalls.push(recorded);
-      const reply = world.geminiQueue.shift();
+      const screening = isScreeningRequest(json);
+      (screening ? world.screenCalls : world.geminiCalls).push(recorded);
+      world.callOrder.push(screening ? "screening" : "reflection");
+      const reply = (screening ? world.screenQueue : world.geminiQueue).shift() ??
+        (screening ? defaultScreenReply(json) : undefined);
       if (!reply) throw new Error("the test queued no Gemini reply");
       if (reply.kind === "network") throw new TypeError("network down");
       if (reply.kind === "hang") {
@@ -515,13 +542,18 @@ export function readyOutput(overrides: Row = {}): Row {
   };
 }
 
-export function audioReadyOutput(overrides: Row = {}): Row {
-  return { no_speech: false, transcript: "I have been carrying a lot this week.", ...readyOutput(), ...overrides };
+// What the fake recording "says" when a test does not queue a screening reply of its own.
+export const SPOKEN = "I have been carrying a lot this week.";
+
+// The crisis screening's reply (_shared/safety/screen.ts): by default a clear written entry. A recording's reply has
+// `transcript` set.
+export function screenOutput(overrides: Row = {}): Row {
+  return { no_speech: false, transcript: "", risk: "none", categories: [], ...overrides };
 }
 
-export function crisisOutput(kind: "text" | "audio" = "text"): Row {
+// A reflection request that comes back flagged as a crisis (the last of the three layers).
+export function crisisOutput(): Row {
   return {
-    ...(kind === "audio" ? { no_speech: false, transcript: "a spoken crisis sentence" } : {}),
     is_crisis: true,
     dominant_emotion: "weary",
     reflection_title: null,

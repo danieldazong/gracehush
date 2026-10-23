@@ -317,3 +317,53 @@ Deno.test(
     assertEquals(await countRecentEntries(admin, USER, since, String(a.id)), 1);
   }),
 );
+
+Deno.test(
+  "a crisis entry saved twice is still one crisis entry with the words it was given and no affirmations",
+  withWorld(async (world, admin) => {
+    const claim = await claimEntry(admin, USER, text, null, Date.now());
+    assert(claim.kind === "claimed");
+    const first = await saveCrisisEntry(admin, USER, claim.row.id, "the words");
+    const second = await saveCrisisEntry(admin, USER, claim.row.id, "the words");
+    assertEquals([first.is_crisis, second.is_crisis], [true, true]);
+    assertEquals(second.transcript, "the words");
+    assertEquals(world.entries.length, 1);
+    assertEquals(world.affirmations.length, 0);
+    // A recording that was never read has no words, and that is saved as such.
+    const blocked = await saveCrisisEntry(admin, USER, claim.row.id, null);
+    assertEquals(blocked.transcript, null);
+    assertEquals(blocked.processing_status, "ready");
+    assertEquals(blocked.error_code, null);
+  }),
+);
+
+Deno.test(
+  "a crisis that cannot be saved is crisis_save_failed and leaves the entry as it was",
+  withWorld(async (world, admin) => {
+    const claim = await claimEntry(admin, USER, text, null, Date.now());
+    assert(claim.kind === "claimed");
+    const real = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      if (request.method === "PATCH" && request.url.includes("/rest/v1/journal_entries")) {
+        return new Response(JSON.stringify({ code: "XX000", message: "a secret detail" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return await real(input, init);
+    };
+    try {
+      const error = await expectAppError(
+        () => saveCrisisEntry(admin, USER, claim.row.id, "the words"),
+        "INTERNAL",
+        "crisis_save_failed",
+      );
+      assert(!error.reason.includes("secret"), "a database's words never reach the reason");
+    } finally {
+      globalThis.fetch = real;
+    }
+    assertEquals(world.entries[0].is_crisis, false);
+    assertEquals(world.entries[0].processing_status, "processing");
+  }),
+);

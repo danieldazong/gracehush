@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "./testing/assert.ts";
-import { audioReadyOutput, crisisOutput, readyOutput } from "./testing/fakes.ts";
+import { crisisOutput, readyOutput } from "./testing/fakes.ts";
 import {
   countWords,
   curlyApostrophes,
@@ -13,12 +13,11 @@ import {
   tidyParagraphs,
 } from "./output.ts";
 
-const parse = (value: unknown, kind: "text" | "audio" = "text") =>
-  parseReflection(typeof value === "string" ? value : JSON.stringify(value), kind);
+const parse = (value: unknown) => parseReflection(typeof value === "string" ? value : JSON.stringify(value));
 
-function invalid(value: unknown, reason: string, kind: "text" | "audio" = "text") {
+function invalid(value: unknown, reason: string) {
   try {
-    parse(value, kind);
+    parse(value);
   } catch (error) {
     assert(error instanceof OutputInvalid, `expected OutputInvalid, got ${String(error)}`);
     assertEquals(error.reason, reason);
@@ -43,35 +42,24 @@ Deno.test("a good written reflection is accepted and cleaned", () => {
     category: "INNER PEACE",
   });
   assertEquals(result.affirmations.map((item) => item.slot), ["morning", "afternoon", "evening"]);
-  assertEquals(result.transcript, null);
-});
-
-Deno.test("a good spoken reflection keeps the model's transcript", () => {
-  const result = parse(audioReadyOutput(), "audio");
-  assert(result.kind === "ready");
-  assertEquals(result.transcript, "I have been carrying a lot this week.");
 });
 
 Deno.test("a reply wrapped in a code fence is read", () => {
   assert(parse("```json\n" + JSON.stringify(readyOutput()) + "\n```").kind === "ready");
 });
 
-Deno.test("crisis wins over everything else the model said", () => {
-  assertEquals(parse(crisisOutput()), { kind: "crisis", transcript: null });
-  assertEquals(parse(crisisOutput("audio"), "audio"), { kind: "crisis", transcript: "a spoken crisis sentence" });
+Deno.test("crisis wins over everything else the model said, and carries nothing but the flag", () => {
+  assertEquals(parse(crisisOutput()), { kind: "crisis" });
   // Scripture, devotional and affirmations returned beside is_crisis are ignored.
-  assertEquals(parse({ ...readyOutput(), is_crisis: true }), { kind: "crisis", transcript: null });
-  // A contradicting no_speech does not hide a crisis.
-  assertEquals(parse({ ...crisisOutput("audio"), no_speech: true, transcript: "" }, "audio"), {
+  assertEquals(parse({ ...readyOutput(), is_crisis: true }), { kind: "crisis" });
+  // Even a reply whose other fields are broken is a crisis if it says so: the flag is read first.
+  assertEquals(parse({ is_crisis: true, dominant_emotion: "angry", affirmations: "none", prayer: null }), {
     kind: "crisis",
-    transcript: null,
   });
 });
 
-Deno.test("no_speech is only a thing for audio", () => {
-  assertEquals(parse({ ...audioReadyOutput(), no_speech: true, transcript: "" }, "audio"), { kind: "no_speech" });
-  // A written entry has no such field, and an extra one is ignored.
-  assert(parse({ ...readyOutput(), no_speech: true }).kind === "ready");
+Deno.test("fields from the old spoken-entry flow are ignored: the reflection is text only now", () => {
+  assert(parse({ ...readyOutput(), no_speech: true, transcript: "ignored" }).kind === "ready");
 });
 
 Deno.test("shape errors", () => {
@@ -79,9 +67,6 @@ Deno.test("shape errors", () => {
   invalid([], "shape");
   invalid({ ...readyOutput(), is_crisis: "no" }, "is_crisis");
   invalid({ ...readyOutput(), dominant_emotion: "angry" }, "emotion");
-  invalid({ ...audioReadyOutput(), no_speech: undefined }, "audio_fields", "audio");
-  invalid({ ...audioReadyOutput(), transcript: "" }, "transcript_empty", "audio");
-  invalid({ ...audioReadyOutput(), transcript: "a".repeat(20_001) }, "transcript_long", "audio");
 });
 
 Deno.test("title rules", () => {

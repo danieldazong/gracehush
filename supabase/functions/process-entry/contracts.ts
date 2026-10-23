@@ -37,7 +37,6 @@ export type ProcessEntryErrorCode =
   | "TOO_SHORT"
   | "AUDIO_NOT_FOUND"
   | "NO_SPEECH"
-  | "CONTENT_BLOCKED"
   | "RATE_LIMITED"
   | "INTERNAL"
   | "AI_UNAVAILABLE";

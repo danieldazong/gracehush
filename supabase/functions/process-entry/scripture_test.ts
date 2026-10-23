@@ -241,8 +241,8 @@ Deno.test(
 
     const line = lastLog(world);
     assertEquals(line.scripture, "replaced");
-    assertEquals(line.attempts, 2, "the reflection and the replacement");
-    assertEquals(line.tokensIn, 642);
+    assertEquals(line.attempts, 3, "the screening, the reflection and the replacement");
+    assertEquals(line.tokensIn, 963);
     assertEquals(line.status, 200);
   }),
 );
@@ -298,12 +298,24 @@ Deno.test(
 );
 
 Deno.test(
-  "a crisis entry never touches the Bible",
+  "a crisis entry never touches the Bible, whichever layer finds it",
   flow([geminiOk(crisisOutput())], async (world) => {
+    // The model's own flag, after a clear screening.
     const response = await post(world, handle, textBody());
     assertEquals(response.status, 200);
     assertEquals(world.bibleCalls.length, 0);
     assertEquals(world.entries[0].scripture_reference, null);
+    assertEquals(lastLog(world).scripture, null);
+
+    // The screening, by a phrase: no model call and no Bible call at all.
+    const other = await post(
+      world,
+      handle,
+      textBody({ clientEntryId: "9c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f", text: "I do not want to be alive anymore." }),
+    );
+    assertEquals(other.status, 200);
+    assertEquals(world.bibleCalls.length, 0);
+    assertEquals(world.geminiCalls.length, 1);
     assertEquals(lastLog(world).scripture, null);
   }),
 );

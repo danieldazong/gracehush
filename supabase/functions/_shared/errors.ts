@@ -14,7 +14,6 @@ export type ErrorCode =
   | "TOO_SHORT"
   | "AUDIO_NOT_FOUND"
   | "NO_SPEECH"
-  | "CONTENT_BLOCKED"
   | "RATE_LIMITED"
   | "INTERNAL"
   | "AI_UNAVAILABLE";
@@ -30,7 +29,6 @@ export const STATUS_BY_CODE: Record<ErrorCode, number> = {
   TOO_SHORT: 422,
   AUDIO_NOT_FOUND: 422,
   NO_SPEECH: 422,
-  CONTENT_BLOCKED: 422,
   RATE_LIMITED: 429,
   INTERNAL: 500,
   AI_UNAVAILABLE: 503,
@@ -48,7 +46,6 @@ export const MESSAGE_BY_CODE: Record<ErrorCode, string> = {
   TOO_SHORT: "Please share a little more and try again.",
   AUDIO_NOT_FOUND: "We couldn’t find your recording. Please try again.",
   NO_SPEECH: "We couldn’t hear any words in that recording.",
-  CONTENT_BLOCKED: "We couldn’t prepare a reflection for that entry.",
   RATE_LIMITED: "You’re going a little fast. Please wait a moment and try again.",
   INTERNAL: "Something went wrong on our side. Please try again.",
   AI_UNAVAILABLE: "We couldn’t prepare your reflection right now. Please try again.",
