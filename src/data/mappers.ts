@@ -51,9 +51,6 @@ const ERROR_CODES: readonly StoredErrorCode[] = [
   "TTS_FAILED",
 ];
 
-// Where the old public devotional URLs keep the storage path (the same backfill step 18 does).
-const PUBLIC_AUDIO_MARKER = "/storage/v1/object/public/journal_media/";
-
 // The allowed value equal to `value`, else null. Unknown strings never reach the app models.
 function pick<T extends string>(allowed: readonly T[], value: string | null | undefined): T | null {
   return allowed.find((item) => item === value) ?? null;
@@ -120,19 +117,13 @@ function toScripture(row: JournalEntryRow): Scripture | null {
   };
 }
 
-function audioPathFromPublicUrl(url: string | null): string | null {
-  const start = url ? url.indexOf(PUBLIC_AUDIO_MARKER) : -1;
-  if (!url || start === -1) return null;
-  return url.slice(start + PUBLIC_AUDIO_MARKER.length) || null;
-}
-
 function toDevotional(row: JournalEntryRow): Devotional | null {
   if (!row.devotional_script) return null;
   return {
     title: row.devotional_title || copy.common.defaultDevotionalTitle,
     script: row.devotional_script,
     closingPrayer: row.closing_prayer ?? null,
-    audioPath: row.devotional_audio_path || audioPathFromPublicUrl(row.devotional_audio_url),
+    audioPath: row.devotional_audio_path || null,
     durationMs: row.devotional_duration_ms ?? null,
   };
 }

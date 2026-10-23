@@ -2,7 +2,7 @@ import { useAuth } from "@clerk/expo";
 import { useEffect, useLayoutEffect } from "react";
 import { AppState } from "react-native";
 
-import { startReminderSync, syncProfile, syncProfileOnForeground } from "@/services/profileSync";
+import { syncProfile, syncProfileOnForeground, watchReminderEdits } from "@/services/profileSync";
 import { setSupabaseSession } from "@/services/supabaseClient";
 
 // Connects the signed-in Clerk user to Supabase and renders nothing. It sits above the navigator, inside
@@ -25,13 +25,13 @@ export function SupabaseAuthBridge() {
   useEffect(() => {
     if (signedInUserId === null) return;
     syncProfile();
-    const stopReminderSync = startReminderSync();
+    const stopWatchingReminders = watchReminderEdits();
     const subscription = AppState.addEventListener("change", (status) => {
       if (status === "active") syncProfileOnForeground();
     });
     return () => {
       subscription.remove();
-      stopReminderSync();
+      stopWatchingReminders();
     };
   }, [signedInUserId]);
 

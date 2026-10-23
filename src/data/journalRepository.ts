@@ -6,7 +6,7 @@ import {
   WEEK_STARTS_ON,
 } from "@/constants/app";
 import { copy } from "@/constants/copy";
-import { toAffirmation, toJournalEntry, toPrayer, toUserProfile } from "@/data/mappers";
+import { getDeviceTimezone, toAffirmation, toJournalEntry, toPrayer, toUserProfile } from "@/data/mappers";
 import { addMockEntry, getMockDb } from "@/data/mock/db";
 import {
   getProfileSource,
@@ -14,7 +14,7 @@ import {
   takeMockSubmitOutcome,
   type MockSubmitOutcome,
 } from "@/data/mock/scenario";
-import { syncProfile } from "@/services/profileSync";
+import { scheduleProfileSync, syncProfile } from "@/services/profileSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
@@ -33,7 +33,7 @@ import type {
   TimeSlot,
   UserProfile,
 } from "@/types";
-import type { JournalEntryRow, UserProfileRow } from "@/types/database";
+import type { JournalEntryRow } from "@/types/database";
 import { answeredDateToTimestamp, isValidAnsweredDate } from "@/utils/prayerDates";
 
 const SLOT_ORDER: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
@@ -85,31 +85,29 @@ function readMockProfile(): UserProfile {
   };
 }
 
-// The signed-in user's profile as this device knows it (step 17): the sign-up date and the plan from the last sync,
-// the reminder times from the onboarding store, and the settings users_profile has no column for yet. Null until
-// the first sync has finished. TODO(18): the settings become columns, and the prefs store goes away.
+// The signed-in user's profile as this device knows it: the sign-up date, the plan and the settings from the last sync,
+// the settings changed since then (not yet sent) on top, and the reminder times from the onboarding store. Null until
+// the first sync has finished.
 function readLocalProfile(userId: string): UserProfile | null {
   const entry = useProfilePrefsStore.getState().byUser[userId];
   if (entry === undefined || entry.snapshot === null) return null;
-  const { prefs, snapshot } = entry;
-  const row: UserProfileRow = {
+  const { unsent, snapshot } = entry;
+  return {
     id: userId,
-    created_at: snapshot.createdAt,
-    subscription_tier: snapshot.subscriptionTier,
-    reminder_morning: null,
-    reminder_afternoon: null,
-    reminder_evening: null,
-    last_active_at: null,
-    ambient_sound: prefs.ambientSound ?? null,
-    ambient_volume: prefs.ambientVolume ?? null,
-    affirmations_enabled: prefs.affirmationsEnabled ?? null,
+    createdAt: snapshot.createdAt,
+    subscriptionTier: snapshot.subscriptionTier,
+    reminders: { ...useOnboardingStore.getState().reminders },
+    timezone: getDeviceTimezone(),
+    ambientSound: unsent.ambientSound ?? snapshot.ambientSound,
+    ambientVolume: unsent.ambientVolume ?? snapshot.ambientVolume,
+    affirmationsEnabled: unsent.affirmationsEnabled ?? snapshot.affirmationsEnabled,
   };
-  return { ...toUserProfile(row), reminders: { ...useOnboardingStore.getState().reminders } };
 }
 
 // Never waits for the network once the account has synced, so Journal, Reflection and Profile open offline and as
 // fast as they did on the mock. The first call after sign-in waits for the sync the app already started (one request).
-// A failure throws: the hooks that call this already show their error state and retry on the next focus.
+// Failing to read the profile at all throws: the hooks that call this already show their error state and retry on the
+// next focus.
 export async function getProfile(): Promise<UserProfile> {
   if (getProfileSource() === "mock") {
     await simulateLatency();
@@ -119,8 +117,10 @@ export async function getProfile(): Promise<UserProfile> {
   if (userId === null) throw new Error("There is no signed-in user.");
   const known = readLocalProfile(userId);
   if (known !== null) return known;
-  const synced = await syncProfile();
-  const afterSync = synced.ok ? readLocalProfile(userId) : null;
+  // The sync saves the profile as soon as it has read the row, so even a sync that failed later (while sending an
+  // edit) leaves one to show. Only a sync that could not read the row leaves nothing.
+  await syncProfile();
+  const afterSync = readLocalProfile(userId);
   if (afterSync === null) throw new Error(copy.profile.errors.load);
   return afterSync;
 }
@@ -269,8 +269,8 @@ function checkProfilePatch(patch: ProfilePatch): RepoResult<ProfilePatch> {
 }
 
 // Saves what Profile can change. Same order as the prayer writes: wait (mock only), the dev failure flag, validate,
-// write. The mock mode writes the mock row. Otherwise the three settings are kept on this device for the signed-in
-// user, because users_profile has no column for them yet. TODO(18): write the columns, and delete the prefs store.
+// write. The mock mode writes the mock row. Otherwise the change is kept on this device as an unsent edit for the
+// signed-in user and a sync sends it to users_profile 800 ms later, so it also works offline (step 18).
 export async function updateProfile(patch: ProfilePatch): Promise<RepoResult<UserProfile>> {
   const isMock = getProfileSource() === "mock";
   if (isMock) await simulateWrite(PROFILE_CHANGE_MS);
@@ -288,7 +288,8 @@ export async function updateProfile(patch: ProfilePatch): Promise<RepoResult<Use
   }
   const userId = getSupabaseUserId();
   if (userId === null) return failure("UNAUTHORIZED", copy.profile.errors.save);
-  useProfilePrefsStore.getState().savePrefs(userId, clean);
+  useProfilePrefsStore.getState().saveUnsent(userId, clean);
+  scheduleProfileSync();
   const saved = readLocalProfile(userId);
   return saved === null ? failure("NOT_FOUND", copy.profile.errors.save) : { ok: true, data: saved };
 }

@@ -1,107 +1,53 @@
-// Hand-written until step 18. Step 18 generates src/types/supabase.ts and this file then re-exports the row types from it.
-// No Supabase project existed when this was written, so there was no live schema to copy. The base
-// columns follow prompt 06 step 0, the planned ones follow AGENTS.md "Known Schema Gaps", and
-// anything unsure is typed nullable. Step 18 checks all of it against the real database.
-// Step 17 added `Database` (below), so the Supabase client is typed for users_profile.
+// The database types. The row types come from src/types/supabase.ts, which is generated from the real database and
+// never edited by hand (see "Regenerating the types" in AGENTS.md, Database Rules). This file only narrows what the
+// signed-in app may SEND, so a column the database would refuse is a compile error here instead of an HTTP 403.
+import type { Database as GeneratedDatabase } from "@/types/supabase";
 
-// A type alias, not an interface: supabase-js only accepts a table whose Row is a plain object type (an interface has
-// no implicit index signature, and the whole table then collapses to `never`).
-export type UserProfileRow = {
-  id: string; // Clerk user id (text, never uuid)
-  created_at: string;
-  subscription_tier: string | null;
-  reminder_morning: string | null; // TIME, "HH:mm:ss"
-  reminder_afternoon: string | null;
-  reminder_evening: string | null;
-  last_active_at: string | null;
+type GeneratedTables = GeneratedDatabase["public"]["Tables"];
 
-  // planned: migration in step 18
-  timezone?: string | null;
-  ambient_sound?: string | null;
-  ambient_volume?: number | null;
-  affirmations_enabled?: boolean | null;
-  updated_at?: string | null;
-};
+export type UserProfileRow = GeneratedTables["users_profile"]["Row"];
+export type JournalEntryRow = GeneratedTables["journal_entries"]["Row"];
+export type DailyAffirmationRow = GeneratedTables["daily_affirmations"]["Row"];
 
-// `embedding` (V2) is left out on purpose.
-export interface JournalEntryRow {
-  id: string;
-  user_id: string;
-  created_at: string;
-  input_type: string | null;
-  transcript: string | null;
-  dominant_emotion: string | null;
-  scripture_reference: string | null;
-  scripture_text: string | null;
-  devotional_script: string | null;
-  devotional_audio_url: string | null; // DEPRECATED: use devotional_audio_path (step 22)
-  is_active_prayer: boolean | null;
-  is_answered: boolean | null;
-  answered_at: string | null;
+// The columns the `authenticated` role is granted (supabase/migrations/20261022120100_gracehush_v1_schema.sql, section 6).
+// subscription_tier, created_at, updated_at and last_active_at are not here on purpose: only the server writes them.
+export type UserProfileInsert = Pick<
+  GeneratedTables["users_profile"]["Insert"],
+  | "id"
+  | "reminder_morning"
+  | "reminder_afternoon"
+  | "reminder_evening"
+  | "timezone"
+  | "affirmations_enabled"
+  | "ambient_sound"
+  | "ambient_volume"
+>;
+export type UserProfileUpdate = Omit<UserProfileInsert, "id">;
 
-  // planned: migration in step 18
-  client_entry_id?: string | null;
-  processing_status?: string | null;
-  error_code?: string | null;
-  is_crisis?: boolean | null;
-  audio_path?: string | null;
-  devotional_audio_path?: string | null;
-  devotional_duration_ms?: number | null;
-  scripture_verified?: boolean | null;
-  devotional_title?: string | null;
-  closing_prayer?: string | null;
-  prayer_title?: string | null;
-  prayer_category?: string | null;
-  prayer_summary?: string | null;
-  answered_notes?: string | null;
-  updated_at?: string | null;
-}
+// The app never inserts or deletes an entry or an affirmation (the Edge Function does), and changes only these.
+export type JournalEntryUpdate = Pick<
+  GeneratedTables["journal_entries"]["Update"],
+  "is_active_prayer" | "is_answered" | "answered_at" | "answered_notes" | "prayer_category"
+>;
+export type DailyAffirmationUpdate = Pick<GeneratedTables["daily_affirmations"]["Update"], "is_favorite">;
 
-// What the app may send when it creates and changes its own profile row: the same columns supabase/schema.sql
-// grants to the `authenticated` role. subscription_tier and created_at are not here on purpose, so sending one
-// does not type-check. Type aliases, for the reason above. TODO(18): replaced by the generated types.
-export type UserProfileInsert = {
-  id: string;
-  reminder_morning?: string; // "HH:mm:ss"
-  reminder_afternoon?: string;
-  reminder_evening?: string;
-};
-
-export type UserProfileUpdate = {
-  reminder_morning?: string;
-  reminder_afternoon?: string;
-  reminder_evening?: string;
-};
-
-// The shape supabase-js wants. journal_entries and daily_affirmations are not queried until steps 25 and 28.
-export type Database = {
-  public: {
+// The shape supabase-js wants: the generated database with the three tables narrowed. `Insert: never` makes
+// `.insert()` and `.upsert()` on a table the app may not insert into a type error.
+export type Database = Omit<GeneratedDatabase, "public"> & {
+  public: Omit<GeneratedDatabase["public"], "Tables"> & {
     Tables: {
-      users_profile: {
-        Row: UserProfileRow;
+      users_profile: Omit<GeneratedTables["users_profile"], "Insert" | "Update"> & {
         Insert: UserProfileInsert;
         Update: UserProfileUpdate;
-        Relationships: [];
+      };
+      journal_entries: Omit<GeneratedTables["journal_entries"], "Insert" | "Update"> & {
+        Insert: never;
+        Update: JournalEntryUpdate;
+      };
+      daily_affirmations: Omit<GeneratedTables["daily_affirmations"], "Insert" | "Update"> & {
+        Insert: never;
+        Update: DailyAffirmationUpdate;
       };
     };
-    Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
-    Enums: { [_ in never]: never };
-    CompositeTypes: { [_ in never]: never };
   };
 };
-
-export interface DailyAffirmationRow {
-  id: string;
-  user_id: string;
-  entry_id: string;
-  time_slot: string;
-  headline: string;
-  affirmation_text: string;
-  is_delivered: boolean | null;
-  created_at: string;
-
-  // planned: migration in step 18
-  is_favorite?: boolean | null;
-  scheduled_for?: string | null;
-}

@@ -2,7 +2,7 @@
 import { copy } from "@/constants/copy";
 import { simulateWrite } from "@/data/journalRepository";
 import { takeMockPrayerMutationFailure } from "@/data/mock/scenario";
-import { cancelReminderSync } from "@/services/profileSync";
+import { cancelProfileSync } from "@/services/profileSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
@@ -42,8 +42,9 @@ export async function deleteAccount(): Promise<RepoResult<null>> {
 export async function signOutCleanup(): Promise<void> {
   // TODO(33): stopRealtime() first, before the database and the token go
   // A reminder edit that has not reached the server belongs to the account that made it: it must never be sent to
-  // the next account that signs in on this phone.
-  cancelReminderSync();
+  // the next account that signs in on this phone. (The reminder times are device-wide. An unsent setting is kept
+  // per user in the prefs store and is sent when that account signs in again.)
+  cancelProfileSync();
   useOnboardingStore.getState().discardUnsyncedReminders();
   // TODO(24): stop the sync engine and clear this user's SQLite cache
   // A full reset of the player: the position, the speed and the session's ambient choice.

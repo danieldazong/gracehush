@@ -32,7 +32,6 @@ function entryRow(id: string, createdAt: Date, fields: Partial<JournalEntryRow>)
     scripture_reference: null,
     scripture_text: null,
     devotional_script: null,
-    devotional_audio_url: null,
     is_active_prayer: false,
     is_answered: false,
     answered_at: null,
