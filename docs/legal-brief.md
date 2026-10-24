@@ -33,7 +33,7 @@ Not collected, as far as the plans go (**TODO:** re-check before saying so): loc
 
 - Prayers show religious belief, and often health, mental health, grief, abuse or self-harm. Ask the lawyer which rules apply and what notice and consent each needs, at least: GDPR Art. 9 (special categories, explicit consent), California's CPRA (sensitive personal information), Washington's My Health My Data Act and similar state laws, and the health categories in Apple's App Privacy and Google's Data safety forms. **TODO:** where consent is taken. The onboarding permissions step is the natural place, and it has none today.
 - A crisis entry keeps its transcript so the user can read it later. The app does not alert anyone, contact a service or monitor entries, and the policy should say so plainly. **TODO:** the lawyer reads that wording.
-- **The Gemini plan matters.** Google's Gemini API Additional Terms say that on *unpaid* services (Google AI Studio and the unpaid quota of the API) Google may use the content to improve its products and human reviewers may read it, and that on *paid* services it does not. Real users' prayers may only go through a billed project. Read the live terms at https://ai.google.dev/terms before the first real call (steps 19 and 32), and do the same check for Cloud Text-to-Speech's data logging. **TODO:** record both answers here.
+- **The Gemini plan matters.** Google's Gemini API Additional Terms say that on *unpaid* services (Google AI Studio and the unpaid quota of the API) Google may use the content to improve its products and human reviewers may read it, and that on *paid* services it does not. Real users' prayers may only go through a billed project. Read the live terms at https://ai.google.dev/terms before the first real call (steps 19 and 32), and for Cloud Text-to-Speech: Google's data-logging page (read on 2026-10-23) says "Google does not log any customer Cloud TTS text or audio data" and says nothing about training, and the paid Google Cloud terms apply. **TODO:** the lawyer confirms that is enough, and the Gemini answer is recorded here.
 
 ## 4. What the user can do in the app
 
@@ -66,7 +66,7 @@ As built (the Paywall, step 16): a yearly and a monthly plan. The prices on scre
 2. The domain for the pages, the support mailbox, and the address of the account deletion page.
 3. The minimum age.
 4. The Supabase region and backup retention, and the PostHog region.
-5. A billed Gemini project, and the Cloud Text-to-Speech data settings.
+5. A billed Google Cloud account (one account pays for Gemini and for Text-to-Speech), and whether Google's statement about Text-to-Speech data is enough.
 6. Whether the on-device copy is encrypted.
 7. Whether onboarding takes explicit consent for sensitive data.
 8. Apple's standard EULA, or your own Terms, for the iPhone.
@@ -82,7 +82,7 @@ The drafts describe the app as designed. These statements depend on a step that 
 | --- | --- |
 | The database holds an account ID and not the email address | 17, 18 |
 | Recordings are in private storage, and encryption at rest is the provider's default | 18, 22 |
-| Google's paid Gemini terms apply, and Cloud Text-to-Speech logging is off | 19, 22, 32 (and the live terms at https://ai.google.dev/terms) |
+| Google's paid Gemini terms apply, and Google says it does not log Cloud Text-to-Speech text or audio (its data-logging page, 2026-10-23) | 19, 22, 32 (and the live terms at https://ai.google.dev/terms) |
 | A local copy of entries on the device is removed at sign-out; whether it is encrypted | 24 |
 | Reminders are local notifications that show an affirmation, with no push server | 28 |
 | Plan and trial status come through RevenueCat, and the tier and its end date are mirrored | 30 |
