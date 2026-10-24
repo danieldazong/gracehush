@@ -33,6 +33,7 @@ const migrations = fs
   .sort();
 const V1 = migrations.find((name) => name.includes("gracehush_v1_schema"));
 const BASELINE = migrations.find((name) => name.includes("baseline"));
+const WAV = migrations.find((name) => name.includes("journal_media_accepts_wav"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -103,9 +104,11 @@ async function freshDatabase(model) {
   return db;
 }
 
-async function applyMigrations(db, { v1Transform = (sql) => sql, twice = false } = {}) {
+// `transforms` maps a migration's file name to a function that changes its SQL (the broken variants below).
+async function applyMigrations(db, { transforms = {}, twice = false } = {}) {
   for (const name of migrations) {
-    const sql = name === V1 ? v1Transform(read(`migrations/${name}`)) : read(`migrations/${name}`);
+    const transform = transforms[name];
+    const sql = transform ? transform(read(`migrations/${name}`)) : read(`migrations/${name}`);
     await db.exec(sql);
     if (twice) await db.exec(sql);
   }
@@ -201,15 +204,16 @@ if (process.argv.includes("--negative")) {
     ["no limit on the gratitude note", "off", (sql) => sql.replace("answered_note_length check (answered_notes is null or char_length(answered_notes) <= 1000)", "answered_note_length check (true)"), [43]],
     ["a crisis entry may be a prayer", "off", (sql) => sql.replace(/constraint crisis_not_prayer\s+check \(not is_crisis or \([\s\S]*?prayer_summary is null\)\)/, "constraint crisis_not_prayer check (true)"), [44]],
     ["verified scripture without its text", "off", (sql) => sql.replace("check (not scripture_verified or (scripture_reference is not null and scripture_text is not null))", "check (true)"), [45]],
+    ["the bucket does not take WAV (the migration adds another type instead)", "off", (sql) => sql.replaceAll("'audio/wav'", "'audio/flac'"), [46], WAV],
     ["ON: the new tables keep anon's default grants", "on", dropLine("revoke all on public.users_profile, public.journal_entries, public.daily_affirmations from anon;"), [33]],
     // An insert stays refused by row level security (no insert policy), so check 13 still passes: the grants are the
     // first lock and the policies the second, and the checks insist on both.
     ["ON: the new tables keep authenticated's default grants", "on", dropLine("revoke all on public.journal_entries, public.daily_affirmations from authenticated;"), [15, 17, 25, 27]],
   ];
   console.log("\n===== broken variants (every one must be caught) =====");
-  for (const [label, modelId, transform, expected] of variants) {
+  for (const [label, modelId, transform, expected, file = V1] of variants) {
     const model = MODELS.find((item) => item.id === modelId);
-    const original = read(`migrations/${V1}`);
+    const original = read(`migrations/${file}`);
     if (transform(original) === original) {
       console.log(`  ${label.padEnd(66)} RUNNER BUG: the variant changed nothing`);
       failures += 1;
@@ -218,7 +222,7 @@ if (process.argv.includes("--negative")) {
     const db = await freshDatabase(model);
     let outcome;
     try {
-      await applyMigrations(db, { v1Transform: transform });
+      await applyMigrations(db, { transforms: { [file]: transform } });
       const rows = await runSqlFile(db, "tests/rls_selftest.sql");
       const failed = rows.filter((row) => !row.passed).map((row) => row.position);
       const caught = expected.every((position) => failed.includes(position));

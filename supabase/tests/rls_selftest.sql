@@ -390,6 +390,10 @@ begin
          scripture_text = 'Be still, and know that I am God.'
          where id = 'a0000000-0000-4000-8000-000000000001'$q$) = 'ok:1');
 
+  insert into rls_results values (46, 'the journal_media bucket also accepts WAV, the spoken devotional''s format',
+    exists (select 1 from storage.buckets
+            where id = 'journal_media' and 'audio/wav' = any (allowed_mime_types)));
+
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
   delete from public.users_profile where id like 'selftest\_%';
 end $$;
