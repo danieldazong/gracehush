@@ -1,24 +1,35 @@
 import { MESSAGE_BY_CODE, STATUS_BY_CODE } from "../_shared/errors.ts";
+import { FREE_DEVOTIONALS_PER_WEEK } from "../_shared/limits/constants.ts";
+import { weekWindow } from "../_shared/limits/weekly.ts";
 import { SCREEN_SAFETY_SETTINGS, screenTiming } from "../_shared/safety/screen.ts";
 import { SCREEN_SYSTEM_INSTRUCTION } from "../_shared/safety/screenPrompt.ts";
+import { DEFAULT_SPEAKING_RATE } from "../_shared/tts/config.ts";
+import { buildSpeechScript } from "../_shared/tts/script.ts";
 import { assert, assertEquals } from "./testing/assert.ts";
 import {
   crisisOutput,
   ENTRY_ID,
+  FIXTURE_WAV,
+  FIXTURE_WAV_MS,
   geminiError,
   geminiOk,
   type GeminiReply,
+  type GoogleReply,
   installWorld,
   post,
   readyOutput,
   screenOutput,
+  seedDevotional,
+  SPEECH_EMAIL,
+  SPEECH_VOICE,
+  speechOn,
   SPOKEN,
   TEXT,
   unscopedRequests,
   type World,
 } from "./testing/fakes.ts";
-import { RATE_LIMIT_MAX } from "./constants.ts";
-import type { ProcessEntryError, ProcessEntryResponse } from "./contracts.ts";
+import { RATE_LIMIT_MAX, speechTiming } from "./constants.ts";
+import type { ProcessEntryError, ProcessEntryLimitError, ProcessEntryResponse } from "./contracts.ts";
 import { GEMINI_URL, MAX_ATTEMPTS, timing } from "./gemini.ts";
 import { handle } from "./handler.ts";
 
@@ -981,6 +992,7 @@ Deno.test(
     const line = JSON.parse(world.logs[0]);
     assertEquals(Object.keys(line).sort(), [
       "attempts",
+      "audioMs",
       "authMs",
       "bibleMs",
       "code",
@@ -989,6 +1001,8 @@ Deno.test(
       "fallbackAttempts",
       "geminiMs",
       "inputType",
+      "limit",
+      "limitUsed",
       "model",
       "promptVersion",
       "reason",
@@ -1002,10 +1016,18 @@ Deno.test(
       "tokensOut",
       "tokensThought",
       "totalMs",
+      "tts",
+      "ttsAttempts",
+      "ttsChars",
+      "ttsMs",
       "user",
     ]);
+    assertEquals(Object.keys(line).length, 30);
     assertEquals(line.status, 200);
     assertEquals(line.inputType, "text");
+    // Speech is off in a fresh world, and a free account with nothing made this week is under its limit.
+    assertEquals([line.tts, line.ttsMs, line.ttsAttempts, line.ttsChars, line.audioMs], ["off", 0, 0, 0, null]);
+    assertEquals([line.limit, line.limitUsed], ["free_ok", 0]);
     // The screening and the reflection are one attempt each, and both are counted.
     assertEquals(line.attempts, 2);
     assertEquals(line.fallbackAttempts, 0);
@@ -1080,5 +1102,696 @@ Deno.test(
         "test-gemini-key",
       ]
     ) assert(!everything.includes(word), `the log must not contain: ${word}`);
+  }),
+);
+
+// -- The spoken devotional (step 22) -----------------------------------------------------------------------------------
+
+// A flow with speech switched on: the test service account (a real RSA key) and a Chirp 3 HD voice.
+function speechFlow(replies: GeminiReply[], work: (world: World) => Promise<void>, screenReplies: GeminiReply[] = []) {
+  return flow(replies, async (world) => {
+    speechOn(world);
+    await work(world);
+  }, screenReplies);
+}
+
+const ID_2 = "9c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
+const ID_3 = "7d2e3f4a-5b6c-4d7e-8f90-1a2b3c4d5e6f";
+
+// The plan and the time zone of the test user's profile (the row is made when the test has not made it yet).
+function profile(world: World, tier: "free" | "trial" | "pro", timezone = "UTC") {
+  world.seedUser(USER);
+  const row = world.users.find((user) => user.id === USER)!;
+  row.subscription_tier = tier;
+  row.timezone = timezone;
+}
+
+// Google answering no: 403, the API is not switched on for the project.
+const googleDenied = (reason = "SERVICE_DISABLED"): GoogleReply => ({
+  kind: "json",
+  status: 403,
+  body: { error: { code: 403, message: "x", status: "PERMISSION_DENIED", details: [{ reason }] } },
+});
+
+// What the Text-to-Speech call received.
+const spokenMarkup = (call: { json: unknown }) => (call.json as { input: { markup: string } }).input.markup;
+
+const sameBytes = (found: Uint8Array | undefined, expected: Uint8Array) =>
+  found !== undefined && found.length === expected.length && found.every((byte, index) => byte === expected[index]);
+
+// Makes every upload to Storage fail with a 500, or never answer. Returns the function that puts the network back.
+function breakUploads(how: "fail" | "hang"): () => void {
+  const real = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    const request = new Request(input, init);
+    if (request.method === "POST" && new URL(request.url).pathname.startsWith("/storage/v1/object/journal_media/")) {
+      return how === "hang" ? new Promise<Response>(() => {}) : Promise.resolve(
+        new Response(JSON.stringify({ statusCode: "500", error: "Internal", message: "boom" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    return real(input, init);
+  };
+  return () => {
+    globalThis.fetch = real;
+  };
+}
+
+Deno.test(
+  "speech a) with no speech secrets a reflection is made as text: no audio, no Google call, tts off",
+  flow([geminiOk(readyOutput())], async (world) => {
+    const response = await post(world, handle, textBody());
+    assertEquals(response.status, 200);
+    const { entry } = await ok(response);
+    assertEquals(entry.status, "ready");
+    assertEquals([entry.devotional?.audioPath, entry.devotional?.durationMs, entry.failureCode], [null, null, null]);
+    assertEquals([world.tokenCalls.length, world.ttsCalls.length, world.uploads.length], [0, 0, 0]);
+    assertEquals(world.entries[0].error_code, null, "speech that is off is not a failure");
+    const line = lastLog(world);
+    assertEquals([line.tts, line.ttsMs, line.ttsAttempts, line.ttsChars, line.audioMs], ["off", 0, 0, 0, null]);
+  }),
+);
+
+Deno.test(
+  "speech b) the saved reflection is read aloud: its script, its passage, a WAV in the private bucket, only a path back",
+  speechFlow([geminiOk(readyOutput())], async (world) => {
+    const response = await post(world, handle, textBody());
+    assertEquals(response.status, 200);
+    const body = await ok(response);
+    const { entry } = body;
+    const [row] = world.entries;
+    const path = `${USER}/devotionals/${row.id}.wav`;
+
+    // The entry: ready, with the path and the measured length of the file, and nothing marked as failed.
+    assertEquals(entry.status, "ready");
+    assertEquals([entry.devotional?.audioPath, entry.devotional?.durationMs, entry.failureCode], [
+      path,
+      FIXTURE_WAV_MS,
+      null,
+    ]);
+    assertEquals(
+      [row.processing_status, row.devotional_audio_path, row.devotional_duration_ms, row.error_code],
+      ["ready", path, FIXTURE_WAV_MS, null],
+    );
+
+    // The file is the one Google made, uploaded as audio/wav to replace any earlier file at that path, for an hour.
+    assert(sameBytes(world.storage.get(path), FIXTURE_WAV), "the stored file is Google's WAV, byte for byte");
+    assertEquals(world.uploads, [{ path, contentType: "audio/wav", upsert: true, cacheControl: "3600" }]);
+
+    // Google was asked for exactly the script of the saved reflection, with the verified passage read out, in the chosen
+    // voice, and signed in once as the service account.
+    assertEquals([world.tokenCalls.length, world.ttsCalls.length], [1, 1]);
+    const script = buildSpeechScript({
+      devotional: String(row.devotional_script),
+      scripture: { reference: String(row.scripture_reference), text: String(row.scripture_text) },
+      closingPrayer: String(row.closing_prayer),
+    });
+    assert(script !== null);
+    const [call] = world.ttsCalls;
+    assertEquals(spokenMarkup(call), script.markup);
+    assert(script.markup.includes("A reading from Philippians chapter 4, verses 6 through 7."));
+    assert(script.markup.includes("Be anxious for nothing"), "the Bible's own words are read");
+    assert(script.markup.endsWith("Amen."));
+    const sent = call.json as { voice: unknown; audioConfig: unknown };
+    assertEquals(sent.voice, { languageCode: "en-US", name: SPEECH_VOICE });
+    assertEquals(sent.audioConfig, { audioEncoding: "LINEAR16", speakingRate: DEFAULT_SPEAKING_RATE });
+    assertEquals(call.headers.get("authorization"), "Bearer ya29.test-1");
+    assert(!call.url.search.includes("key"), "no API key anywhere: Text-to-Speech does not take one");
+
+    // The function returns no link: a path and a number, nothing that can be opened.
+    assert(!JSON.stringify(body).includes("http"), "no URL in the response");
+    assert(!JSON.stringify(body).includes("token"));
+
+    const line = lastLog(world);
+    assertEquals(line.tts, "ok");
+    assertEquals([line.ttsAttempts, line.ttsChars, line.audioMs], [1, script.chars, FIXTURE_WAV_MS]);
+    assert(Number.isInteger(line.ttsMs) && line.ttsMs >= 0);
+    assertEquals(unscopedRequests(world, USER), []);
+  }),
+);
+
+Deno.test(
+  "speech c) a passage the Bible could not confirm is not read: the script has no reading",
+  speechFlow([geminiOk(readyOutput())], async (world) => {
+    world.bible.set("PHP/4", { kind: "status", status: 503 });
+    const { entry } = await ok(await post(world, handle, textBody()));
+    assertEquals(entry.scripture?.verified, false);
+    assertEquals(entry.scripture?.text, null);
+    assert(entry.devotional?.audioPath !== null, "the devotional and the prayer are still read");
+    const markup = spokenMarkup(world.ttsCalls[0]);
+    assert(!markup.includes("A reading from"));
+    assert(!markup.includes("Be anxious"));
+    assert(markup.includes("Let's pray."));
+    assertEquals(lastLog(world).scripture, "unverified");
+  }),
+);
+
+Deno.test(
+  "speech d) Google refusing the call leaves the reflection ready as text, marked TTS_FAILED; the same request adds the audio only",
+  speechFlow([geminiOk(readyOutput())], async (world) => {
+    world.ttsQueue.push(googleDenied());
+    const first = await post(world, handle, textBody());
+    assertEquals(first.status, 200, "a failed speech never fails the reflection");
+    const failed = await ok(first);
+    assertEquals(failed.entry.status, "ready");
+    assertEquals([failed.entry.devotional?.audioPath, failed.entry.devotional?.durationMs], [null, null]);
+    assertEquals(failed.entry.failureCode, "TTS_FAILED");
+    assertEquals([world.entries[0].processing_status, world.entries[0].error_code], ["ready", "TTS_FAILED"]);
+    assertEquals(world.uploads.length, 0);
+    const line = lastLog(world);
+    assertEquals(line.tts, "failed:tts_http_403:PERMISSION_DENIED/SERVICE_DISABLED");
+    assertEquals(
+      [line.ttsAttempts, line.ttsChars, line.audioMs],
+      [1, 0, null],
+      "a refused call is one attempt, never billed",
+    );
+    const calls = [world.screenCalls.length, world.geminiCalls.length];
+
+    // Google is fixed: the same request finds a finished reflection with no audio and adds the audio, and only that.
+    const retry = await post(world, handle, textBody());
+    assertEquals(retry.status, 200);
+    const done = await ok(retry);
+    assertEquals(done.entry.id, failed.entry.id);
+    assertEquals(done.entry.devotional?.script, failed.entry.devotional?.script, "the same devotional");
+    assertEquals(done.entry.devotional?.audioPath, `${USER}/devotionals/${done.entry.id}.wav`);
+    assertEquals([done.entry.failureCode, world.entries[0].error_code], [null, null], "TTS_FAILED is cleared");
+    assertEquals([world.screenCalls.length, world.geminiCalls.length], calls, "no screening call and no Gemini call");
+    assertEquals([world.entries.length, world.affirmations.length], [1, 3]);
+    const retryLine = lastLog(world);
+    assertEquals([retryLine.tts, retryLine.screen, retryLine.attempts, retryLine.limit], ["ok", null, 0, null]);
+  }),
+);
+
+Deno.test(
+  "speech d2) a key Google refuses, and a Google that is busy once: the first fails with its word, the second is tried again",
+  speechFlow([geminiOk(readyOutput()), geminiOk(readyOutput())], async (world) => {
+    world.tokenQueue.push({
+      kind: "json",
+      status: 400,
+      body: { error: "invalid_grant", error_description: "SECRET-WORDS" },
+    });
+    const refused = await ok(await post(world, handle, textBody()));
+    assertEquals(refused.entry.devotional?.audioPath, null);
+    assertEquals(refused.entry.failureCode, "TTS_FAILED");
+    assertEquals(lastLog(world).tts, "failed:tts_auth:invalid_grant");
+    assertEquals(world.ttsCalls.length, 0, "no call was made without a token");
+    assert(!world.logs.join("\n").includes("SECRET-WORDS"), "Google's own description is never kept");
+
+    world.ttsQueue.push({ kind: "json", status: 503, body: { error: { code: 503, status: "UNAVAILABLE" } } });
+    const busy = await ok(await post(world, handle, textBody({ clientEntryId: ID_2 })));
+    assert(busy.entry.devotional?.audioPath, "the second attempt worked");
+    const line = lastLog(world);
+    assertEquals([line.tts, line.ttsAttempts], ["ok", 2]);
+    assertEquals(busy.entry.failureCode, null);
+  }),
+);
+
+Deno.test(
+  "speech e) a half-set or malformed secret is logged by name and never fails the reflection; it is not a failed call",
+  speechFlow([geminiOk(readyOutput()), geminiOk(readyOutput()), geminiOk(readyOutput())], async (world) => {
+    const cases: [string, () => void, string][] = [
+      ["a voice is missing", () => Deno.env.delete("TTS_VOICE_NAME"), "bad_config:TTS_VOICE_NAME"],
+      ["the key is not a service account", () => {
+        speechOn(world);
+        Deno.env.set("GOOGLE_TTS_CREDENTIALS_B64", "bm90IGEga2V5");
+      }, "bad_config:GOOGLE_TTS_CREDENTIALS_B64"],
+      ["the rate is not a number", () => {
+        speechOn(world);
+        Deno.env.set("TTS_SPEAKING_RATE", "fast");
+      }, "bad_config:TTS_SPEAKING_RATE"],
+    ];
+    const ids = [ENTRY_ID, ID_2, ID_3];
+    for (const [index, [label, set, expected]] of cases.entries()) {
+      set();
+      const response = await post(world, handle, textBody({ clientEntryId: ids[index] }));
+      assertEquals(response.status, 200, label);
+      const { entry } = await ok(response);
+      assertEquals([entry.status, entry.devotional?.audioPath, entry.failureCode], ["ready", null, null], label);
+      assertEquals(lastLog(world).tts, expected, label);
+    }
+    assertEquals([world.tokenCalls.length, world.ttsCalls.length, world.uploads.length], [0, 0, 0]);
+    assert(world.entries.every((row) => row.error_code === null));
+  }),
+);
+
+Deno.test(
+  "speech f) a request that already took too long skips speech; the same request later adds the audio",
+  speechFlow([geminiOk(readyOutput())], async (world) => {
+    speechTiming.latestStartMs = 0;
+    const { entry } = await ok(await post(world, handle, textBody()));
+    assertEquals([entry.status, entry.devotional?.audioPath, entry.failureCode], ["ready", null, null]);
+    assertEquals(lastLog(world).tts, "skipped:time");
+    assertEquals(world.ttsCalls.length, 0);
+    assertEquals(world.entries[0].error_code, null, "skipped is not failed");
+
+    speechTiming.latestStartMs = 100_000;
+    const retry = await ok(await post(world, handle, textBody()));
+    assertEquals(retry.entry.devotional?.audioPath, `${USER}/devotionals/${entry.id}.wav`);
+    assertEquals(lastLog(world).tts, "ok");
+    assertEquals(world.geminiCalls.length, 1);
+  }),
+);
+
+Deno.test(
+  "speech g) an upload that fails, and one that never answers, leave the reflection ready as text; the retry adds the audio",
+  speechFlow([geminiOk(readyOutput()), geminiOk(readyOutput())], async (world) => {
+    const mend = breakUploads("fail");
+    const failed = await post(world, handle, textBody());
+    assertEquals(failed.status, 200);
+    const first = await ok(failed);
+    assertEquals([first.entry.status, first.entry.devotional?.audioPath, first.entry.failureCode], [
+      "ready",
+      null,
+      "TTS_FAILED",
+    ]);
+    assertEquals(world.entries[0].error_code, "TTS_FAILED");
+    const line = lastLog(world);
+    assertEquals([line.tts, line.ttsAttempts, line.ttsChars], ["failed:storage", 1, 0]);
+    assertEquals(world.ttsCalls.length, 1, "Google had made the file; the upload is what failed");
+    mend();
+
+    // The next one never gets an answer from Storage: the upload is given up at its own cap.
+    speechTiming.uploadTimeoutMs = 40;
+    const stop = breakUploads("hang");
+    const second = await ok(await post(world, handle, textBody({ clientEntryId: ID_2 })));
+    assertEquals([second.entry.status, second.entry.devotional?.audioPath, second.entry.failureCode], [
+      "ready",
+      null,
+      "TTS_FAILED",
+    ]);
+    assertEquals(lastLog(world).tts, "failed:storage");
+    stop();
+
+    // Storage is back: the same request adds the audio to each, and clears the mark.
+    for (const clientEntryId of [ENTRY_ID, ID_2]) {
+      const retry = await ok(await post(world, handle, textBody({ clientEntryId })));
+      assert(retry.entry.devotional?.audioPath, "audio added");
+      assertEquals(retry.entry.failureCode, null);
+    }
+    assert(world.entries.every((row) => row.error_code === null && row.devotional_audio_path !== null));
+  }),
+);
+
+Deno.test(
+  "speech h) two requests asking for audio on one entry at once: one wins the row, both answer with the audio, one file",
+  speechFlow([], async (world) => {
+    // A finished reflection with no audio: what a request leaves when speech was off or failed.
+    seedDevotional(world, USER, { client_entry_id: ENTRY_ID });
+    const slow = { ...(synthSlow()), delayMs: 40 };
+    world.ttsQueue.push(slow);
+    const results = await Promise.all([post(world, handle, textBody()), post(world, handle, textBody())]);
+    assertEquals(results.map((response) => response.status), [200, 200]);
+    const [a, b] = await Promise.all(results.map(ok));
+    const [row] = world.entries;
+    const path = `${USER}/devotionals/${row.id}.wav`;
+    assertEquals([a.entry.devotional?.audioPath, b.entry.devotional?.audioPath], [path, path]);
+    assertEquals([a.entry.devotional?.durationMs, b.entry.devotional?.durationMs], [FIXTURE_WAV_MS, FIXTURE_WAV_MS]);
+    assertEquals(world.entries.length, 1);
+    assertEquals(world.uploads.length, 2, "both made and uploaded the file: the second replaced the first");
+    assertEquals([...world.storage.keys()].filter((key) => key.includes("/devotionals/")), [path]);
+    assertEquals([row.devotional_audio_path, row.error_code], [path, null]);
+    assertEquals(world.callOrder, [], "no screening and no model call for either");
+  }),
+);
+
+// A Text-to-Speech answer that carries the fixture WAV, to put a delay on.
+function synthSlow(): Extract<GoogleReply, { kind: "json" }> {
+  const bytes = FIXTURE_WAV;
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return { kind: "json", status: 200, body: { audioContent: btoa(binary) } };
+}
+
+Deno.test(
+  "speech i) a crisis entry gets no speech, no limit check and no Google call, and its retry answers it as it is",
+  speechFlow([], async (world) => {
+    const response = await post(world, handle, textBody({ text: PHRASE_TEXT }));
+    assertEquals(response.status, 200);
+    assertCrisis(world, await ok(response), PHRASE_TEXT);
+    assertEquals([world.tokenCalls.length, world.ttsCalls.length, world.uploads.length], [0, 0, 0]);
+    assert(
+      !world.requests.some((request) => request.url.searchParams.has("devotional_script")),
+      "no count of devotionals was asked for",
+    );
+    assert(
+      !world.requests.some((request) => request.method === "GET" && request.url.pathname.endsWith("/users_profile")),
+      "the plan was not read",
+    );
+    const line = lastLog(world);
+    assertEquals([line.tts, line.limit, line.limitUsed, line.screen], [null, null, null, "crisis"]);
+
+    const again = await post(world, handle, textBody({ text: PHRASE_TEXT }));
+    assertEquals(again.status, 200);
+    assertEquals((await ok(again)).entry.isCrisis, true);
+    assertEquals([world.ttsCalls.length, world.uploads.length], [0, 0]);
+    assertEquals(lastLog(world).tts, null);
+    assertEquals(world.entries[0].devotional_audio_path, null);
+  }),
+);
+
+// -- The free tier's limit (step 22) -----------------------------------------------------------------------------------
+
+// What a 402 says: the usual error and, beside it, the entry that was saved and the week's numbers.
+async function limitBody(response: Response): Promise<ProcessEntryLimitError> {
+  assertEquals(response.status, 402);
+  const body = await response.json() as ProcessEntryLimitError;
+  assertEquals(Object.keys(body).sort(), ["entryId", "error", "usage"]);
+  assertEquals(Object.keys(body.error).sort(), ["code", "message", "requestId"]);
+  assertEquals(body.error.code, "LIMIT_REACHED");
+  assertEquals(body.error.message, MESSAGE_BY_CODE.LIMIT_REACHED);
+  assert(/^[0-9a-f-]{36}$/.test(body.error.requestId), "the error carries a request id");
+  assertEquals(Object.keys(body.usage).sort(), ["limit", "resetsAt", "used"]);
+  return body;
+}
+
+const seedWeek = (world: World, count = FREE_DEVOTIONALS_PER_WEEK) => {
+  for (let index = 0; index < count; index += 1) seedDevotional(world, USER);
+};
+
+Deno.test(
+  "limit j) m) a fourth devotional of the week is a 402 with the entry and the usage, screened and never written; again, still one entry",
+  flow([geminiOk(readyOutput())], async (world) => {
+    seedWeek(world);
+    const body = await limitBody(await post(world, handle, textBody()));
+    const row = world.entries.find((entry) => entry.client_entry_id === ENTRY_ID)!;
+    assertEquals(body.entryId, row.id);
+    assertEquals([body.usage.used, body.usage.limit], [3, FREE_DEVOTIONALS_PER_WEEK]);
+    // resetsAt is the start of next week on the profile's clock: a Monday, 00:00, still to come.
+    const resets = new Date(body.usage.resetsAt);
+    assertEquals(body.usage.resetsAt, weekWindow(new Date(), "UTC").end.toISOString());
+    assertEquals([resets.getUTCDay(), resets.getUTCHours(), resets.getUTCMinutes(), resets.getUTCSeconds()], [
+      1,
+      0,
+      0,
+      0,
+    ]);
+    assert(resets.getTime() > Date.now());
+
+    // The entry is saved as failed with the code and with the person's words, and nothing was written for it: the screening
+    // was the only model call.
+    assertEquals(
+      [row.processing_status, row.error_code, row.devotional_script, row.transcript],
+      ["failed", "LIMIT_REACHED", null, TEXT],
+    );
+    assertEquals(world.callOrder, ["screening"]);
+    assertEquals(world.affirmations.length, 0);
+    const line = lastLog(world);
+    assertEquals([line.status, line.code, line.reason], [402, "LIMIT_REACHED", "free_limit"]);
+    assertEquals([line.screen, line.limit, line.limitUsed, line.tts], ["clear", "free_blocked", 3, null]);
+    assert(!world.logs.join("\n").includes(body.entryId), "the body's entry id is not in the log");
+    assertEquals(unscopedRequests(world, USER), []);
+
+    // The account stays free and sends the same request again: blocked again, the same single entry, screened again.
+    const again = await limitBody(await post(world, handle, textBody()));
+    assertEquals(again.entryId, body.entryId);
+    assertEquals(world.entries.length, FREE_DEVOTIONALS_PER_WEEK + 1);
+    assertEquals(world.callOrder, ["screening", "screening"]);
+
+    // The account becomes Pro: the same request is made from the same entry, and nothing is counted.
+    profile(world, "pro");
+    const made = await post(world, handle, textBody());
+    assertEquals(made.status, 200);
+    assertEquals((await ok(made)).entry.id, body.entryId);
+    assertEquals(world.entries.length, FREE_DEVOTIONALS_PER_WEEK + 1);
+    assertEquals([row.processing_status, row.error_code], ["ready", null]);
+    const madeLine = lastLog(world);
+    assertEquals([madeLine.limit, madeLine.limitUsed], ["exempt", null]);
+  }),
+);
+
+Deno.test(
+  "limit k) l) a recording the limit held back keeps what was heard; after an upgrade it is screened from those words, not read again",
+  flow([geminiOk(readyOutput())], async (world) => {
+    seedWeek(world);
+    world.storage.set(AUDIO_PATH, new Uint8Array(500));
+    const body = await limitBody(await post(world, handle, audioBody()));
+    const row = world.entries.find((entry) => entry.client_entry_id === ENTRY_ID)!;
+    assertEquals(body.entryId, row.id);
+    assertEquals(
+      [row.processing_status, row.error_code, row.transcript, row.audio_path],
+      ["failed", "LIMIT_REACHED", SPOKEN, AUDIO_PATH],
+    );
+    const downloads = () =>
+      world.requests.filter((request) => request.method === "GET" && request.url.pathname.endsWith(AUDIO_PATH)).length;
+    assertEquals(downloads(), 1);
+    assert(Array.isArray(sentBody(world.screenCalls[0]).input), "the first screening heard the recording");
+
+    profile(world, "pro");
+    const made = await post(world, handle, audioBody());
+    assertEquals(made.status, 200);
+    const { entry } = await ok(made);
+    assertEquals([entry.id, entry.inputType, entry.transcript], [body.entryId, "audio", SPOKEN]);
+    assertEquals(downloads(), 1, "the recording was not downloaded again");
+    assertEquals(world.screenCalls.length, 2);
+    assertEquals(sentBody(world.screenCalls[1]).input, `<journal_entry>\n${SPOKEN}\n</journal_entry>`);
+    const line = lastLog(world);
+    assertEquals([line.inputType, line.limit, line.screen], ["audio", "exempt", "clear"]);
+    assertEquals(world.entries.length, FREE_DEVOTIONALS_PER_WEEK + 1);
+  }),
+);
+
+for (const tier of ["trial", "pro"] as const) {
+  Deno.test(
+    `limit n) a ${tier} account has no limit: ten devotionals this week, a new one is made, and nothing is counted`,
+    flow([geminiOk(readyOutput())], async (world) => {
+      profile(world, tier);
+      // Made earlier than the ten-minute rate limit looks, so that only the weekly limit is in question.
+      const earlier = new Date(Date.now() - 11 * 60_000).toISOString();
+      for (let index = 0; index < 10; index += 1) seedDevotional(world, USER, { created_at: earlier });
+      const response = await post(world, handle, textBody());
+      assertEquals(response.status, 200);
+      assertEquals((await ok(response)).entry.status, "ready");
+      assert(!world.requests.some((request) => request.url.searchParams.has("devotional_script")), "no count was made");
+      const line = lastLog(world);
+      assertEquals([line.limit, line.limitUsed], ["exempt", null]);
+    }),
+  );
+}
+
+Deno.test(
+  "limit o) a crisis entry over the limit gets the crisis answer, never a 402, and is not counted afterwards",
+  flow([geminiOk(readyOutput())], async (world) => {
+    seedWeek(world);
+    const byPhrase = await post(world, handle, textBody({ text: PHRASE_TEXT }));
+    assertEquals(byPhrase.status, 200);
+    assertEquals((await ok(byPhrase)).entry.isCrisis, true);
+    world.screenQueue.push(flagged("crisis"));
+    const byModel = await post(world, handle, textBody({ clientEntryId: ID_2, text: QUIET_TEXT }));
+    assertEquals(byModel.status, 200);
+    assertEquals((await ok(byModel)).entry.isCrisis, true);
+    assertEquals(lastLog(world).limit, null, "a crisis never reaches the limit");
+
+    // Neither crisis was counted: the next ordinary entry still sees exactly the three that were made.
+    const next = await limitBody(await post(world, handle, textBody({ clientEntryId: ID_3 })));
+    assertEquals(next.usage.used, FREE_DEVOTIONALS_PER_WEEK);
+  }),
+);
+
+Deno.test(
+  "limit q) two requests at once as the third and the fourth devotional: exactly one is made, whichever looks first (20 rounds)",
+  async () => {
+    for (let round = 0; round < 20; round += 1) {
+      await flow([geminiOk(readyOutput()), geminiOk(readyOutput())], async (world) => {
+        seedWeek(world, FREE_DEVOTIONALS_PER_WEEK - 1);
+        const ids = [crypto.randomUUID(), crypto.randomUUID()];
+        const results = await Promise.all(ids.map((clientEntryId) => post(world, handle, textBody({ clientEntryId }))));
+        assertEquals(results.map((response) => response.status).sort(), [200, 402], `round ${round}`);
+        assertEquals(world.entries.length, FREE_DEVOTIONALS_PER_WEEK + 1, `round ${round}`);
+        assertEquals(
+          world.entries.filter((row) => row.devotional_script !== null).length,
+          FREE_DEVOTIONALS_PER_WEEK,
+          `round ${round}: three devotionals, never four`,
+        );
+      })();
+    }
+  },
+);
+
+Deno.test(
+  "limit r) the profile's time zone decides where the week starts",
+  flow([geminiOk(readyOutput())], async (world) => {
+    const startOf = (zone: string) => weekWindow(new Date(), zone).start.getTime();
+    const [early, late] = ["Pacific/Kiritimati", "Pacific/Pago_Pago"].sort((a, b) => startOf(a) - startOf(b));
+    assert(startOf(early) < startOf(late), "the two zones begin the week at different moments, whatever the time now");
+    // Three devotionals made a minute before the later zone's week began: they are in the earlier zone's week and not in
+    // the later one's, at any moment of any week.
+    const lastMinute = new Date(startOf(late) - 60_000).toISOString();
+    for (let index = 0; index < FREE_DEVOTIONALS_PER_WEEK; index += 1) {
+      seedDevotional(world, USER, { created_at: lastMinute });
+    }
+
+    profile(world, "free", early);
+    const blocked = await limitBody(await post(world, handle, textBody()));
+    assertEquals(blocked.usage.used, FREE_DEVOTIONALS_PER_WEEK);
+    assertEquals(blocked.usage.resetsAt, weekWindow(new Date(), early).end.toISOString());
+    assertEquals(lastLog(world).limit, "free_blocked");
+
+    profile(world, "free", late);
+    const allowed = await post(world, handle, textBody({ clientEntryId: ID_2 }));
+    assertEquals(allowed.status, 200);
+    const line = lastLog(world);
+    assertEquals([line.limit, line.limitUsed], ["free_ok", 0]);
+  }),
+);
+
+Deno.test(
+  "limit r2) a zone Intl does not know is read as UTC, and the log says so",
+  flow([geminiOk(readyOutput())], async (world) => {
+    profile(world, "free", "Mars/Phobos");
+    assertEquals((await post(world, handle, textBody())).status, 200);
+    const line = lastLog(world);
+    assertEquals([line.limit, line.limitUsed], ["free_ok:bad_timezone", 0]);
+
+    seedWeek(world, FREE_DEVOTIONALS_PER_WEEK - 1);
+    const body = await limitBody(await post(world, handle, textBody({ clientEntryId: ID_2 })));
+    assertEquals(body.usage.resetsAt, weekWindow(new Date(), "UTC").end.toISOString());
+    const blocked = lastLog(world);
+    assertEquals([blocked.limit, blocked.limitUsed], ["free_blocked:bad_timezone", FREE_DEVOTIONALS_PER_WEEK]);
+  }),
+);
+
+// -- The log, the refusals and the entry that was saved (step 22) ------------------------------------------------------
+
+Deno.test(
+  "log s) with speech on the line has exactly 30 fields and holds no script, verse, link, path, key or address",
+  speechFlow([geminiOk(readyOutput())], async (world) => {
+    const token = await world.token({ sub: USER });
+    const response = await post(world, handle, textBody({ text: `${TEXT} SECRET-MARKER` }), { token });
+    assertEquals(response.status, 200);
+    const { entry } = await ok(response);
+    assertEquals(world.logs.length, 1);
+    const line = JSON.parse(world.logs[0]);
+    assertEquals(Object.keys(line).length, 30);
+    assertEquals([line.tts, line.limit, line.limitUsed], ["ok", "free_ok", 0]);
+    assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
+
+    // And a call that Google refuses puts only its short words in the line, never its message.
+    world.geminiQueue.push(geminiOk(readyOutput()));
+    world.ttsQueue.push({
+      kind: "json",
+      status: 403,
+      body: { error: { code: 403, status: "PERMISSION_DENIED", message: "SECRET-GOOGLE-MESSAGE project-1234" } },
+    });
+    await post(world, handle, textBody({ clientEntryId: ID_2 }), { token });
+    assertEquals(lastLog(world).tts, "failed:tts_http_403:PERMISSION_DENIED");
+
+    const everything = world.logs.join("\n");
+    for (
+      const word of [
+        TEXT,
+        "SECRET-MARKER",
+        "SECRET-GOOGLE-MESSAGE",
+        "project-1234",
+        USER,
+        token,
+        "test-gemini-key",
+        "sb_secret_test_key",
+        "Paragraph 1",
+        "Be anxious for nothing",
+        "Philippians",
+        "Let's pray",
+        "Lord, we bring",
+        "A reading from",
+        "pause",
+        "://", // no link of any kind (tts_http_403 is Google's status word, not a link)
+        "journal_media",
+        "devotionals",
+        String(entry.id),
+        String(entry.devotional?.audioPath),
+        SPEECH_EMAIL,
+        "gserviceaccount",
+        "PRIVATE KEY",
+        "ya29",
+        "Bearer",
+      ]
+    ) assert(!everything.includes(word), `the log must not contain: ${word}`);
+  }),
+);
+
+Deno.test(
+  "log t) a request that is refused answers its usual body, with nothing of the limit in it",
+  flow([], async (world) => {
+    for (const token of [null, "not.a.jwt"]) {
+      const response = await post(world, handle, textBody(), { token });
+      assertEquals(response.status, 401);
+      const json = await response.json();
+      assertEquals(Object.keys(json), ["error"]);
+      assertEquals(Object.keys(json.error).sort(), ["code", "message", "requestId"]);
+    }
+    const short = await post(world, handle, textBody({ text: "Hello" }));
+    assertEquals(short.status, 422);
+    assertEquals(Object.keys(await short.json()), ["error"]);
+    assertEquals(world.requests.length, 0);
+  }),
+);
+
+Deno.test(
+  "saved u) a database that fails while the answer is built, after the reflection and its audio were saved, never fails the entry",
+  speechFlow([geminiOk(readyOutput())], async (world) => {
+    const real = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+      const request = new Request(input, init);
+      if (request.method === "GET" && new URL(request.url).pathname === "/rest/v1/daily_affirmations") {
+        const body = JSON.stringify({ code: "XX000", message: "boom" });
+        return Promise.resolve(new Response(body, { status: 500, headers: { "Content-Type": "application/json" } }));
+      }
+      return real(input, init);
+    };
+    let response: Response;
+    try {
+      response = await post(world, handle, textBody());
+    } finally {
+      globalThis.fetch = real;
+    }
+    assertEquals(response.status, 500);
+    assertError(await failure(response), "INTERNAL");
+    assertEquals(lastLog(world).reason, "db:affirmations_read:XX000");
+
+    // The reflection and its audio were saved before the answer was built, and nothing flipped the entry to failed.
+    const [row] = world.entries;
+    assertEquals([row.processing_status, row.error_code], ["ready", null]);
+    assert(row.devotional_script !== null && row.devotional_audio_path !== null);
+    assertEquals(world.affirmations.length, 3);
+
+    // The same request answers it from its saved row: no screening, no model, no Google.
+    const calls = [world.screenCalls.length, world.geminiCalls.length, world.ttsCalls.length];
+    const retry = await post(world, handle, textBody());
+    assertEquals(retry.status, 200);
+    const { entry } = await ok(retry);
+    assertEquals([entry.id, entry.status, entry.devotional?.audioPath], [row.id, "ready", row.devotional_audio_path]);
+    assertEquals([world.screenCalls.length, world.geminiCalls.length, world.ttsCalls.length], calls);
+  }),
+);
+
+Deno.test(
+  "saved u2) after a crisis is saved the handler needs no database at all, so nothing can turn it into a failed entry",
+  flow([], async (world) => {
+    const real = globalThis.fetch;
+    let saved = false;
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      if (saved && new URL(request.url).host.endsWith("supabase.test")) {
+        throw new TypeError("the database went away after the save");
+      }
+      const reply = await real(input, init);
+      if (request.method === "PATCH" && (await request.clone().text()).includes('"is_crisis":true')) saved = true;
+      return reply;
+    };
+    let response: Response;
+    try {
+      response = await post(world, handle, textBody({ text: PHRASE_TEXT }));
+    } finally {
+      globalThis.fetch = real;
+    }
+    assert(saved, "the crisis was saved");
+    assertEquals(response.status, 200, "the answer was built from the saved row, with no further database call");
+    assertCrisis(world, await ok(response), PHRASE_TEXT);
+
+    // The same request answers it as the crisis it is.
+    const again = await post(world, handle, textBody({ text: PHRASE_TEXT }));
+    assertEquals(again.status, 200);
+    assertCrisis(world, await ok(again), PHRASE_TEXT);
   }),
 );

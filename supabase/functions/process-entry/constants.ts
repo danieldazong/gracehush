@@ -23,6 +23,22 @@ export const RATE_LIMIT_WINDOW_MS = 10 * 60_000;
 // (free plan), and step 22's speech needs about 40 s of that.
 export const GEMINI_DEADLINE_MS = 90_000;
 
+// The rest of the time budget of one request, all counted from its start (step 22). It is an object so that a test can
+// shorten it, like `timing` in gemini.ts and `screenTiming` in the screening.
+//
+//   the crisis screening, all its attempts   60 s    screenTiming.deadlineMs (_shared/safety/screen.ts)
+//   the reflection and a second passage      90 s    GEMINI_DEADLINE_MS, above
+//   speech may START                         in the first 100 s: later than that it is skipped, and sending the same request
+//                                            again adds the audio
+//   speech's calls all end                   by 135 s: 30 s a call, one retry after 1 s, none starts with under 8 s left
+//                                            (ttsTiming in _shared/tts/synthesize.ts)
+//   the upload                               20 s, and never later than 5 s after the 135 s (speech.ts)
+//   the platform                             150 s of wall clock on the free plan, 2 s of CPU (waiting is free), 256 MB
+//
+// So even when every step is slow the answer is sent at about 145 s. A request that the platform does stop still leaves a
+// good "ready" entry, and the same request sent again adds the audio.
+export const speechTiming = { latestStartMs: 100_000, deadlineMs: 135_000, uploadTimeoutMs: 20_000 };
+
 // A row that has been "processing" for longer than this belongs to a request that died, and may be claimed again.
 // Longer than the platform's 150 s wall clock, so a request that is still running is never taken over.
 export const CLAIM_LEASE_MS = 3 * 60_000;

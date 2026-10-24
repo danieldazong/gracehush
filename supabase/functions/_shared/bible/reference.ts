@@ -43,6 +43,24 @@ export function formatReference(ref: ScriptureRef): string {
   return `${name} ${ref.chapter}:${verses}`;
 }
 
+const ORDINALS: Record<string, string> = { "1": "First", "2": "Second", "3": "Third" };
+
+// How a passage is read aloud (step 22), for the sentence "A reading from …": the numbered books say First, Second and
+// Third ("1 John" is "First John"), a dash becomes "through", the book of Psalms has no "chapter" ("Psalm 23, verses 1
+// through 3"), and a book with one chapter leaves the chapter out ("Jude, verses 24 through 25"), as a reader would.
+export function spokenReference(ref: ScriptureRef): string {
+  const book = bookById(ref.bookId);
+  const name = (book ? displayName(book) : ref.bookId).replace(
+    /^([123]) /,
+    (_whole, digit: string) => `${ORDINALS[digit]} `,
+  );
+  const verses = ref.verseEnd > ref.verseStart
+    ? `verses ${ref.verseStart} through ${ref.verseEnd}`
+    : `verse ${ref.verseStart}`;
+  if (book !== null && book.chapters === 1) return `${name}, ${verses}`;
+  return ref.bookId === "PSA" ? `${name} ${ref.chapter}, ${verses}` : `${name} chapter ${ref.chapter}, ${verses}`;
+}
+
 const REFERENCE = /^(.+?)\s+(\d{1,3}):(\d{1,3})(?:\s*[–-]\s*(\d{1,3}))?$/;
 
 // Reads what formatReference() writes, and the spellings older rows may hold ("Psalms 127:1-2", "Phil. 4:6-7"). Null when

@@ -1,10 +1,12 @@
 // One JSON line per request.
 //
 // Allowed: the request id, a short hash of the user id, the status, an error code or category, the input kind,
-// durations, attempt and token counts, the model name, what became of the passage as one word (step 20), and what the
-// crisis screening answered as one word, with the stage that decided (step 21). Never: a token or its claims, an email, a
-// transcript, entry text, audio, model output, scripture (not even which book or chapter), the categories of concern the
-// screening named, a phrase that matched, SQL, or a provider's error message (those can quote what the user wrote).
+// durations, attempt and token counts, the model name, what became of the passage as one word (step 20), what the
+// crisis screening answered as one word, with the stage that decided (step 21), and what the speech step and the free
+// tier's check did, as one word each with their numbers (step 22). Never: a token or its claims, an email, a
+// transcript, entry text, audio, model output, the script that was read aloud, scripture (not even which book or chapter),
+// the categories of concern the screening named, a phrase that matched, a link, a storage path, a key, the service
+// account's address, SQL, or a provider's error message (those can quote what the user wrote).
 
 // What became of the passage: verified on the first try, replaced by a second choice that was verified, kept without its
 // text because the Bible text could not be read, or dropped because no valid passage was found. null: no passage was
@@ -19,6 +21,28 @@ export type ScreenStatus = "clear" | "crisis" | "no_speech" | "failed";
 // being unsure (which counts as a crisis), or a safety filter blocking the request. The generation stage uses the same
 // words when it is the one that catches a crisis the screening called clear.
 export type CrisisSource = "phrase" | "model" | "uncertain" | "blocked";
+
+// What the speech step did (step 22). null in the log: it did not run (a refused request, a crisis, an entry the free limit
+// held back, or a retry of an entry that needed no speech). "bad_config" names the secret to look at, and "failed" holds
+// Google's or storage's short words only (tts_http_403:PERMISSION_DENIED/SERVICE_DISABLED, tts_timeout, storage...), never
+// a message of theirs.
+export type SpeechStatus =
+  | "ok"
+  | "off"
+  | "skipped:time"
+  | "skipped:script"
+  | `bad_config:${string}`
+  | `failed:${string}`;
+
+// What the free tier's check found (step 22). null: it did not run (the request ended before it, or it was a crisis).
+// "exempt" is a trial or Pro account, for which nothing is counted. ":bad_timezone": the profile's zone was not one Intl
+// knows, so the week was worked out in UTC.
+export type LimitStatus =
+  | "exempt"
+  | "free_ok"
+  | "free_blocked"
+  | "free_ok:bad_timezone"
+  | "free_blocked:bad_timezone";
 
 export type LogLine = {
   requestId: string;
@@ -49,6 +73,16 @@ export type LogLine = {
   screenMs: number;
   screenAttempts: number;
   crisisSource: CrisisSource | null;
+  // The speech step (step 22): its outcome; the time, the calls and the billed characters it spent (0 when none ran or
+  // when the call failed); and the length of the WAV it stored.
+  tts: SpeechStatus | null;
+  ttsMs: number;
+  ttsAttempts: number;
+  ttsChars: number;
+  audioMs: number | null;
+  // The free tier (step 22): what the check found, and the count it found (null when no count was made).
+  limit: LimitStatus | null;
+  limitUsed: number | null;
 };
 
 // The first 8 hex characters of SHA-256(value): enough to follow one user through the logs, not to find them.

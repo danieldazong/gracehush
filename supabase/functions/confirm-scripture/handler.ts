@@ -209,6 +209,13 @@ export async function handle(req: Request): Promise<Response> {
       screenMs: 0,
       screenAttempts: 0,
       crisisSource: null,
+      tts: null,
+      ttsMs: 0,
+      ttsAttempts: 0,
+      ttsChars: 0,
+      audioMs: null,
+      limit: null,
+      limitUsed: null,
     };
     writeLog(line);
   }

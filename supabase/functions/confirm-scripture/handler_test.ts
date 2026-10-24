@@ -279,6 +279,7 @@ Deno.test(
     const line = JSON.parse(world.logs[0]);
     assertEquals(Object.keys(line).sort(), [
       "attempts",
+      "audioMs",
       "authMs",
       "bibleMs",
       "code",
@@ -287,6 +288,8 @@ Deno.test(
       "fallbackAttempts",
       "geminiMs",
       "inputType",
+      "limit",
+      "limitUsed",
       "model",
       "promptVersion",
       "reason",
@@ -300,10 +303,17 @@ Deno.test(
       "tokensOut",
       "tokensThought",
       "totalMs",
+      "tts",
+      "ttsAttempts",
+      "ttsChars",
+      "ttsMs",
       "user",
     ]);
     assertEquals(line.status, 200);
     assertEquals(line.scripture, "verified");
+    // Speech and the free limit are process-entry's: this function leaves their fields empty.
+    assertEquals([line.tts, line.ttsMs, line.ttsAttempts, line.ttsChars, line.audioMs], [null, 0, 0, 0, null]);
+    assertEquals([line.limit, line.limitUsed], [null, null]);
     for (
       const word of [
         String(entry.id),

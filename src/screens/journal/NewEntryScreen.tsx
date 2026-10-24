@@ -146,7 +146,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
       navigation.replace("Reflection", { entryId: result.entryId });
     } else if (result.code === "LIMIT_REACHED") {
       leaving.current = true;
-      // TODO(22): the server returns entryId with LIMIT_REACHED; pass it as { source: "limit", entryId }
+      // TODO(25): read entryId from the 402 body (ProcessEntryLimitError) and pass { source: "limit", entryId }
       navigation.replace("Paywall", { source: "limit" });
     } else {
       submitting.current = false;

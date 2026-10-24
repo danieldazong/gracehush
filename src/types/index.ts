@@ -185,7 +185,22 @@ export interface ProcessEntryError {
   error: { code: ProcessEntryErrorCode; message: string; requestId: string };
 }
 
-// A crisis entry comes back with `affirmations: []`. Steps 19, 21 and 22 add fields (the 402 body, signed audio URL).
+// The 402 body (step 22): the usual error, the entry that was saved, and the numbers the Paywall needs. `used` is the real
+// count and can be higher than `limit` (a person who was Pro earlier in the week and then lapsed), so a screen that shows
+// it shows the smaller of the two.
+export interface LimitUsage {
+  used: number;
+  limit: number;
+  resetsAt: string; // ISO 8601: the start of next week on the person's clock
+}
+export interface ProcessEntryLimitError {
+  error: { code: "LIMIT_REACHED"; message: string; requestId: string };
+  entryId: string;
+  usage: LimitUsage;
+}
+
+// A crisis entry comes back with `affirmations: []`. A devotional's `audioPath` and `durationMs` are a path and a number:
+// the function returns and stores no link (step 22), and the app asks Supabase for its own signed link (step 26).
 export type ProcessEntryResponse = { entry: JournalEntry; affirmations: Affirmation[] };
 
 // confirm-scripture (step 20): asked again for the passage of a reflection whose text could not be read when it was made.

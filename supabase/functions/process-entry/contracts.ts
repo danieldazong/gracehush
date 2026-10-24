@@ -47,6 +47,20 @@ export interface ProcessEntryError {
   error: { code: ProcessEntryErrorCode; message: string; requestId: string };
 }
 
+// The 402 body (step 22): the usual error, the entry that was saved, and the numbers the Paywall needs. `used` is the real
+// count and can be higher than `limit` (a person who was Pro earlier in the week and then lapsed), so a screen that shows
+// it shows the smaller of the two.
+export interface LimitUsage {
+  used: number;
+  limit: number;
+  resetsAt: string; // ISO 8601: the start of next week on the person's clock
+}
+export interface ProcessEntryLimitError {
+  error: { code: "LIMIT_REACHED"; message: string; requestId: string };
+  entryId: string;
+  usage: LimitUsage;
+}
+
 export interface Scripture {
   reference: string;
   text: string | null;

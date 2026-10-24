@@ -18,6 +18,8 @@ export type ContractParity = [
   Expect<Same<App.ProcessEntryErrorCode, Server.ProcessEntryErrorCode>>,
   Expect<Same<App.StoredErrorCode, Server.StoredErrorCode>>,
   Expect<Same<App.ProcessEntryError, Server.ProcessEntryError>>,
+  Expect<Same<App.LimitUsage, Server.LimitUsage>>,
+  Expect<Same<App.ProcessEntryLimitError, Server.ProcessEntryLimitError>>,
   Expect<Same<App.ProcessEntryResponse, Server.ProcessEntryResponse>>,
   Expect<Same<App.ConfirmScriptureRequest, Server.ConfirmScriptureRequest>>,
   Expect<Same<App.ConfirmScriptureResponse, Server.ConfirmScriptureResponse>>,

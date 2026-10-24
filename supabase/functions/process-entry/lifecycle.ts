@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { AppError } from "../_shared/errors.ts";
+import type { LimitProfile } from "../_shared/limits/weekly.ts";
 import { CLAIM_LEASE_MS } from "./constants.ts";
 import type { InputType, ProcessEntryRequest, TimeSlot } from "./contracts.ts";
 
@@ -60,6 +61,18 @@ export async function ensureProfile(admin: SupabaseClient, userId: string): Prom
     ignoreDuplicates: true,
   });
   if (error) throw dbFailure("profile", error);
+}
+
+// The person's plan and time zone, for the free tier's check (step 22). A plan the table does not know reads as free (its
+// check constraint keeps it to three values, so this only guards against a future one), and the time zone is passed on as
+// it is: weekWindow reads one that Intl does not know as UTC, and says so.
+export async function readProfile(admin: SupabaseClient, userId: string): Promise<LimitProfile> {
+  const { data, error } = await admin.from("users_profile").select("subscription_tier, timezone")
+    .eq("id", userId).maybeSingle();
+  if (error || data === null) throw dbFailure("profile_read", error);
+  const row = data as { subscription_tier: string | null; timezone: string | null };
+  const tier = row.subscription_tier === "trial" || row.subscription_tier === "pro" ? row.subscription_tier : "free";
+  return { tier, timezone: row.timezone ?? "UTC" };
 }
 
 export async function findEntry(
@@ -166,6 +179,20 @@ export async function claimEntry(
   return won.length === 1 ? { kind: "claimed", row: won[0] } : { kind: "busy" };
 }
 
+// A recording that the free limit holds back keeps the words the screening heard (step 22), so that sending it again after
+// an upgrade screens those words as written text and neither downloads nor transcribes the recording a second time. Only
+// an entry that is still being processed is changed.
+export async function saveTranscript(
+  admin: SupabaseClient,
+  userId: string,
+  entryId: string,
+  words: string,
+): Promise<void> {
+  const { error } = await admin.from("journal_entries").update({ transcript: words })
+    .eq("id", entryId).eq("user_id", userId).eq("processing_status", "processing");
+  if (error) throw dbFailure("save_transcript", error);
+}
+
 // Marks a claimed entry failed. The person's text or recording stays saved. Never throws: the error being handled is
 // the one that matters.
 export async function failEntry(
@@ -245,7 +272,8 @@ export async function saveReadyEntry(
   const { data, error } = await admin.from("journal_entries").update({
     ...fields,
     is_crisis: false,
-    // TODO(22): speech, devotional_audio_path and devotional_duration_ms.
+    // A reflection is saved without its audio. Speech is a later, best-effort step (speech.ts) that adds the path and the
+    // length once the file is stored, so nothing about it can lose or fail a reflection.
     devotional_audio_path: null,
     devotional_duration_ms: null,
     processing_status: "ready",
@@ -265,7 +293,8 @@ export async function saveReadyEntry(
 // If any part of this fails, the whole thing is a plain 500 with the reason crisis_save_failed and the caller never
 // falls back to a devotional: the person can send the same entry again.
 //
-// TODO(22): a crisis entry never counts toward the free-tier limit, so the weekly count must skip is_crisis rows.
+// A crisis entry never counts toward the free tier's limit (checkDevotionalLimit skips is_crisis rows, and a crisis is
+// answered before the limit is ever checked) and it never gets speech.
 // TODO(28): never schedule affirmations for a crisis entry (it has none, and the phone must not make any up).
 export async function saveCrisisEntry(
   admin: SupabaseClient,
@@ -300,5 +329,56 @@ export async function saveCrisisEntry(
     return rows[0];
   } catch {
     throw new AppError("INTERNAL", "crisis_save_failed");
+  }
+}
+
+// A reflection that is ready, has its devotional and still has no audio: the one kind of finished entry that speech can
+// still be added to (step 22). A crisis entry never is, whatever else it holds.
+export function needsSpeech(
+  row: Pick<EntryRow, "is_crisis" | "processing_status" | "devotional_script" | "devotional_audio_path">,
+): boolean {
+  return !row.is_crisis && row.processing_status === "ready" && !!row.devotional_script && !row.devotional_audio_path;
+}
+
+// Stores where the audio is and how long it is. The update only matches a ready reflection that still has no audio, so of
+// two requests that add it at the same moment exactly one changes the row; the other gets null and reads the entry again
+// (and the file it uploaded replaced the first one's at the same path, which is harmless). A failure that went before is
+// cleared: error_code goes back to null.
+export async function saveAudio(
+  admin: SupabaseClient,
+  userId: string,
+  entryId: string,
+  path: string,
+  durationMs: number | null,
+): Promise<EntryRow | null> {
+  const { data, error } = await admin.from("journal_entries").update({
+    devotional_audio_path: path,
+    devotional_duration_ms: durationMs,
+    error_code: null,
+  }).eq("id", entryId).eq("user_id", userId).eq("is_crisis", false).eq("processing_status", "ready")
+    .is("devotional_audio_path", null).select();
+  if (error) throw dbFailure("save_audio", error);
+  const rows = data as EntryRow[];
+  return rows.length === 1 ? rows[0] : null;
+}
+
+// Speech failed (Google or storage said no): the reflection stays ready as text and says so, so that the app can tell "no
+// audio yet" from "no audio". Guarded like saveAudio, so it never marks a crisis entry, an unfinished one or one that got
+// its audio from another request. Never throws, and returns the row as it now stands, or null when nothing was marked.
+export async function markSpeechFailed(
+  admin: SupabaseClient,
+  userId: string,
+  entryId: string,
+): Promise<EntryRow | null> {
+  try {
+    const { data, error } = await admin.from("journal_entries").update({ error_code: "TTS_FAILED" })
+      .eq("id", entryId).eq("user_id", userId).eq("is_crisis", false).eq("processing_status", "ready")
+      .is("devotional_audio_path", null).select();
+    if (error) return null;
+    const rows = data as EntryRow[];
+    return rows.length === 1 ? rows[0] : null;
+  } catch {
+    // The reflection is already saved; there is nothing more to do.
+    return null;
   }
 }

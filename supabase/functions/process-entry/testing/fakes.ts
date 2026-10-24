@@ -1,11 +1,15 @@
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
 import { bibleTiming, clearChapterCache } from "../../_shared/bible/helloao.ts";
+import { clearTokenCache } from "../../_shared/tts/googleAuth.ts";
+import { ttsTiming } from "../../_shared/tts/synthesize.ts";
+import { makeServiceAccount, synthOk, tokenOk } from "../../_shared/tts/testing.ts";
+import { speechTiming } from "../constants.ts";
 import type { EntryRow } from "../lifecycle.ts";
 
-// An offline world for the tests: a stand-in for Clerk's key set, Gemini, the Bible API, PostgREST and Storage that is
-// installed as `globalThis.fetch`. The real handler, the real jose and the real supabase-js run unchanged on top of it, so a test
-// sees the same requests the hosted function would send.
+// An offline world for the tests: a stand-in for Clerk's key set, Gemini, the Bible API, Google (its token endpoint and
+// Text-to-Speech), PostgREST and Storage that is installed as `globalThis.fetch`. The real handler, the real jose and the
+// real supabase-js run unchanged on top of it, so a test sees the same requests the hosted function would send.
 //
 // The fake database enforces what the step 18 migration enforces for these tables (check constraints, the unique keys,
 // the foreign keys, the crisis trigger) and refuses a column that does not exist, so a wrong column name fails here.
@@ -14,6 +18,8 @@ export const ISSUER = "https://clerk.test";
 export const SUPABASE_URL = "https://project.supabase.test";
 export const GEMINI_HOST = "generativelanguage.googleapis.com";
 export const BIBLE_HOST = "bible.helloao.org";
+export const GOOGLE_TOKEN_HOST = "oauth2.googleapis.com";
+export const GOOGLE_TTS_HOST = "texttospeech.googleapis.com";
 
 type Row = Record<string, unknown>;
 
@@ -24,6 +30,28 @@ export type GeminiReply =
   | { kind: "network" }
   // Never answers; the request ends when its AbortSignal fires (our own timeout).
   | { kind: "hang" };
+
+// Google's replies have the same three shapes.
+export type GoogleReply = GeminiReply;
+
+// A real WAV (_shared/tts/fixtures: Cloud Text-to-Speech's own LINEAR16 answer, 24 kHz mono 16-bit, "Amen."), which a
+// synthesize request is answered with unless a test queued something else. Its length, by ffprobe and by wavDuration.ts, is
+// FIXTURE_WAV_MS.
+export const FIXTURE_WAV = Deno.readFileSync(
+  new URL("../../_shared/tts/fixtures/a-24k-mono-amen.wav", import.meta.url),
+);
+export const FIXTURE_WAV_MS = 1282;
+
+// What the journal_media bucket accepts (step 18, and audio/wav since the 2026-10-24 migration): these types, and files up
+// to 25 MiB.
+const BUCKET_MIME_TYPES = ["audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac", "audio/mpeg", "audio/wav"];
+const BUCKET_MAX_BYTES = 26_214_400;
+
+// The speech secrets of the test world: a real RSA key in a service account (so the sign-in signs for real), made once.
+const SPEECH_ACCOUNT = await makeServiceAccount();
+export const SPEECH_VOICE = "en-US-Chirp3-HD-Aoede";
+export const SPEECH_EMAIL = SPEECH_ACCOUNT.account.clientEmail;
+const SPEECH_NAMES = ["GOOGLE_TTS_CREDENTIALS_B64", "TTS_VOICE_NAME", "TTS_SPEAKING_RATE"];
 
 // What the Bible API answers for one chapter, keyed "PHP/4". A chapter with no entry is served from the real chapters in
 // _shared/bible/fixtures (404 when there is no fixture for it).
@@ -74,7 +102,7 @@ const ENTRY_DEFAULTS = (): Row => ({
 });
 
 const COLUMNS: Record<string, string[]> = {
-  users_profile: ["id", "created_at", "subscription_tier"],
+  users_profile: ["id", "created_at", "subscription_tier", "timezone"],
   journal_entries: ["id", "user_id", "created_at", "updated_at", ...Object.keys(ENTRY_DEFAULTS())],
   daily_affirmations: [
     "id",
@@ -123,7 +151,17 @@ export type World = {
   callOrder: ("screening" | "reflection")[];
   bible: Map<string, BibleReply>;
   bibleCalls: Recorded[];
+  // Google, for the speech step (step 22). A token request is answered with a fresh token ("ya29.test-1", "-2"...) unless
+  // tokenQueue holds a reply, and a synthesize request with FIXTURE_WAV unless ttsQueue does.
+  tokenCalls: Recorded[];
+  tokenQueue: GoogleReply[];
+  ttsCalls: Recorded[];
+  ttsQueue: GoogleReply[];
+  // Every file the function uploaded to journal_media, as storage-js sent it (the bytes are in `storage`).
+  uploads: { path: string; contentType: string; upsert: boolean; cacheControl: string }[];
   logs: string[];
+  // The database's clock: every call gives a later time than the one before, to the millisecond, so that two rows never
+  // share a created_at (the real database hands out a distinct time to each insert).
   now(): string;
   token(claims?: Row, options?: { expiresIn?: number; kid?: string }): Promise<string>;
   seedUser(id: string): void;
@@ -131,8 +169,10 @@ export type World = {
   restore(): void;
 };
 
+let lastClockMs = 0;
 function isoNow(): string {
-  return new Date().toISOString();
+  lastClockMs = Math.max(Date.now(), lastClockMs + 1);
+  return new Date(lastClockMs).toISOString();
 }
 
 function jsonResponse(status: number, body: unknown, headers: HeadersInit = {}): Response {
@@ -200,27 +240,37 @@ function check(table: string, row: Row, world: World, isInsert: boolean): void {
   }
 }
 
-type Filter = { column: string; op: string; value: string };
+type Filter = { column: string; op: string; value: string; negate: boolean };
 
+// PostgREST writes a filter as `column=op.value`, and a negated one as `column=not.op.value` (`not.is.null`).
 function filtersOf(url: URL): Filter[] {
   const reserved = new Set(["select", "on_conflict", "columns", "order", "limit", "offset"]);
   const filters: Filter[] = [];
   for (const [column, spec] of url.searchParams) {
     if (reserved.has(column)) continue;
-    const dot = spec.indexOf(".");
-    filters.push({ column, op: spec.slice(0, dot), value: spec.slice(dot + 1) });
+    const negate = spec.startsWith("not.");
+    const rest = negate ? spec.slice(4) : spec;
+    const dot = rest.indexOf(".");
+    filters.push({ column, op: rest.slice(0, dot), value: rest.slice(dot + 1), negate });
   }
   return filters;
 }
 
+// The operators are compared as text, which is exact for the ISO timestamps and the ids the function filters on. As in
+// SQL, a comparison with a null cell is not true (`is` is the way to ask about null).
 function matches(row: Row, filters: Filter[]): boolean {
-  return filters.every(({ column, op, value }) => {
+  return filters.every(({ column, op, value, negate }) => {
     const cell = row[column] === null || row[column] === undefined ? null : String(row[column]);
-    if (op === "eq") return cell === value;
-    if (op === "neq") return cell !== value;
-    if (op === "lt") return cell !== null && cell < value;
-    if (op === "gte") return cell !== null && cell >= value;
-    throw new Error(`fake PostgREST: operator "${op}" is not supported`);
+    let found: boolean;
+    if (op === "eq") found = cell === value;
+    else if (op === "neq") found = cell !== null && cell !== value;
+    else if (op === "is") found = value === "null" ? cell === null : cell === value;
+    else if (op === "lt") found = cell !== null && cell < value;
+    else if (op === "lte") found = cell !== null && cell <= value;
+    else if (op === "gt") found = cell !== null && cell > value;
+    else if (op === "gte") found = cell !== null && cell >= value;
+    else throw new Error(`fake PostgREST: operator "${op}" is not supported`);
+    return negate ? !found : found;
   });
 }
 
@@ -275,7 +325,7 @@ function rest(world: World, table: string, request: Recorded): Response {
       }
       const now = world.now();
       let row: Row;
-      if (table === "users_profile") row = { created_at: now, subscription_tier: "free", ...record };
+      if (table === "users_profile") row = { created_at: now, subscription_tier: "free", timezone: "UTC", ...record };
       else if (table === "journal_entries") {
         row = { id: crypto.randomUUID(), created_at: now, updated_at: now, ...ENTRY_DEFAULTS(), ...record };
       } else {
@@ -358,6 +408,52 @@ function defaultScreenReply(json: unknown): GeminiReply {
   return geminiOk(screenOutput(audio ? { transcript: SPOKEN } : {}));
 }
 
+// Plays one queued reply as the network would: a connection that fails, a call that never answers (it ends when the
+// request's own timeout aborts it), or an answer, after its delay if it has one.
+async function play(reply: GeminiReply, request: Request): Promise<Response> {
+  if (reply.kind === "network") throw new TypeError("network down");
+  if (reply.kind === "hang") {
+    return await new Promise<Response>((_resolve, reject) => {
+      request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    });
+  }
+  if (reply.delayMs) await new Promise((resolve) => setTimeout(resolve, reply.delayMs));
+  return jsonResponse(reply.status, reply.body);
+}
+
+// A file sent to journal_media. storage-js sends a Uint8Array as a plain POST that carries its type, its cache time and
+// x-upsert in headers. The bucket refuses a type it does not list, a file over its limit, and a path that is taken when
+// the upload does not say it may replace it (the answers are the real ones: a 400 whose body says 409 for a duplicate).
+function upload(world: World, path: string, headers: Headers, bytes: Uint8Array): Response {
+  const contentType = headers.get("content-type") ?? "";
+  if (!BUCKET_MIME_TYPES.includes(contentType)) {
+    return jsonResponse(415, {
+      statusCode: "415",
+      error: "invalid_mime_type",
+      message: `mime type ${contentType} is not supported`,
+    });
+  }
+  if (bytes.length > BUCKET_MAX_BYTES) {
+    return jsonResponse(413, {
+      statusCode: "413",
+      error: "Payload too large",
+      message: "The object exceeded the maximum allowed size",
+    });
+  }
+  const upsert = headers.get("x-upsert") === "true";
+  if (world.storage.has(path) && !upsert) {
+    return jsonResponse(400, { statusCode: "409", error: "Duplicate", message: "The resource already exists" });
+  }
+  world.storage.set(path, bytes);
+  world.uploads.push({
+    path,
+    contentType,
+    upsert,
+    cacheControl: (headers.get("cache-control") ?? "").replace("max-age=", ""),
+  });
+  return jsonResponse(200, { Id: crypto.randomUUID(), Key: `journal_media/${path}` });
+}
+
 // The real chapter from _shared/bible/fixtures, or a 404 when there is none (the API answers 404 for a chapter it lacks).
 function bibleFixture(key: string): BibleReply {
   try {
@@ -375,11 +471,23 @@ export function installWorld(): World {
     saved[name] = Deno.env.get(name);
     Deno.env.set(name, value);
   }
+  // Speech is off in a fresh world, whatever the shell running the tests holds: speechOn(world) turns it on.
+  for (const name of SPEECH_NAMES) {
+    saved[name] = Deno.env.get(name);
+    Deno.env.delete(name);
+  }
   const originalLog = console.log;
   const savedBibleTiming = { ...bibleTiming };
   bibleTiming.retryDelayMs = 1;
   bibleTiming.requestTimeoutMs = 300;
+  // A busy Google is tried again after a millisecond here, not a second. A test that shortens the speech budget gets it
+  // back as it was when the world is restored.
+  const savedTtsTiming = { ...ttsTiming };
+  const savedSpeechTiming = { ...speechTiming };
+  ttsTiming.retryPauseMs = 1;
   clearChapterCache();
+  clearTokenCache();
+  let googleTokens = 0;
 
   const world: World = {
     users: [],
@@ -394,6 +502,11 @@ export function installWorld(): World {
     callOrder: [],
     bible: new Map(),
     bibleCalls: [],
+    tokenCalls: [],
+    tokenQueue: [],
+    ttsCalls: [],
+    ttsQueue: [],
+    uploads: [],
     logs: [],
     now: isoNow,
     async token(claims = {}, options = {}) {
@@ -409,7 +522,7 @@ export function installWorld(): World {
     },
     seedUser(id) {
       if (!world.users.some((user) => user.id === id)) {
-        world.users.push({ id, created_at: world.now(), subscription_tier: "free" });
+        world.users.push({ id, created_at: world.now(), subscription_tier: "free", timezone: "UTC" });
       }
     },
     seedEntry(fields) {
@@ -423,7 +536,10 @@ export function installWorld(): World {
       globalThis.fetch = original;
       console.log = originalLog;
       Object.assign(bibleTiming, savedBibleTiming);
+      Object.assign(ttsTiming, savedTtsTiming);
+      Object.assign(speechTiming, savedSpeechTiming);
       clearChapterCache();
+      clearTokenCache();
       for (const [name, value] of Object.entries(saved)) {
         if (value === undefined) Deno.env.delete(name);
         else Deno.env.set(name, value);
@@ -437,21 +553,19 @@ export function installWorld(): World {
 
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
-    const text = request.method === "GET" || request.method === "HEAD" ? "" : await request.text();
+    const url = new URL(request.url);
+    // A file sent to Storage is binary, so it is read as bytes and never as text.
+    const isUpload = url.origin === SUPABASE_URL && request.method === "POST" &&
+      url.pathname.startsWith("/storage/v1/object/journal_media/");
+    const bytes = isUpload ? new Uint8Array(await request.arrayBuffer()) : null;
+    const text = bytes !== null || request.method === "GET" || request.method === "HEAD" ? "" : await request.text();
     let json: unknown = null;
     try {
       json = text ? JSON.parse(text) : null;
     } catch {
-      // Not JSON.
+      // Not JSON (a form, as the Google token request is).
     }
-    const recorded: Recorded = {
-      method: request.method,
-      url: new URL(request.url),
-      headers: request.headers,
-      text,
-      json,
-    };
-    const { url } = recorded;
+    const recorded: Recorded = { method: request.method, url, headers: request.headers, text, json };
 
     if (url.origin === ISSUER) return jsonResponse(200, { keys: [publicJwk] });
 
@@ -462,14 +576,18 @@ export function installWorld(): World {
       const reply = (screening ? world.screenQueue : world.geminiQueue).shift() ??
         (screening ? defaultScreenReply(json) : undefined);
       if (!reply) throw new Error("the test queued no Gemini reply");
-      if (reply.kind === "network") throw new TypeError("network down");
-      if (reply.kind === "hang") {
-        return await new Promise<Response>((_resolve, reject) => {
-          request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
-        });
-      }
-      if (reply.delayMs) await new Promise((resolve) => setTimeout(resolve, reply.delayMs));
-      return jsonResponse(reply.status, reply.body);
+      return await play(reply, request);
+    }
+
+    if (url.host === GOOGLE_TOKEN_HOST) {
+      world.tokenCalls.push(recorded);
+      googleTokens += 1;
+      return await play(world.tokenQueue.shift() ?? tokenOk(`ya29.test-${googleTokens}`), request);
+    }
+
+    if (url.host === GOOGLE_TTS_HOST) {
+      world.ttsCalls.push(recorded);
+      return await play(world.ttsQueue.shift() ?? synthOk(FIXTURE_WAV), request);
     }
 
     if (url.host === BIBLE_HOST) {
@@ -493,9 +611,10 @@ export function installWorld(): World {
         if (url.pathname.startsWith("/rest/v1/")) return rest(world, url.pathname.slice("/rest/v1/".length), recorded);
         if (url.pathname.startsWith("/storage/v1/object/journal_media/")) {
           const path = decodeURIComponent(url.pathname.slice("/storage/v1/object/journal_media/".length));
-          const bytes = world.storage.get(path);
-          return bytes
-            ? new Response(new Uint8Array(bytes), { status: 200, headers: { "Content-Type": "audio/mp4" } })
+          if (bytes !== null) return upload(world, path, request.headers, bytes);
+          const stored = world.storage.get(path);
+          return stored
+            ? new Response(new Uint8Array(stored), { status: 200, headers: { "Content-Type": "audio/mp4" } })
             : jsonResponse(400, { statusCode: "404", error: "not_found", message: "Object not found" });
         }
       } catch (error) {
@@ -565,12 +684,46 @@ export function crisisOutput(): Row {
   };
 }
 
+// Turns speech on in the world's environment: the test service account (a real RSA key) and a Chirp 3 HD voice.
+// world.restore() puts the environment back. The Google counters start again from here.
+export function speechOn(world: World): void {
+  Deno.env.set("GOOGLE_TTS_CREDENTIALS_B64", SPEECH_ACCOUNT.encoded);
+  Deno.env.set("TTS_VOICE_NAME", SPEECH_VOICE);
+  Deno.env.delete("TTS_SPEAKING_RATE");
+  world.tokenCalls.length = 0;
+  world.ttsCalls.length = 0;
+  clearTokenCache();
+}
+
+// A finished reflection of this user, as process-entry leaves one: ready, with its devotional and no audio. Pass fields to
+// change it (a created_at in another week, an audio path, an error code).
+export function seedDevotional(world: World, userId: string, over: Row = {}): EntryRow {
+  return world.seedEntry({
+    user_id: userId,
+    client_entry_id: crypto.randomUUID(),
+    input_type: "text",
+    transcript: TEXT,
+    processing_status: "ready",
+    dominant_emotion: "anxious",
+    devotional_title: "Peace in the Waiting",
+    devotional_script: DEVOTIONAL,
+    closing_prayer: "Lord, we bring you the weight of this week and ask for your peace. Amen.",
+    ...over,
+  });
+}
+
 // Every request the function sent about a user's own tables carried that user's id: a filter on reads, updates and
-// deletes, a column on inserts. Returns the requests that did not.
+// deletes, a column on inserts. Returns the requests that did not. (A user's profile is filtered by its `id`; the
+// profile's own insert is not checked, because ensureProfile also creates another user's row in some tests.)
 export function unscopedRequests(world: World, userId: string): string[] {
   const offenders: string[] = [];
   for (const request of world.requests) {
     const table = request.url.pathname.startsWith("/rest/v1/") ? request.url.pathname.slice("/rest/v1/".length) : "";
+    if (
+      table === "users_profile" && request.method !== "POST" && request.url.searchParams.get("id") !== `eq.${userId}`
+    ) {
+      offenders.push(`${request.method} ${table}${request.url.search}`);
+    }
     if (table !== "journal_entries" && table !== "daily_affirmations") continue;
     if (request.method === "POST") {
       const rows = (Array.isArray(request.json) ? request.json : [request.json]) as Row[];

@@ -3,7 +3,7 @@
 //
 //   npx --yes deno@2.9.6 run --no-lock --node-modules-dir=none --config supabase/functions/process-entry/deno.json \
 //     --allow-net --allow-env --allow-read --env-file=supabase/functions/.env.local \
-//     supabase/functions/process-entry/live_check.ts [--shape] [--show] [--audio path/to/recording.m4a]
+//     supabase/functions/process-entry/live_check.ts [--shape] [--show] [--audio path/to/recording.m4a] [--speak out.wav]
 //
 // Every case goes through the same two stages as a real request: the crisis screening first (_shared/safety), and then, only
 // for an entry it calls clear, the reflection, written from the screened words alone. Besides the reflection it checks the
@@ -14,6 +14,10 @@
 //             length), to confirm that Google's reply looks the way gemini.ts expects before anything else runs
 //   --show    also print the reflection's text (only for the made-up entries below; never for a real person's)
 //   --audio   also send this recording (a file you made for the test) as an audio entry
+//   --speak   read the first written case's reflection aloud through the real Text-to-Speech (step 22): it builds the script
+//             the function would, calls Google with the speech settings from .env.local, measures the WAV and writes it to
+//             this file, then prints the script's characters, the file's bytes and length, the attempts and the seconds
+//             (never the script). It needs --allow-write=<the file>, and says so when speech is not set up.
 //
 // It uses the production modules (the same requests, the same schemas, the same output rules), so a pass here is a pass of
 // the real path. The made-up entries below are the only text it ever sends. A key from the free tier may only ever see
@@ -30,6 +34,10 @@ import { SCREEN_PROMPT_VERSION, SCREEN_SYSTEM_INSTRUCTION } from "../_shared/saf
 import { buildRequestBody, GEMINI_URL, generate, newStats } from "./gemini.ts";
 import { formatReference } from "../_shared/bible/reference.ts";
 import { countWords, parseReflection, type Reflection } from "./output.ts";
+import { wavDurationMs } from "../_shared/tts/wavDuration.ts";
+import { buildSpeechScript } from "../_shared/tts/script.ts";
+import { readTtsConfig } from "../_shared/tts/config.ts";
+import { synthesize } from "../_shared/tts/synthesize.ts";
 import { buildSystemInstruction, PROMPT_VERSION, wrapEntry } from "./prompt.ts";
 import { buildSchema } from "./schema.ts";
 import { resolveScripture } from "./scripture.ts";
@@ -38,6 +46,7 @@ import { GEMINI_DEADLINE_MS } from "./constants.ts";
 const args = Deno.args;
 const flag = (name: string) => args.includes(name);
 const audioPath = args.includes("--audio") ? args[args.indexOf("--audio") + 1] : null;
+const speakPath = args.includes("--speak") ? args[args.indexOf("--speak") + 1] : null;
 
 const apiKey = Deno.env.get("GEMINI_API_KEY")?.trim() ?? "";
 const model = Deno.env.get("GEMINI_MODEL")?.trim() ?? "";
@@ -152,6 +161,48 @@ function describe(result: Reflection): string {
   ].filter(Boolean).join(" | ");
 }
 
+// Reads one reflection aloud, as the function does after it saves one (step 22). Only the first case is read: one call, one
+// file. Returns the lines to print under that case: numbers, never the script.
+let spoke = false;
+async function speak(
+  reflection: Extract<Reflection, { kind: "ready" }>,
+  passage: Awaited<ReturnType<typeof resolveScripture>>,
+  outFile: string,
+): Promise<string> {
+  spoke = true;
+  const setup = readTtsConfig((name) => Deno.env.get(name));
+  if (setup.state !== "ready") {
+    return `speech: not set up (${
+      setup.state === "off" ? "no speech secrets in .env.local" : `${setup.name} is not right`
+    }), so nothing was read aloud`;
+  }
+  const script = buildSpeechScript({
+    devotional: reflection.devotional,
+    scripture: passage.verified && passage.reference !== null && passage.text !== null
+      ? { reference: passage.reference, text: passage.text }
+      : null,
+    closingPrayer: reflection.closingPrayer,
+  });
+  if (script === null) {
+    problems += 1;
+    return "UNEXPECTED speech: the reflection could not be turned into a script";
+  }
+  const started = performance.now();
+  const spoken = await synthesize(script.markup, setup.config, Date.now() + 60_000);
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  if (!spoken.ok) {
+    problems += 1;
+    return `UNEXPECTED speech failed: ${spoken.reason} after ${seconds} s, ${spoken.attempts} attempt(s)`;
+  }
+  Deno.writeFileSync(outFile, spoken.audio);
+  const length = wavDurationMs(spoken.audio);
+  return `ok      speech: ${script.chars} characters (${
+    script.scripture ? "with" : "without"
+  } the passage), ${spoken.audio.length} bytes, ${
+    length === null ? "length unknown" : `${(length / 1000).toFixed(1)} s long`
+  }, ${seconds} s, ${spoken.attempts} attempt(s) -> ${outFile}`;
+}
+
 let problems = 0;
 async function run(name: string, input: ScreenInput, expect: "ready" | "crisis" | null) {
   const stats = newStats();
@@ -200,6 +251,10 @@ async function run(name: string, input: ScreenInput, expect: "ready" | "crisis" 
         detail += `\n         ${good ? "ok     " : "UNEXPECTED"} passage ${resolved.outcome}: ${
           resolved.reference ?? "none"
         }, ${resolved.text?.length ?? 0} characters, Bible ${resolved.bibleMs} ms`;
+        if (speakPath !== null && !spoke) {
+          detail += `
+         ${await speak(result, resolved, speakPath)}`;
+        }
         if (flag("--show") && resolved.text) detail += `\n         ${resolved.text.replaceAll("\n", "\n         ")}`;
         if (flag("--show")) {
           detail += `\n         title: ${result.title}\n         ${

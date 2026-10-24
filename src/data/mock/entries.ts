@@ -88,7 +88,7 @@ function readyEntry(spec: ReadyEntrySpec): JournalEntryRow {
     devotional_title: spec.title,
     devotional_script: spec.script.join("\n\n"),
     closing_prayer: spec.closing,
-    devotional_audio_path: hasAudio ? `${MOCK_USER_ID}/devotionals/${spec.id}.mp3` : null,
+    devotional_audio_path: hasAudio ? `${MOCK_USER_ID}/devotionals/${spec.id}.wav` : null,
     devotional_duration_ms: spec.durationMs,
     error_code: hasAudio ? null : "TTS_FAILED",
     is_active_prayer: spec.prayer !== undefined,

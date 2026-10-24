@@ -265,8 +265,8 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
   }
 
   // Crisis support is never paywalled: the entry that sent the user here is a crisis entry, so Reflection takes
-  // this screen's place. Nothing of the paywall has been drawn meanwhile.
-  // TODO(22): the server checks crisis before the free-tier limit
+  // this screen's place. Nothing of the paywall has been drawn meanwhile. The server does the same: it screens an entry
+  // before it checks the free limit, so a crisis is never counted and never gets a 402 (step 22).
   useEffect(() => {
     if (state.status === "crisis" && entryId !== undefined) {
       navigation.replace("Reflection", { entryId });

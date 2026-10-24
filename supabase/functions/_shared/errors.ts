@@ -1,4 +1,5 @@
-// One error format for every Edge Function: { error: { code, message, requestId } }.
+// One error format for every Edge Function: { error: { code, message, requestId } }. The 402 (LIMIT_REACHED) also carries
+// the saved entry's id and the week's usage beside `error` (step 22, AppError.details).
 // Each function's contract (process-entry/contracts.ts) lists the codes that function can answer with, and the app's
 // copy of that list must match (src/types/contractParity.ts checks it). process-entry never answers NOT_FOUND;
 // confirm-scripture does.
@@ -57,13 +58,17 @@ export class AppError extends Error {
   // A short category for the log line. It is never sent to the client and never holds user content,
   // a token, a provider's message or SQL.
   readonly reason: string;
+  // Values the function built itself (never the person's words, a provider's message or SQL), which errorResponse puts beside
+  // `error` in the body. Only the 402 uses it (the entry that was saved and the week's usage). It is never logged.
+  readonly details: Record<string, unknown> | null;
 
-  constructor(code: ErrorCode, reason: string = code.toLowerCase()) {
+  constructor(code: ErrorCode, reason: string = code.toLowerCase(), details: Record<string, unknown> | null = null) {
     super(code);
     this.name = "AppError";
     this.code = code;
     this.status = STATUS_BY_CODE[code];
     this.reason = reason;
+    this.details = details;
   }
 }
 
@@ -77,7 +82,7 @@ export function jsonResponse(status: number, body: unknown, headers: HeadersInit
 export function errorResponse(error: AppError, requestId: string, headers: HeadersInit = {}): Response {
   return jsonResponse(
     error.status,
-    { error: { code: error.code, message: MESSAGE_BY_CODE[error.code], requestId } },
+    { error: { code: error.code, message: MESSAGE_BY_CODE[error.code], requestId }, ...(error.details ?? {}) },
     headers,
   );
 }

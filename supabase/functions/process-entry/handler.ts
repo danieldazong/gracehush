@@ -3,15 +3,19 @@ import { readAuthConfig, verifyClerkRequest } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import { optionalEnv, requireEnv } from "../_shared/env.ts";
 import { AppError, errorResponse, jsonResponse } from "../_shared/errors.ts";
+import { checkDevotionalLimit, type LimitDecision } from "../_shared/limits/weekly.ts";
 import {
   type CrisisSource,
+  type LimitStatus,
   type LogLine,
   type ScreenStatus,
   type ScriptureOutcome,
   shortHash,
+  type SpeechStatus,
   writeLog,
 } from "../_shared/log.ts";
 import { screenEntry, type ScreenInput, type ScreenResult, screenTiming } from "../_shared/safety/screen.ts";
+import { readTtsConfig } from "../_shared/tts/config.ts";
 import { downloadRecording } from "./audio.ts";
 import { GEMINI_DEADLINE_MS, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./constants.ts";
 import type { ProcessEntryRequest } from "./contracts.ts";
@@ -24,23 +28,30 @@ import {
   failEntry,
   findEntry,
   listAffirmations,
+  needsSpeech,
+  readProfile,
   saveCrisisEntry,
   saveReadyEntry,
+  saveTranscript,
 } from "./lifecycle.ts";
 import { parseReflection, type Reflection } from "./output.ts";
 import { buildSystemInstruction, PROMPT_VERSION, wrapEntry } from "./prompt.ts";
 import { toResponse } from "./response.ts";
 import { buildSchema } from "./schema.ts";
 import { resolveScripture } from "./scripture.ts";
+import { type SpeechOutcome, speechStage } from "./speech.ts";
 import { readJsonBody, validateRequest } from "./validate.ts";
 
 // The request flow, top to bottom. Each step that can fail throws an AppError; handle() turns it into the one error
 // format. Once an entry is claimed, any failure also marks that entry failed, so the person's text or recording stays
-// saved and the same clientEntryId can be sent again.
+// saved and the same clientEntryId can be sent again. The exception is an entry that has been saved: from then on nothing
+// marks it failed, whatever goes wrong while the answer is built.
 //
 // The order matters for safety. A crisis screening comes first (_shared/safety): nothing is written for the person, no
 // limit is counted and no reflection is asked for until the entry has been screened, and a crisis is answered at once.
-// Only an entry the screening called clear is turned into a reflection, from its words alone.
+// Only an entry the screening called clear meets the free tier's limit (a crisis is therefore never counted and never
+// blocked) and is turned into a reflection, from its words alone. Speech comes last and is best effort: a reflection that
+// was saved is never lost to it.
 
 type Counters = { authMs: number; dbMs: number };
 
@@ -58,6 +69,13 @@ type Context = {
   screenMs: number;
   screenAttempts: number;
   crisisSource: CrisisSource | null;
+  tts: SpeechStatus | null;
+  ttsMs: number;
+  ttsAttempts: number;
+  ttsChars: number;
+  audioMs: number | null;
+  limit: LimitStatus | null;
+  limitUsed: number | null;
   counters: Counters;
 };
 
@@ -100,18 +118,39 @@ async function respond(
   return jsonResponse(200, toResponse(row, affirmations), corsHeaders);
 }
 
+// What the speech step did goes into the request's log line, one word and the numbers.
+function recordSpeech(context: Context, outcome: SpeechOutcome): void {
+  context.tts = outcome.tts;
+  context.ttsMs = outcome.ttsMs;
+  context.ttsAttempts = outcome.ttsAttempts;
+  context.ttsChars = outcome.ttsChars;
+  context.audioMs = outcome.audioMs;
+}
+
+function limitStatus(decision: LimitDecision): LimitStatus {
+  if (decision.kind === "exempt") return "exempt";
+  const word = decision.allowed ? "free_ok" : "free_blocked";
+  return decision.zoneFallback ? `${word}:bad_timezone` : word;
+}
+
 // Reads the recording if there is one, and screens the entry. The recording's bytes live only inside this function, so
 // they are free to be collected before the reflection is written. The screening ends by its own deadline, earlier than
 // the request's, so that the reflection always has time after it.
+//
+// A recording that the free limit held back has the words the screening heard saved on its entry (`savedWords`). Sent
+// again, it is screened from those words as written text: the recording is not downloaded and not transcribed a second time.
 async function screenStage(
   context: Context,
   admin: ReturnType<typeof createAdmin>,
   input: ProcessEntryRequest,
+  savedWords: string | null,
   gemini: ReturnType<typeof readGeminiConfig>,
   deadlineAt: number,
 ): Promise<ScreenResult> {
   const subject: ScreenInput = input.inputType === "text"
     ? { kind: "text", text: input.text }
+    : savedWords !== null && savedWords.trim() !== ""
+    ? { kind: "text", text: savedWords }
     : { kind: "audio", bytes: await timed(context, "dbMs", () => downloadRecording(admin, input.audioPath)) };
 
   const attemptsBefore = context.stats.attempts;
@@ -142,30 +181,56 @@ async function run(req: Request, context: Context): Promise<Response> {
   const input: ProcessEntryRequest = validateRequest(await readJsonBody(req), user.userId);
   context.inputType = input.inputType;
 
+  // Speech is optional and this never throws: with no secrets set it is simply off, a half-set or malformed secret is
+  // logged by name, and a reflection is made and saved as text either way.
+  const speech = readTtsConfig(optionalEnv);
+
   const admin = createAdmin();
   const db = <T>(work: () => Promise<T>) => timed(context, "dbMs", work);
 
+  // An entry that already finished is answered as it is. The one exception is a reflection that has its devotional and no
+  // audio, when speech is on: then the same request adds the audio, and only that (no screening, no limit, no model
+  // call). A crisis entry is always answered as it is.
+  async function answerReady(row: EntryRow): Promise<Response> {
+    if (speech.state !== "ready" || !needsSpeech(row)) return await respond(context, admin, user.userId, row);
+    const outcome = await speechStage({
+      admin,
+      userId: user.userId,
+      row,
+      setup: speech,
+      startedAt: context.startedAt,
+      db,
+    });
+    recordSpeech(context, outcome);
+    return await respond(context, admin, user.userId, outcome.row);
+  }
+
   await db(() => ensureProfile(admin, user.userId));
   const existing = await db(() => findEntry(admin, user.userId, input.clientEntryId));
-  // A retry of an entry that already finished costs nothing: no screening, no limit, no model call. A crisis entry that
-  // was saved is answered the same way, as the crisis it is.
-  if (existing?.processing_status === "ready") return await respond(context, admin, user.userId, existing);
+  // A retry of an entry that already finished costs nothing: no screening, no limit, no model call, no rate limit.
+  if (existing?.processing_status === "ready") return await answerReady(existing);
 
   const since = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
   const recent = await db(() => countRecentEntries(admin, user.userId, since, existing?.id ?? null));
   if (recent >= RATE_LIMIT_MAX) throw new AppError("RATE_LIMITED", "rate_limit");
 
   const claim = await db(() => claimEntry(admin, user.userId, input, existing, Date.now()));
-  if (claim.kind === "ready") return await respond(context, admin, user.userId, claim.row);
+  if (claim.kind === "ready") return await answerReady(claim.row);
   if (claim.kind === "busy") throw new AppError("ALREADY_PROCESSING", "claim_busy");
   const entryId = claim.row.id;
 
+  // True once the entry has been saved as a reflection or as a crisis. From then on the catch below never marks it failed:
+  // a database that hiccups while the answer is built answers a plain 500, and the entry stays as it was saved (the same
+  // request sent again answers it from its saved row).
+  let saved = false;
+
   // A crisis entry keeps only the flag and the person's words. The reply is the same 200 shape as a reflection, built from
   // the saved row, with no devotional, no passage and no affirmations. Nothing is sent to anyone, nothing is waited for,
-  // and only the source (one word) reaches the log.
+  // and only the source (one word) reaches the log. It gets no speech and is never counted or blocked by the limit.
   async function answerCrisis(words: string | null, source: CrisisSource): Promise<Response> {
     context.crisisSource = source;
     const row = await db(() => saveCrisisEntry(admin, user.userId, entryId, words));
+    saved = true;
     return await respond(context, admin, user.userId, row);
   }
 
@@ -173,17 +238,31 @@ async function run(req: Request, context: Context): Promise<Response> {
     const deadlineAt = context.startedAt + GEMINI_DEADLINE_MS;
 
     // Screen first. No screening answer means no reflection: the entry is failed and can be sent again.
-    const screening = await screenStage(context, admin, input, gemini, deadlineAt);
+    const screening = await screenStage(context, admin, input, claim.row.transcript, gemini, deadlineAt);
     context.screen = screening.status;
     if (screening.status === "failed") throw new AppError("AI_UNAVAILABLE", `screening_failed:${screening.reason}`);
     if (screening.status === "no_speech") throw new AppError("NO_SPEECH", "no_speech");
     if (screening.status === "crisis") return await answerCrisis(screening.transcript, screening.source);
 
-    // Only a clear screening gets this far, so a crisis can never reach the limit below.
-    // TODO(22): the free-tier weekly limit goes here: 402 LIMIT_REACHED. It is checked after the screening, never before.
-
     // The reflection is written from the screened words alone, never from the recording again.
     const words = screening.transcript;
+
+    // The free tier's limit. Only a clear screening gets this far, so a crisis is never counted and never blocked. An entry
+    // over the limit is saved as failed with LIMIT_REACHED (the catch below does that) and answered with a 402 that carries
+    // the entry and the week's numbers; sent again after an upgrade or when the week turns, it is claimed and checked again.
+    const profile = await db(() => readProfile(admin, user.userId));
+    const decision = await db(() => checkDevotionalLimit(admin, user.userId, profile, claim.row));
+    context.limit = limitStatus(decision);
+    context.limitUsed = decision.kind === "free" ? decision.used : null;
+    if (decision.kind === "free" && !decision.allowed) {
+      // A recording keeps the words that were heard in it, so that sending it again does not start from the recording.
+      if (input.inputType === "audio") await db(() => saveTranscript(admin, user.userId, entryId, words));
+      throw new AppError("LIMIT_REACHED", "free_limit", {
+        entryId,
+        usage: { used: decision.used, limit: decision.limit, resetsAt: decision.resetsAt },
+      });
+    }
+
     let reflection: Reflection;
     try {
       reflection = await generate({
@@ -234,12 +313,24 @@ async function run(req: Request, context: Context): Promise<Response> {
         prayer_summary: reflection.prayer?.summary ?? null,
       }, reflection.affirmations)
     );
-    return await respond(context, admin, user.userId, row);
+    saved = true;
+
+    // Speech, best effort, from the row that was just saved. It never throws and never changes the status.
+    const outcome = await speechStage({
+      admin,
+      userId: user.userId,
+      row,
+      setup: speech,
+      startedAt: context.startedAt,
+      db,
+    });
+    recordSpeech(context, outcome);
+    return await respond(context, admin, user.userId, outcome.row);
   } catch (error) {
     const failure = error instanceof AppError
       ? error
       : new AppError("INTERNAL", `unhandled:${error instanceof Error ? error.name : "unknown"}`);
-    await failEntry(admin, user.userId, entryId, failure.code);
+    if (!saved) await failEntry(admin, user.userId, entryId, failure.code);
     throw failure;
   }
 }
@@ -258,6 +349,13 @@ export async function handle(req: Request): Promise<Response> {
     screenMs: 0,
     screenAttempts: 0,
     crisisSource: null,
+    tts: null,
+    ttsMs: 0,
+    ttsAttempts: 0,
+    ttsChars: 0,
+    audioMs: null,
+    limit: null,
+    limitUsed: null,
     counters: { authMs: 0, dbMs: 0 },
   };
   let status = 200;
@@ -303,6 +401,13 @@ export async function handle(req: Request): Promise<Response> {
       screenMs: context.screenMs,
       screenAttempts: context.screenAttempts,
       crisisSource: context.crisisSource,
+      tts: context.tts,
+      ttsMs: context.ttsMs,
+      ttsAttempts: context.ttsAttempts,
+      ttsChars: context.ttsChars,
+      audioMs: context.audioMs,
+      limit: context.limit,
+      limitUsed: context.limitUsed,
     };
     writeLog(line);
   }

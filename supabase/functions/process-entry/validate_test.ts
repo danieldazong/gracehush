@@ -79,7 +79,7 @@ Deno.test("the audio path is exactly this user's, for this entry", async () => {
     const bad of [
       `user_other/raw/${ID}.m4a`,
       `${USER}/raw/00000000-0000-4000-8000-000000000000.m4a`,
-      `${USER}/devotionals/${ID}.mp3`,
+      `${USER}/devotionals/${ID}.wav`,
       `${USER}/raw/${ID}.mp3`,
       `${USER}/raw/../${ID}.m4a`,
       `${PATH} `,

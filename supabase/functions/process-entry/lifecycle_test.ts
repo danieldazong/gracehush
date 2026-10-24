@@ -1,6 +1,6 @@
 import { createAdmin } from "../_shared/admin.ts";
 import { assert, assertEquals, expectAppError } from "./testing/assert.ts";
-import { ENTRY_ID, installWorld, unscopedRequests, type World } from "./testing/fakes.ts";
+import { ENTRY_ID, installWorld, seedDevotional, unscopedRequests, type World } from "./testing/fakes.ts";
 import { CLAIM_LEASE_MS } from "./constants.ts";
 import type { ProcessEntryRequest } from "./contracts.ts";
 import {
@@ -11,8 +11,13 @@ import {
   failEntry,
   findEntry,
   listAffirmations,
+  markSpeechFailed,
+  needsSpeech,
+  readProfile,
+  saveAudio,
   saveCrisisEntry,
   saveReadyEntry,
+  saveTranscript,
 } from "./lifecycle.ts";
 
 const USER = "user_a";
@@ -365,5 +370,145 @@ Deno.test(
     }
     assertEquals(world.entries[0].is_crisis, false);
     assertEquals(world.entries[0].processing_status, "processing");
+  }),
+);
+
+// -- Step 22: the plan, the held-back recording's words, and the audio -----------------------------------------------------
+
+Deno.test(
+  "readProfile gives the plan and the time zone, reads an unknown plan as free, and fails plainly",
+  withWorld(async (world, admin) => {
+    const row = world.users.find((user) => user.id === USER)!;
+    assertEquals(await readProfile(admin, USER), { tier: "free", timezone: "UTC" });
+    for (const tier of ["trial", "pro"] as const) {
+      row.subscription_tier = tier;
+      row.timezone = "Africa/Lagos";
+      assertEquals(await readProfile(admin, USER), { tier, timezone: "Africa/Lagos" });
+    }
+    row.subscription_tier = "platinum";
+    assertEquals((await readProfile(admin, USER)).tier, "free", "a plan this code does not know is not a free pass");
+    row.subscription_tier = null;
+    row.timezone = null;
+    assertEquals(await readProfile(admin, USER), { tier: "free", timezone: "UTC" });
+
+    // No row at all is a failure, with Postgres' code or "error" and nothing of its message.
+    world.users.length = 0;
+    await expectAppError(() => readProfile(admin, USER), "INTERNAL", "db:profile_read:error");
+  }),
+);
+
+Deno.test(
+  "saveTranscript keeps the words of a recording that is still being processed, and only that entry's",
+  withWorld(async (world, admin) => {
+    const claim = await claimEntry(admin, USER, audio, null, Date.now());
+    assert(claim.kind === "claimed");
+    assertEquals(claim.row.transcript, null);
+    await saveTranscript(admin, USER, claim.row.id, "what was heard");
+    assertEquals(world.entries[0].transcript, "what was heard");
+    // Another user's entry, and an entry that is no longer processing, are left alone.
+    const other = world.seedEntry({
+      user_id: "user_b",
+      client_entry_id: "33333333-3333-4333-8333-333333333333",
+      input_type: "audio",
+      processing_status: "processing",
+    });
+    await saveTranscript(admin, USER, String(other.id), "not yours");
+    assertEquals(other.transcript, null);
+    await failEntry(admin, USER, claim.row.id, "AI_UNAVAILABLE");
+    await saveTranscript(admin, USER, claim.row.id, "too late");
+    assertEquals(world.entries[0].transcript, "what was heard");
+  }),
+);
+
+Deno.test("needsSpeech is true only for a ready reflection that has its devotional and no audio", () => {
+  const row = {
+    is_crisis: false,
+    processing_status: "ready",
+    devotional_script: "Words.",
+    devotional_audio_path: null as string | null,
+  };
+  assertEquals(needsSpeech(row), true);
+  assertEquals(needsSpeech({ ...row, devotional_audio_path: "u/devotionals/x.wav" }), false);
+  assertEquals(needsSpeech({ ...row, devotional_audio_path: "" }), true, "an empty path is no audio");
+  assertEquals(needsSpeech({ ...row, devotional_script: null }), false);
+  assertEquals(needsSpeech({ ...row, devotional_script: "" }), false);
+  for (const status of ["pending", "uploading", "processing", "failed"]) {
+    assertEquals(needsSpeech({ ...row, processing_status: status }), false, status);
+  }
+  // A crisis entry never needs speech, whatever else it holds.
+  assertEquals(needsSpeech({ ...row, is_crisis: true }), false);
+});
+
+Deno.test(
+  "saveAudio stores the path and the length once, clears TTS_FAILED, and gives the row; a second writer gets nothing",
+  withWorld(async (world, admin) => {
+    const entry = seedDevotional(world, USER, { error_code: "TTS_FAILED" });
+    const id = String(entry.id);
+    const path = `${USER}/devotionals/${id}.wav`;
+
+    const saved = await saveAudio(admin, USER, id, path, 5064);
+    assert(saved !== null);
+    assertEquals([saved.devotional_audio_path, saved.devotional_duration_ms, saved.error_code], [path, 5064, null]);
+    assertEquals(saved.processing_status, "ready");
+
+    // The path is no longer empty, so a request that comes second changes nothing and is told so.
+    assertEquals(await saveAudio(admin, USER, id, `${USER}/devotionals/other.wav`, 1), null);
+    assertEquals([entry.devotional_audio_path, entry.devotional_duration_ms], [path, 5064]);
+
+    // A length that could not be measured is stored as null (the player learns it when it loads the file).
+    const second = seedDevotional(world, USER);
+    const unmeasured = await saveAudio(admin, USER, String(second.id), "p.wav", null);
+    assert(unmeasured !== null);
+    assertEquals([unmeasured.devotional_audio_path, unmeasured.devotional_duration_ms], ["p.wav", null]);
+  }),
+);
+
+Deno.test(
+  "saveAudio and markSpeechFailed never touch a crisis entry, an unfinished one or another user's",
+  withWorld(async (world, admin) => {
+    const crisis = world.seedEntry({
+      user_id: USER,
+      client_entry_id: "44444444-4444-4444-8444-444444444444",
+      input_type: "text",
+      processing_status: "ready",
+      is_crisis: true,
+    });
+    const processing = world.seedEntry({
+      user_id: USER,
+      client_entry_id: "55555555-5555-4555-8555-555555555555",
+      input_type: "text",
+      processing_status: "processing",
+      devotional_script: "Words.",
+    });
+    const theirs = seedDevotional(world, "user_b");
+    for (const entry of [crisis, processing, theirs]) {
+      assertEquals(await saveAudio(admin, USER, String(entry.id), "p.wav", 1), null, String(entry.id));
+      assertEquals(await markSpeechFailed(admin, USER, String(entry.id)), null, String(entry.id));
+      assertEquals([entry.devotional_audio_path, entry.error_code], [null, null], String(entry.id));
+    }
+  }),
+);
+
+Deno.test(
+  "markSpeechFailed marks a ready reflection that has no audio, gives the row, and never throws",
+  withWorld(async (world, admin) => {
+    const entry = seedDevotional(world, USER);
+    const marked = await markSpeechFailed(admin, USER, String(entry.id));
+    assert(marked !== null);
+    assertEquals([marked.error_code, marked.processing_status], ["TTS_FAILED", "ready"]);
+
+    // A reflection that got its audio from another request in the meantime is not marked.
+    const withAudio = seedDevotional(world, USER, { devotional_audio_path: "p.wav" });
+    assertEquals(await markSpeechFailed(admin, USER, String(withAudio.id)), null);
+    assertEquals(withAudio.error_code, null);
+
+    // A database that cannot be reached is not an error here: the reflection is already saved.
+    const real = globalThis.fetch;
+    globalThis.fetch = () => Promise.reject(new TypeError("connect ECONNREFUSED"));
+    try {
+      assertEquals(await markSpeechFailed(admin, USER, String(entry.id)), null);
+    } finally {
+      globalThis.fetch = real;
+    }
   }),
 );
