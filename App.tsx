@@ -44,6 +44,12 @@ function AppShell() {
     [fonts.dmBold]: DMSans_700Bold,
   });
 
+  // The gate below opens on a font error too, so a font that will not load never holds the app,
+  // but every text then draws in the system font: say so in development.
+  useEffect(() => {
+    if (__DEV__ && error) console.warn(`[fonts] ${error.message}`);
+  }, [error]);
+
   // The fonts, Clerk and the two saved stores load in parallel. Waiting for all of them means the
   // navigator first renders with everything known: a signed-in user never sees Onboarding flash by, a
   // finished onboarding never shows Welcome, and the profile sync never writes to a store that is
