@@ -39,7 +39,7 @@ export function JournalFilterSheet({
       <Text accessibilityRole="header" className="text-headline text-ink">
         {text.title}
       </Text>
-      <View className="mt-6 flex-row flex-wrap gap-2">
+      <View className="mt-6 flex-row flex-wrap justify-center gap-2">
         {FILTERS.map((value) => {
           const selected = value === filter;
           // Every chip has the 1.5 border, transparent when not selected, so choosing one never
