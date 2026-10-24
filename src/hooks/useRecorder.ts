@@ -5,33 +5,40 @@ import { MAX_RECORDING_MS, WAVEFORM_BAR_COUNT } from "@/constants/app";
 import {
   cancelRecording,
   getMicPermission,
+  holdPaused,
+  pauseRecording,
   requestMicPermission,
+  resumeRecording,
   startRecording,
   stopRecording,
 } from "@/services/recorder";
-import type { RecorderStatus, RecordingResult } from "@/types";
+import { deleteRecording, finalizeRecording } from "@/services/recordingFiles";
+import type { RecordedAudio, RecorderStatus } from "@/types";
 
-export type RecorderState = "idle" | "requesting" | "denied" | "recording" | "recorded";
+export type RecorderState = "idle" | "requesting" | "denied" | "recording" | "paused" | "recorded";
 
-// "start" and "save" are the two messages step 23 reuses for a real recorder.
-export type RecorderError = "start" | "save" | null;
+// "start" and "save" were the step 10 messages. "resume" is new in step 23: the system would not give the
+// microphone back (a call is still going on).
+export type RecorderError = "start" | "save" | "resume" | null;
 
 const silence = () => Array.from({ length: WAVEFORM_BAR_COUNT }, () => 0);
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
 
-// Everything the Speak view needs from the recorder. A tap is the only thing that starts it. The state
-// machine: idle -> (requesting) -> recording -> recorded, or denied when the microphone is off.
-export function useRecorder() {
+// Everything the Speak view needs from the recorder. A tap is the only thing that starts or resumes it. The state
+// machine: idle -> (requesting) -> recording -> recorded, with recording <-> paused when the app is left or something
+// else takes the microphone, and denied when the microphone is off. `clientEntryId` names the finished file
+// (recordings/{clientEntryId}.m4a): the screen makes one per entry and passes it in.
+export function useRecorder(clientEntryId: string) {
   const [state, setState] = useState<RecorderState>("idle");
   const [error, setError] = useState<RecorderError>(null);
   const [durationMs, setDurationMs] = useState(0);
   const [levels, setLevels] = useState<number[]>(silence);
-  const [recording, setRecording] = useState<RecordingResult | null>(null);
+  const [recording, setRecording] = useState<RecordedAudio | null>(null);
 
   // The latest state for the AppState listener and the guards below. Written only in callbacks.
   const stateRef = useRef<RecorderState>("idle");
-  // True while a start or a stop is on its way, so a second tap or the automatic stop cannot overlap.
+  // True while a start, a resume or a stop is on its way, so a second tap or the automatic stop cannot overlap.
   const busy = useRef(false);
   const mounted = useRef(false);
 
@@ -45,19 +52,38 @@ export function useRecorder() {
     setLevels(silence());
   }, []);
 
-  // Keeps what was recorded. Finish, the automatic stop at the limit and a backgrounded app all use it.
-  const stop = useCallback(async (): Promise<RecordingResult | null> => {
-    if (stateRef.current !== "recording" || busy.current) return null;
+  // Holds a running recording. It happens by itself when the app goes to the background or another app takes the
+  // microphone; the take is kept and only a tap on the orb continues it.
+  const hold = useCallback(() => {
+    if (stateRef.current !== "recording") return;
+    pauseRecording();
+    setLevels(silence());
+    update("paused");
+  }, [update]);
+
+  // Keeps what was recorded: stops the recorder, then moves the file to recordings/{clientEntryId}.m4a. Finish, the
+  // automatic stop at the limit and the orb all use it, from recording or from paused.
+  const stop = useCallback(async (): Promise<RecordedAudio | null> => {
+    const from = stateRef.current;
+    if ((from !== "recording" && from !== "paused") || busy.current) return null;
     busy.current = true;
     try {
-      const result = await stopRecording();
-      const kept = { ...result, durationMs: Math.min(result.durationMs, MAX_RECORDING_MS) };
+      const raw = await stopRecording();
+      const saved = await finalizeRecording(raw.uri, clientEntryId);
+      const kept: RecordedAudio = {
+        clientEntryId,
+        uri: saved.uri,
+        sizeBytes: saved.sizeBytes,
+        durationMs: Math.min(raw.durationMs, MAX_RECORDING_MS),
+        mimeType: raw.mimeType,
+      };
       setRecording(kept);
       setDurationMs(kept.durationMs);
       setLevels(silence());
       update("recorded");
       return kept;
     } catch {
+      await deleteRecording(clientEntryId);
       resetReading();
       setError("save");
       update("idle");
@@ -65,7 +91,7 @@ export function useRecorder() {
     } finally {
       busy.current = false;
     }
-  }, [resetReading, update]);
+  }, [clientEntryId, resetReading, update]);
 
   const onStatus = useCallback(
     (status: RecorderStatus) => {
@@ -73,14 +99,17 @@ export function useRecorder() {
       setLevels((previous) => [...previous.slice(1), clamp01(status.metering)]);
       if (status.durationMs >= MAX_RECORDING_MS) {
         stop();
+      } else if (!status.isRecording && !busy.current) {
+        hold();
       }
     },
-    [stop],
+    [hold, stop],
   );
 
   const start = useCallback(async () => {
-    // A recording that exists is replaced only after discard(), never by a stray second start.
-    if (busy.current || stateRef.current === "recording" || stateRef.current === "recorded") return;
+    // A take that exists is replaced only after discard(), never by a stray second start.
+    const current = stateRef.current;
+    if (busy.current || current === "recording" || current === "paused" || current === "recorded") return;
     busy.current = true;
     setError(null);
     try {
@@ -110,22 +139,41 @@ export function useRecorder() {
     }
   }, [onStatus, resetReading, update]);
 
-  // Cancels a recording that is running and clears everything.
+  // The tap on the orb while paused. If the system will not give the microphone back, the take stays paused.
+  const resume = useCallback(async () => {
+    if (stateRef.current !== "paused" || busy.current) return;
+    busy.current = true;
+    setError(null);
+    try {
+      await resumeRecording();
+      update("recording");
+    } catch {
+      setError("resume");
+    } finally {
+      busy.current = false;
+    }
+  }, [update]);
+
+  // Throws the take away: stops a recorder that is running and deletes the file, wherever it is.
   const discard = useCallback(async () => {
-    if (stateRef.current === "recording") {
+    const current = stateRef.current;
+    if (current === "recording" || current === "paused") {
       await cancelRecording().catch(() => undefined);
+    } else if (current === "recorded") {
+      await deleteRecording(clientEntryId);
     }
     setError(null);
     setRecording(null);
     resetReading();
     update("idle");
-  }, [resetReading, update]);
+  }, [clientEntryId, resetReading, update]);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (stateRef.current === "recording") {
+      const current = stateRef.current;
+      if (current === "recording" || current === "paused") {
         cancelRecording().catch(() => undefined);
       }
     };
@@ -133,12 +181,13 @@ export function useRecorder() {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (status) => {
-      if (status !== "active") {
-        // TODO(23): real interruption handling (pause, resume)
-        // Until then a recording that loses the screen is stopped and kept.
-        if (stateRef.current === "recording") stop();
+      if (status === "background") {
+        hold();
         return;
       }
+      if (status !== "active") return;
+      // Back in the foreground: a paused take stays paused until a tap, even if the library resumed it.
+      if (stateRef.current === "paused") holdPaused();
       // Back from Settings: the card goes away by itself when the microphone was turned on.
       if (stateRef.current === "denied") {
         getMicPermission().then((permission) => {
@@ -149,9 +198,9 @@ export function useRecorder() {
       }
     });
     return () => subscription.remove();
-  }, [stop, update]);
+  }, [hold, update]);
 
-  return { state, error, durationMs, levels, recording, start, stop, discard };
+  return { state, error, durationMs, levels, recording, start, resume, stop, discard };
 }
 
 export type Recorder = ReturnType<typeof useRecorder>;

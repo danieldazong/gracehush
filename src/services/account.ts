@@ -3,6 +3,7 @@ import { copy } from "@/constants/copy";
 import { simulateWrite } from "@/data/journalRepository";
 import { takeMockPrayerMutationFailure } from "@/data/mock/scenario";
 import { cancelProfileSync } from "@/services/profileSync";
+import { deleteAllRecordings } from "@/services/recordingFiles";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
@@ -46,6 +47,10 @@ export async function signOutCleanup(): Promise<void> {
   // per user in the prefs store and is sent when that account signs in again.)
   cancelProfileSync();
   useOnboardingStore.getState().discardUnsyncedReminders();
+  // A prayer's audio must not outlive the session: every finished recording on this phone goes (step 23). A take that
+  // is still being made cannot be running here: Sign Out is on Profile, and New Entry, which owns the recorder, is a
+  // screen above the tabs. Step 24 may decide to keep an unsent queue per user instead.
+  await deleteAllRecordings();
   // TODO(24): stop the sync engine and clear this user's SQLite cache
   // A full reset of the player: the position, the speed and the session's ambient choice.
   usePlayerStore.getState().stop();

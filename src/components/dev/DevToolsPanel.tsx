@@ -32,6 +32,8 @@ import {
 } from "@/data/selectors";
 import type { MainTabScreenProps, RootStackParamList } from "@/navigation/types";
 import { signOutCleanup } from "@/services/account";
+import { countRawUploads, uploadRawRecording } from "@/services/mediaUpload";
+import { listRecordings } from "@/services/recordingFiles";
 import {
   checkSessionToken,
   describeSessionToken,
@@ -58,6 +60,11 @@ const SCENARIOS: MockScenario[] = ["default", "empty", "offline"];
 const SUBMIT_OUTCOMES: MockSubmitOutcome[] = ["ready", "crisis", "failed", "limit"];
 const PLANS: SubscriptionTier[] = ["free", "trial", "pro"];
 const PROFILE_SOURCES: ProfileSource[] = ["supabase", "mock"];
+
+// The count of finished recordings kept on this phone (recordings/ in the app's own folder).
+function recordingsLine(): string {
+  return `recordings on this phone: ${listRecordings().length}`;
+}
 const TOKEN_LABELS: Record<SessionTokenCheck, string> = {
   ok: "has role = authenticated",
   "no-role-claim": "NO role claim: activate the Supabase integration in Clerk",
@@ -261,6 +268,8 @@ function DevToolsContent() {
   const [checking, setChecking] = useState(false);
   const [processLines, setProcessLines] = useState<string[]>([]);
   const [processChecking, setProcessChecking] = useState(false);
+  const [recordingLines, setRecordingLines] = useState<string[]>(() => [recordingsLine()]);
+  const [recordingBusy, setRecordingBusy] = useState(false);
   // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
   const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
   const crisisEntryId = targets.find((target) => target.label === "Crisis")?.entryId ?? null;
@@ -304,6 +313,34 @@ function DevToolsContent() {
     setProcessLines([]);
     await runProcessEntryCheck((line) => setProcessLines((current) => [...current, line]));
     setProcessChecking(false);
+  }
+
+  // The newest finished recording on this phone goes to the real bucket, under the signed-in user's raw/ folder.
+  // The lines say ok or a code and a count, never a path, an id or a size.
+  async function uploadLastRecording() {
+    setRecordingBusy(true);
+    const userId = getSupabaseUserId();
+    const latest = listRecordings().sort((a, b) => b.modifiedAt - a.modifiedAt)[0];
+    let result = "upload: no recording on this phone";
+    if (userId === null) {
+      result = "upload: not signed in";
+    } else if (latest) {
+      const uploaded = await uploadRawRecording(latest, userId);
+      result = uploaded.ok ? "upload: ok" : `upload: ${uploaded.code}`;
+    }
+    setRecordingLines([recordingsLine(), result]);
+    setRecordingBusy(false);
+  }
+
+  async function countUploads() {
+    setRecordingBusy(true);
+    const userId = getSupabaseUserId();
+    const counted = userId === null ? null : await countRawUploads(userId);
+    let result = "uploads: not signed in";
+    if (counted?.ok) result = `uploads in your raw folder: ${counted.count}`;
+    else if (counted) result = `uploads: ${counted.code}`;
+    setRecordingLines([recordingsLine(), result]);
+    setRecordingBusy(false);
   }
 
   // The session goes first, and the cleanup before it, as in Profile's own Sign out.
@@ -467,6 +504,22 @@ function DevToolsContent() {
                 {line}
               </Text>
             ))}
+          </View>
+          <View className="items-center gap-2">
+            <Text className="text-center text-body-sm text-mauve">Recordings (dev)</Text>
+            {recordingLines.map((line) => (
+              <Text key={line} className="text-center text-body-sm text-ink">
+                {line}
+              </Text>
+            ))}
+            <View className="flex-row flex-wrap justify-center gap-2">
+              <DevButton
+                label="Upload last recording (dev)"
+                disabled={recordingBusy}
+                onPress={uploadLastRecording}
+              />
+              <DevButton label="Count my uploads (dev)" disabled={recordingBusy} onPress={countUploads} />
+            </View>
           </View>
         </View>
         <View className="gap-2">

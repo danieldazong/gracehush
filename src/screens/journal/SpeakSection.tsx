@@ -40,6 +40,7 @@ export function SpeakSection({ recorder, onRecordAgain, onWriteInstead }: SpeakS
   const { speak } = copy.newEntry;
   const { state, durationMs, levels, error } = recorder;
   const recording = state === "recording";
+  const paused = state === "paused";
   const recorded = state === "recorded";
   const requesting = state === "requesting";
 
@@ -49,12 +50,18 @@ export function SpeakSection({ recorder, onRecordAgain, onWriteInstead }: SpeakS
   const spoken = formatDurationSpoken(shownMs);
   const atLimit = recorded && durationMs >= MAX_RECORDING_MS;
 
-  // A light tap when a recording starts and a firmer one when it stops, whichever way it stops (the orb,
-  // Finish or the five-minute limit). Only a real change fires, so coming back to this view does not.
+  // A light tap when a recording starts (a resume counts) and a firmer one when it stops, whichever way it stops (the
+  // orb, Finish, or the five-minute limit, from recording or from paused). Pausing makes none: it happens by itself.
+  // Only a real change fires, so coming back to this view does not.
   const previousState = useRef(state);
   useEffect(() => {
     if (previousState.current !== "recording" && state === "recording") haptics.light();
-    if (previousState.current === "recording" && state === "recorded") haptics.medium();
+    if (
+      (previousState.current === "recording" || previousState.current === "paused") &&
+      state === "recorded"
+    ) {
+      haptics.medium();
+    }
     previousState.current = state;
   }, [state]);
 
@@ -65,6 +72,8 @@ export function SpeakSection({ recorder, onRecordAgain, onWriteInstead }: SpeakS
   let message: { text: string; className: string } | null = null;
   if (error) {
     message = { text: speak.errors[error], className: "text-rosewood" };
+  } else if (paused) {
+    message = { text: speak.paused, className: "text-mauve" };
   } else if (recording && durationMs >= RECORDING_WARNING_MS) {
     message = { text: speak.warning, className: "text-rosewood" };
   } else if (atLimit) {
@@ -78,6 +87,8 @@ export function SpeakSection({ recorder, onRecordAgain, onWriteInstead }: SpeakS
     if (requesting) return;
     if (recording) {
       recorder.stop();
+    } else if (paused) {
+      recorder.resume();
     } else if (recorded) {
       onRecordAgain();
     } else {
@@ -85,7 +96,13 @@ export function SpeakSection({ recorder, onRecordAgain, onWriteInstead }: SpeakS
     }
   }
 
-  const orbLabel = recording ? speak.stopLabel(spoken) : recorded ? speak.recordAgain : speak.start;
+  const orbLabel = recording
+    ? speak.stopLabel(spoken)
+    : paused
+      ? speak.resumeLabel(spoken)
+      : recorded
+        ? speak.recordAgain
+        : speak.start;
 
   return (
     <View>
@@ -184,7 +201,9 @@ export function SpeakSection({ recorder, onRecordAgain, onWriteInstead }: SpeakS
               ? speak.recorded(elapsed)
               : recording
                 ? speak.captionRecording
-                : speak.captionIdle}
+                : paused
+                  ? speak.captionPaused
+                  : speak.captionIdle}
           </Text>
           {message ? (
             <Text

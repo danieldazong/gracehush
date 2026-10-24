@@ -58,14 +58,14 @@ type DialogKind = "leave" | "record-again";
 
 export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewEntry">) {
   const { width, fontScale } = useWindowDimensions();
-  const recorder = useRecorder();
+  // One id for the whole screen: "Try again" resubmits it, and the recording is named after it (recordings/{id}.m4a).
+  const [clientEntryId] = useState(() => randomUUID());
+  const recorder = useRecorder(clientEntryId);
   const [mode, setMode] = useState(route.params.mode);
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>("editing");
   const [stage, setStage] = useState<ProcessingStage | null>(null);
   const [dialog, setDialog] = useState<DialogKind | null>(null);
-  // One id for the whole screen: "Try again" resubmits it, and step 23 names the recording after it.
-  const [clientEntryId] = useState(() => randomUUID());
   const inputRef = useRef<TextInputInstance>(null);
   // The removal the guard stopped, kept until the dialog is answered.
   const pendingLeave = useRef<NavigationAction | null>(null);
@@ -76,14 +76,15 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
   const submitting = useRef(false);
   const lastRequest = useRef<ProcessEntryRequest | null>(null);
 
-  const hasContent =
-    recorder.state === "recording" || recorder.state === "recorded" || text.trim().length > 0;
-  const hasAudio = recorder.state === "recording" || recorder.state === "recorded";
+  // A take that is recording or paused is already something to keep, and the toggle stays locked until it is stopped.
+  const recordingOpen = recorder.state === "recording" || recorder.state === "paused";
+  const hasAudio = recordingOpen || recorder.state === "recorded";
+  const hasContent = hasAudio || text.trim().length > 0;
   const canSubmit =
     mode === "speak"
       ? hasAudio && recorder.durationMs >= MIN_RECORDING_MS
       : text.trim().length >= MIN_TEXT_LENGTH;
-  const modeLocked = recorder.state === "recording" || recorder.state === "requesting";
+  const modeLocked = recordingOpen || recorder.state === "requesting";
 
   useEffect(() => {
     mounted.current = true;
@@ -160,8 +161,8 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     Keyboard.dismiss();
     let request: ProcessEntryRequest;
     if (mode === "speak") {
-      // Finish while recording stops first, then sends what was recorded.
-      const audio = recorder.state === "recording" ? await recorder.stop() : recorder.recording;
+      // Finish while recording or paused stops first (the file is then in recordings/), then sends what was recorded.
+      const audio = recordingOpen ? await recorder.stop() : recorder.recording;
       if (!audio) {
         submitting.current = false;
         return;
@@ -169,6 +170,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
       request = {
         clientEntryId,
         inputType: "audio",
+        // TODO(25): upload the file (uploadRawRecording), then send its storage path here, not this local address
         audioPath: audio.uri,
         durationMs: audio.durationMs,
         mimeType: audio.mimeType,

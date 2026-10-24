@@ -218,9 +218,18 @@ export interface ConfirmScriptureError {
   error: { code: ConfirmScriptureErrorCode; message: string; requestId: string };
 }
 
-// New Entry (step 10). Steps 23 and 25 swap the mock recorder and the mock submit without changing these.
+// New Entry (step 10). Step 23 swapped the mock recorder for the real one without changing these; step 25 swaps the mock submit.
 export type RecorderStatus = { isRecording: boolean; durationMs: number; metering: number }; // metering 0..1
 export type RecordingResult = { uri: string; durationMs: number; mimeType: AudioMimeType };
+// A finished recording as the rest of the app sees it (step 23): the file is recordings/{clientEntryId}.m4a on this
+// phone and `sizeBytes` was measured on disk. Step 24 queues it and step 25 uploads it.
+export type RecordedAudio = {
+  clientEntryId: string;
+  uri: string;
+  durationMs: number;
+  mimeType: AudioMimeType;
+  sizeBytes: number;
+};
 export type ProcessingStage = "receiving" | "reflecting" | "preparing";
 export type SubmitResult =
   | { kind: "ready"; entryId: string }

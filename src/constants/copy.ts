@@ -218,18 +218,23 @@ export const copy = {
       // The caption under the orb follows the state. After a recording it says how long it was (`recorded`).
       captionIdle: "Tap to begin",
       captionRecording: "Tap to stop",
+      captionPaused: "Tap to resume",
       recorded: (time: string) => `Recorded ${time}`,
       recordAgain: "Record again",
       start: "Start recording",
       stopLabel: (spoken: string) => `Stop recording, ${spoken} recorded`,
+      resumeLabel: (spoken: string) => `Resume recording, ${spoken} recorded`,
       started: "Recording started",
       stopped: (spoken: string) => `Recording stopped, ${spoken} recorded`,
       timerLabel: (elapsed: string, total: string) => `${elapsed} of ${total}`,
+      // Said when the app was left, or a call or Siri took the microphone, while recording. The take is kept.
+      paused: "Recording paused while you were away.",
       warning: "30 seconds left",
       limit: "Your 5 minutes are up. You can finish your reflection now.",
       errors: {
         start: "We couldn’t start recording. Please try again.",
         save: "We couldn’t save that recording. Please try again.",
+        resume: "We couldn’t resume recording. You can finish what you have.",
       },
       denied: {
         title: "Microphone access is off",

@@ -1,6 +1,23 @@
-import { getRecordingPermissionsAsync, requestRecordingPermissionsAsync } from "expo-audio";
+import {
+  AudioModule,
+  getRecordingPermissionsAsync,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  type AudioRecorder,
+  type RecorderState,
+} from "expo-audio";
+import { createRecordingOptions } from "expo-audio/build/utils/options";
+import { File } from "expo-file-system";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 
+import {
+  KEEP_AWAKE_TAG,
+  METER_INTERVAL_MS,
+  RECORDING_MIME_TYPE,
+  RECORDING_OPTIONS,
+} from "@/constants/audio";
 import type { PermissionResult, RecorderStatus, RecordingResult } from "@/types";
+import { meterToLevel, smoothLevel } from "@/utils/audioLevels";
 
 import { toPermissionResult } from "./permissions";
 
@@ -28,41 +45,201 @@ export async function requestMicPermission(): Promise<PermissionResult> {
   }
 }
 
-// TEMP(23): replace internals with expo-audio, keep signatures
-// A mock: nothing is recorded and the microphone is never opened. It reports a status every 100 ms with
-// the elapsed time taken from the clock (never counted in ticks: JS timers run late when the device is
-// busy) and a smoothed random level.
-const STATUS_INTERVAL_MS = 100;
+// The recorder (step 23). One recording at a time. The native recorder is made when a recording starts and released
+// when it ends, so opening New Entry or writing never touches the microphone, and a recorder that cannot start fails
+// only the start.
+//
+// What expo-audio 58 does by itself (read in its native sources): when the app goes to the background, or a call or
+// Siri takes the audio session, it pauses a recording; when the app comes back, or the interruption ends, it resumes
+// a recording that IT paused, and since 58.0.6 leaves alone one the app paused. Gracehush never records without a
+// tap, so pauseRecording takes the pause over (a pause the app made is never resumed by the library) and only
+// resumeRecording, on a tap, starts the microphone again.
+//
+// Nothing here logs: a native error can carry a file path.
 
-let recording: { startedAt: number; timer: ReturnType<typeof setInterval> } | null = null;
+// A recorder that says it is recording while its clock stands still has stopped. iOS keeps saying "recording" when
+// the system refused a start or a resume. The wait is long enough for a Bluetooth microphone, which can take a few
+// seconds to start delivering sound, not to be taken for a stall.
+const STALL_MS = 4_000;
+// Not recording for this many reads in a row means someone else paused it (a call, Siri).
+const IDLE_READS_BEFORE_PAUSED = 2;
 
-function clearRecording() {
-  if (recording) {
-    clearInterval(recording.timer);
-    recording = null;
+type Session = {
+  recorder: AudioRecorder;
+  timer: ReturnType<typeof setInterval>;
+  level: number; // the smoothed level, 0 to 1
+  durationMs: number; // the longest length read so far
+  advancedAt: number; // when `durationMs` last grew
+  idleReads: number;
+};
+
+let session: Session | null = null;
+
+// import/namespace reads AudioModule (a default export that expo-audio re-exports by name) as a namespace and cannot
+// see its members, so the construction below goes through a typed alias instead of a rule disable.
+const nativeAudio: typeof AudioModule = AudioModule;
+
+function keepAwake(on: boolean) {
+  const done = on ? activateKeepAwakeAsync(KEEP_AWAKE_TAG) : deactivateKeepAwake(KEEP_AWAKE_TAG);
+  done.catch(() => undefined);
+}
+
+// On iOS the audio session must allow recording while a take runs, and go back afterwards so the next playback
+// uses the speaker and not the earpiece (step 26 replaces these calls with its session modes).
+async function allowRecording(allowed: boolean) {
+  try {
+    await setAudioModeAsync(
+      allowed ? { allowsRecording: true, playsInSilentMode: true } : { allowsRecording: false },
+    );
+  } catch {
+    // Best effort. A start that really cannot record fails at prepare or record, which the caller sees.
   }
+}
+
+function releaseQuietly(recorder: AudioRecorder | null) {
+  try {
+    recorder?.release();
+  } catch {
+    // Already released.
+  }
+}
+
+function deleteQuietly(uri: string | null) {
+  try {
+    if (!uri) return;
+    const file = new File(uri);
+    if (file.exists) file.delete();
+  } catch {
+    // Nothing more to do for a file that is already gone.
+  }
+}
+
+async function endSession() {
+  const current = session;
+  session = null;
+  if (!current) return;
+  clearInterval(current.timer);
+  releaseQuietly(current.recorder);
+  keepAwake(false);
+  await allowRecording(false);
+}
+
+// One read of the native recorder, handed to the hook as the step 10 status shape. `metering` is 0 to 1 and smoothed;
+// `isRecording` is false once the recorder has stood idle for two reads or its clock has stalled.
+function read(current: Session, onStatus: (status: RecorderStatus) => void) {
+  if (session !== current) return;
+  let status: RecorderState;
+  try {
+    status = current.recorder.getStatus();
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  const durationMs = Math.max(0, status.durationMillis);
+  if (durationMs > current.durationMs) {
+    current.durationMs = durationMs;
+    current.advancedAt = now;
+  }
+  const stalled = status.isRecording && now - current.advancedAt > STALL_MS;
+  const capturing = status.isRecording && !stalled;
+  current.idleReads = capturing ? 0 : current.idleReads + 1;
+  current.level = smoothLevel(current.level, capturing ? meterToLevel(status.metering) : 0);
+  onStatus({
+    isRecording: capturing || current.idleReads < IDLE_READS_BEFORE_PAUSED,
+    durationMs,
+    metering: current.level,
+  });
 }
 
 export async function startRecording(onStatus: (status: RecorderStatus) => void): Promise<void> {
-  clearRecording();
-  const startedAt = Date.now();
-  let level = 0.5;
-  const timer = setInterval(() => {
-    level = 0.6 * level + 0.4 * (0.15 + Math.random() * 0.75);
-    onStatus({ isRecording: true, durationMs: Date.now() - startedAt, metering: level });
-  }, STATUS_INTERVAL_MS);
-  recording = { startedAt, timer };
-}
-
-export async function stopRecording(): Promise<RecordingResult> {
-  if (!recording) {
-    throw new Error("No recording is running");
+  await endSession();
+  let recorder: AudioRecorder | null = null;
+  try {
+    await allowRecording(true);
+    recorder = new nativeAudio.AudioRecorder(createRecordingOptions(RECORDING_OPTIONS));
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+  } catch (error) {
+    releaseQuietly(recorder);
+    await allowRecording(false);
+    throw error;
   }
-  const durationMs = Date.now() - recording.startedAt;
-  clearRecording();
-  return { uri: `mock://recording-${Date.now()}.m4a`, durationMs, mimeType: "audio/m4a" };
+  keepAwake(true);
+  const next: Session = {
+    recorder,
+    timer: setInterval(() => read(next, onStatus), METER_INTERVAL_MS),
+    level: 0,
+    durationMs: 0,
+    advancedAt: Date.now(),
+    idleReads: 0,
+  };
+  session = next;
 }
 
+// Holds a running recording. The library has often paused it already (see above); the call is still made, because it is
+// what tells the library the pause is ours, so that it never resumes the microphone by itself.
+export function pauseRecording(): void {
+  const current = session;
+  if (!current) return;
+  try {
+    current.recorder.pause();
+  } catch {
+    // Paused by the system already.
+  }
+  keepAwake(false);
+}
+
+// The tap on Resume. Throws when the system will not give the microphone back (a call is still going on).
+export async function resumeRecording(): Promise<void> {
+  const current = session;
+  if (!current) throw new Error("No recording is running");
+  await allowRecording(true);
+  current.recorder.record();
+  current.advancedAt = Date.now();
+  current.idleReads = 0;
+  keepAwake(true);
+}
+
+// Back in the foreground with a recording that is ours to keep paused: if the library resumed it anyway (an older
+// expo-audio, or a pause that raced the system's), pause it again.
+export function holdPaused(): void {
+  const current = session;
+  if (!current) return;
+  try {
+    if (current.recorder.getStatus().isRecording) current.recorder.pause();
+  } catch {
+    // Nothing to hold.
+  }
+}
+
+// Finishes the take and hands back the raw file (the hook moves it to its final place). The audio session goes back to
+// playback and the recorder is released whatever happens.
+export async function stopRecording(): Promise<RecordingResult> {
+  const current = session;
+  if (!current) throw new Error("No recording is running");
+  try {
+    // iOS reports a length of 0 once the recorder has stopped, so it is read first.
+    const durationMs = Math.max(0, current.recorder.getStatus().durationMillis);
+    await current.recorder.stop();
+    const uri = current.recorder.uri;
+    if (!uri) throw new Error("The recording has no file");
+    return { uri, durationMs, mimeType: RECORDING_MIME_TYPE };
+  } finally {
+    await endSession();
+  }
+}
+
+// Throws the take away: stops the recorder and deletes its unfinished file.
 export async function cancelRecording(): Promise<void> {
-  clearRecording();
+  const current = session;
+  if (!current) return;
+  let uri: string | null = null;
+  try {
+    uri = current.recorder.uri;
+    await current.recorder.stop();
+  } catch {
+    // A recorder that already stopped can refuse; the file is deleted either way.
+  }
+  await endSession();
+  deleteQuietly(uri);
 }

@@ -337,7 +337,7 @@ const row = ({
   });
   // The "database" is one row the fake keeps: a push changes it, as the real update would.
   function makeSyncEnv({ stored = {}, source = "supabase", server = row() } = {}) {
-    const calls = { fetch: 0, push: [] };
+    const calls = { fetch: 0, push: [], recordingsDeleted: 0 };
     const remote = { server, fetchFails: null, pushFails: [], onPush: null, onFetch: null };
     const session = { userId: "user_a" };
     // The two pure column builders are the real ones, so what the sync sends is what the app would send.
@@ -373,6 +373,8 @@ const row = ({
     };
     // react-native cannot load in Node; the player store only matters to signOutCleanup's reset.
     fakes["@/store/playerStore"] = { usePlayerStore: { getState: () => ({ stop: () => undefined }) } };
+    // expo-file-system cannot load in Node either; signOutCleanup only needs the recordings on the phone to be deleted.
+    fakes["@/services/recordingFiles"] = { deleteAllRecordings: async () => void calls.recordingsDeleted++ };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
     env.use("@/store/devStore").useDevStore.getState().setProfileSource(source);
@@ -829,12 +831,14 @@ const row = ({
     ob.getState().setReminder("morning", "05:00");
     const account = ctx.env.use("@/services/account");
     await account.signOutCleanup();
+    assert.equal(ctx.calls.recordingsDeleted, 1, "sign out deletes the finished recordings on the phone");
     assert.equal(ob.getState().remindersDirty, false);
     assert.deepEqual(unsentOf(ctx), { ambientSound: "soft-rain" }, "sign out keeps the user's unsent setting");
     await sleep(1000);
     assert.equal(ctx.calls.fetch, 1, "the debounce was cancelled: nothing was sent after sign out");
     const deleted = await account.deleteAccount();
     assert.equal(deleted.ok, true);
+    assert.equal(ctx.calls.recordingsDeleted, 2, "account deletion deletes the recordings too");
     assert.equal(prefsOf(ctx).getState().byUser.user_a, undefined, "delete forgets them");
   });
 
@@ -942,7 +946,12 @@ const row = ({
   async function clientEnv(token = "tokA") {
     const backend = fakeBackend();
     globalThis.fetch = backend.fake;
-    const env = makeEnv({ fakes: { "@/store/playerStore": { usePlayerStore: { getState: () => ({ stop: () => undefined }) } } } });
+    const env = makeEnv({
+      fakes: {
+        "@/store/playerStore": { usePlayerStore: { getState: () => ({ stop: () => undefined }) } },
+        "@/services/recordingFiles": { deleteAllRecordings: async () => undefined },
+      },
+    });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();
     await env.use("@/store/profilePrefsStore").useProfilePrefsStore.persist.rehydrate();
     const client = env.use("@/services/supabaseClient");
