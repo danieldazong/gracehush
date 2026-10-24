@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type TextInputInstance,
   View,
 } from "react-native";
 
@@ -25,7 +26,7 @@ type WriteSectionProps = {
   text: string;
   onChangeText: (text: string) => void;
   // Owned by the screen, which focuses the field after the modal has opened.
-  inputRef: RefObject<TextInput | null>;
+  inputRef: RefObject<TextInputInstance | null>;
 };
 
 // The text lives in the screen's state until it is submitted, and nowhere else.

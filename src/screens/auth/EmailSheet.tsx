@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  type TextInputInstance,
+  View,
+} from "react-native";
 
 import { BottomSheet } from "@/components/BottomSheet";
 import { PrimaryButton } from "@/components/PrimaryButton";
@@ -37,8 +45,8 @@ export function EmailSheet({ visible, onClose }: EmailSheetProps) {
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
-  const emailInput = useRef<TextInput>(null);
-  const codeInput = useRef<TextInput>(null);
+  const emailInput = useRef<TextInputInstance>(null);
+  const codeInput = useRef<TextInputInstance>(null);
   // Bumped whenever the flow is abandoned, so a request that finishes late is ignored.
   const session = useRef(0);
 

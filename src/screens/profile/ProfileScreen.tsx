@@ -10,6 +10,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  type ScrollViewInstance,
   StyleSheet,
   Switch,
   Text,
@@ -329,7 +330,7 @@ function Footer() {
 export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const state = useProfileSettings();
   const { signOut } = useAuth();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   useScrollToTop(scrollRef);
   const paddingBottom = useTabScreenBottomPadding();
   const reminders = useOnboardingStore((store) => store.reminders);

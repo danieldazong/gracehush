@@ -437,8 +437,8 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
         // The days on the cards follow `now`, which is not part of the data.
         extraData={ready?.now}
         ItemSeparatorComponent={tab === "answered" ? TimelineSeparator : CardGap}
-        ListHeaderComponent={header}
-        ListEmptyComponent={emptyState}
+        ListHeaderComponent={header ?? undefined}
+        ListEmptyComponent={emptyState ?? undefined}
         contentContainerStyle={{
           flexGrow: 1,
           paddingHorizontal:

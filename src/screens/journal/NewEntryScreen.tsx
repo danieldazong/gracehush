@@ -9,7 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  type TextInput,
+  type TextInputInstance,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -66,7 +66,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   // One id for the whole screen: "Try again" resubmits it, and step 23 names the recording after it.
   const [clientEntryId] = useState(() => randomUUID());
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   // The removal the guard stopped, kept until the dialog is answered.
   const pendingLeave = useRef<NavigationAction | null>(null);
   // Set just before every deliberate exit, so the guard lets it through.

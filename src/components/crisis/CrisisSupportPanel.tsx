@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  type TextInstance,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -46,7 +47,7 @@ type CrisisSupportPanelProps = {
 export function CrisisSupportPanel({ transcript, onOpenResources, onReturn }: CrisisSupportPanelProps) {
   const { width } = useWindowDimensions();
   const { fallback, fallbackVisible, run, closeFallback } = useCrisisActions();
-  const titleRef = useRef<Text>(null);
+  const titleRef = useRef<TextInstance>(null);
   const words = transcript?.trim() ?? "";
 
   useEffect(() => {
