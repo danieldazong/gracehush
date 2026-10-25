@@ -30,10 +30,13 @@ import {
   getPrayerCounts,
   getReflectionDays,
 } from "@/data/selectors";
+import { isDatabaseOpen } from "@/db/database";
+import * as outbox from "@/db/outbox";
 import type { MainTabScreenProps, RootStackParamList } from "@/navigation/types";
 import { signOutCleanup } from "@/services/account";
 import { countRawUploads, uploadRawRecording } from "@/services/mediaUpload";
 import { listRecordings } from "@/services/recordingFiles";
+import { resumeAfterUpgrade, subscribe, syncNow } from "@/services/syncEngine";
 import {
   checkSessionToken,
   describeSessionToken,
@@ -43,7 +46,7 @@ import {
 import { useDevStore } from "@/store/devStore";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
-import type { JournalEntry, PermissionResult, SubscriptionTier } from "@/types";
+import type { JournalEntry, OutboxStatus, PermissionResult, SubscriptionTier } from "@/types";
 import {
   formatDuration,
   formatEntryTimestamp,
@@ -57,13 +60,25 @@ import {
 // Rules"). Later steps add their own controls to this panel as new sections.
 
 const SCENARIOS: MockScenario[] = ["default", "empty", "offline"];
-const SUBMIT_OUTCOMES: MockSubmitOutcome[] = ["ready", "crisis", "failed", "limit"];
+const SUBMIT_OUTCOMES: MockSubmitOutcome[] = ["ready", "crisis", "failed", "limit", "too_short"];
+const OUTBOX_STATES: OutboxStatus[] = ["queued", "sending", "needs_action", "limit_reached", "paused_auth"];
 const PLANS: SubscriptionTier[] = ["free", "trial", "pro"];
 const PROFILE_SOURCES: ProfileSource[] = ["supabase", "mock"];
 
 // The count of finished recordings kept on this phone (recordings/ in the app's own folder).
 function recordingsLine(): string {
   return `recordings on this phone: ${listRecordings().length}`;
+}
+
+// How many reflections are in each state of the outbox: numbers only, never a word that was written.
+async function outboxLine(): Promise<string> {
+  if (!isDatabaseOpen()) return "outbox: the database is not open";
+  try {
+    const counts = await outbox.countsByStatus();
+    return `outbox: ${OUTBOX_STATES.map((name) => `${name} ${counts[name] ?? 0}`).join(", ")}`;
+  } catch {
+    return "outbox: could not be read";
+  }
 }
 const TOKEN_LABELS: Record<SessionTokenCheck, string> = {
   ok: "has role = authenticated",
@@ -245,6 +260,8 @@ function DevToolsContent() {
   const setNextCrisisLinkFails = useDevStore((state) => state.setNextCrisisLinkFails);
   const nextPrayerMutationFails = useDevStore((state) => state.nextPrayerMutationFails);
   const setNextPrayerMutationFails = useDevStore((state) => state.setNextPrayerMutationFails);
+  const nextNetworkFails = useDevStore((state) => state.nextNetworkFails);
+  const setNextNetworkFails = useDevStore((state) => state.setNextNetworkFails);
   const mockProfileVersion = useDevStore((state) => state.mockProfileVersion);
   const bumpMockProfileVersion = useDevStore((state) => state.bumpMockProfileVersion);
   const notificationStatusOverride = useDevStore((state) => state.notificationStatusOverride);
@@ -270,6 +287,7 @@ function DevToolsContent() {
   const [processChecking, setProcessChecking] = useState(false);
   const [recordingLines, setRecordingLines] = useState<string[]>(() => [recordingsLine()]);
   const [recordingBusy, setRecordingBusy] = useState(false);
+  const [outboxText, setOutboxText] = useState("outbox: …");
   // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
   const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
   const crisisEntryId = targets.find((target) => target.label === "Crisis")?.entryId ?? null;
@@ -289,9 +307,27 @@ function DevToolsContent() {
     };
   }, [scenario, mockProfileVersion]);
 
+  // The outbox counts follow the sync engine: every change it makes to the queue refreshes them.
+  useEffect(() => {
+    let cancelled = false;
+    const read = () => {
+      outboxLine().then((line) => {
+        if (!cancelled) setOutboxText(line);
+      });
+    };
+    read();
+    const stopFollowing = subscribe(read);
+    return () => {
+      cancelled = true;
+      stopFollowing();
+    };
+  }, []);
+
   function changePlan(next: SubscriptionTier) {
     setMockSubscriptionTier(next);
     bumpMockProfileVersion();
+    // What the free limit held back goes as soon as the plan is paid (a no-op on the free plan).
+    void resumeAfterUpgrade();
   }
 
   // Profile and this panel reload through the mock profile version, as for a mock plan change.
@@ -467,6 +503,17 @@ function DevToolsContent() {
           selected={nextPrayerMutationFails}
           onPress={() => setNextPrayerMutationFails(true)}
         />
+        {/* The next call the sync engine makes gets no answer, so its retries (5 s, 15 s, 60 s) can be watched. */}
+        <DevButton
+          label="Fail next network call (dev)"
+          selected={nextNetworkFails}
+          onPress={() => setNextNetworkFails(true)}
+        />
+        <View className="items-center gap-2">
+          <Text className="text-center text-body-sm text-mauve">Outbox (dev)</Text>
+          <Text className="text-center text-body-sm text-ink">{outboxText}</Text>
+          <DevButton label="Sync now (dev)" onPress={() => void syncNow("manual")} />
+        </View>
         <View className="gap-2">
           <Text className="text-center text-body-sm text-mauve">Profile source (dev)</Text>
           <View className="flex-row flex-wrap justify-center gap-2">

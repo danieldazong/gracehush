@@ -1,4 +1,4 @@
-// TEMP(24/25/29): internals move to the SQLite cache and Supabase. Keep the names and argument order; those steps widen some return types to RepoResult. The profile is real since step 17.
+// TEMP(25/29): internals move to Supabase and the SQLite read cache (built in step 24, filled by step 25). Keep the names and argument order; those steps widen some return types to RepoResult. The profile is real since step 17.
 import {
   AMBIENT_SOUNDS,
   FREE_DEVOTIONALS_PER_WEEK,
@@ -10,25 +10,31 @@ import { getDeviceTimezone, toAffirmation, toJournalEntry, toPrayer, toUserProfi
 import { addMockEntry, getMockDb } from "@/data/mock/db";
 import {
   getProfileSource,
+  takeMockNetworkFailure,
   takeMockPrayerMutationFailure,
   takeMockSubmitOutcome,
   type MockSubmitOutcome,
 } from "@/data/mock/scenario";
+import { toPendingEntry } from "@/data/pendingEntries";
+import { isDatabaseOpen } from "@/db/database";
+import * as outbox from "@/db/outbox";
 import { scheduleProfileSync, syncProfile } from "@/services/profileSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 import type {
   Affirmation,
+  HomeEntry,
   JournalEntry,
   MarkAnsweredInput,
+  OutboxItem,
   PlanUsage,
   Prayer,
   ProcessEntryRequest,
   ProcessingStage,
+  ProcessOutcome,
   ProfilePatch,
   RepoResult,
-  SubmitResult,
   SubscriptionTier,
   TimeSlot,
   UserProfile,
@@ -45,6 +51,7 @@ const STAGES: Record<MockSubmitOutcome, readonly ProcessingStage[]> = {
   crisis: ["receiving", "reflecting"],
   failed: ["receiving", "reflecting"],
   limit: ["receiving"],
+  too_short: ["receiving"],
 };
 const STAGE_MS = 1200;
 
@@ -142,9 +149,54 @@ export async function listEntries(): Promise<JournalEntry[]> {
   return readEntries();
 }
 
-export async function getEntry(id: string): Promise<JournalEntry | null> {
+// A reflection that is still only on this phone has no server id: its id is its client entry id, and it is an entry
+// that is not finished yet (Reflection shows "still being prepared"), never "not found" (step 24).
+export async function getEntry(id: string): Promise<HomeEntry | null> {
   await simulateLatency();
-  return readEntries().find((entry) => entry.id === id) ?? null;
+  const found = readEntries().find((entry) => entry.id === id);
+  if (found) return found;
+  const item = await findPendingItem(id);
+  return item === null ? null : toPendingEntry(item);
+}
+
+async function findPendingItem(clientEntryId: string): Promise<OutboxItem | null> {
+  if (!isDatabaseOpen()) return null;
+  try {
+    return await outbox.get(clientEntryId);
+  } catch {
+    return null;
+  }
+}
+
+// The reflections saved on this phone and not prepared yet, newest first. Empty while the database is not open, and when
+// it cannot be read: Journal and Profile show what the server has either way.
+export async function listPendingItems(): Promise<OutboxItem[]> {
+  if (!isDatabaseOpen()) return [];
+  try {
+    return await outbox.listPending();
+  } catch {
+    return [];
+  }
+}
+
+// How many reflections signing out would lose: the ones the server has never been given. 0 while the database is not open.
+export async function countUnsentItems(): Promise<number> {
+  if (!isDatabaseOpen()) return 0;
+  try {
+    return await outbox.countUnsent();
+  } catch {
+    return 0;
+  }
+}
+
+// The plan as this device knows it, with no waiting. The sync engine uses it to send what the free limit held back as soon
+// as the plan is paid, wherever the purchase was made. A mock purchase counts first, because the screens show the mock
+// plan until step 30 (TEMP(30)); otherwise it is the plan the last profile sync read, or null before the first sync.
+export function getKnownTier(): SubscriptionTier | null {
+  const mock = getMockSubscriptionTier();
+  if (mock !== "free" || getProfileSource() === "mock") return mock;
+  const userId = getSupabaseUserId();
+  return userId === null ? null : (readLocalProfile(userId)?.subscriptionTier ?? null);
 }
 
 // The prayer of every mapped entry that has one, so a prayer never disagrees with its entry.
@@ -318,30 +370,56 @@ export async function getLatestAffirmations(): Promise<Affirmation[]> {
   return latest ? readAffirmations(latest.id) : [];
 }
 
-// TEMP(25): call process-entry via api/journalApi.ts
-// A mock run: it reports each stage 1.2 s apart, then answers with what the dev store asked for (one
-// shot, see takeMockSubmitOutcome). A finished or crisis outcome adds an entry to the mock database.
-export async function submitEntry(
-  req: ProcessEntryRequest,
+// What the mock database needs of an outbox item. It reads the words of a written entry and nothing else.
+function toMockRequest(item: OutboxItem): ProcessEntryRequest {
+  if (item.inputType === "text") {
+    return { clientEntryId: item.clientEntryId, inputType: "text", text: item.text ?? "" };
+  }
+  return {
+    clientEntryId: item.clientEntryId,
+    inputType: "audio",
+    audioPath: "",
+    durationMs: item.durationMs ?? 0,
+    mimeType: item.mimeType ?? "audio/mp4",
+  };
+}
+
+// TEMP(25): the real processor uploads the recording and calls process-entry (services/entryProcessor.ts)
+// A mock run for the sync engine: it reports each stage 1.2 s apart, then answers with what the dev store asked for (one
+// shot, see takeMockSubmitOutcome), or with no answer at all when the dev panel failed the network. A finished or crisis
+// outcome adds an entry to the mock database and answers with it, as the server does.
+export async function processMock(
+  item: OutboxItem,
   onStage: (stage: ProcessingStage) => void,
-): Promise<SubmitResult> {
+): Promise<ProcessOutcome> {
+  if (takeMockNetworkFailure()) {
+    onStage("receiving");
+    await new Promise((resolve) => setTimeout(resolve, STAGE_MS));
+    return { ok: false, code: "NETWORK" };
+  }
   const taken = takeMockSubmitOutcome();
   // A paid plan never hits the free limit, so there a "limit" run finishes like a normal one.
   const outcome = taken === "limit" && getMockSubscriptionTier() !== "free" ? "ready" : taken;
   // The outcome is never logged: a crisis outcome must leave no log line (AGENTS.md Crisis Safety Rules).
   for (const stage of STAGES[outcome]) {
-    if (__DEV__) console.log(`[submitEntry] stage ${stage}`);
+    if (__DEV__) console.log(`[process] stage ${stage}`);
     onStage(stage);
     await new Promise((resolve) => setTimeout(resolve, STAGE_MS));
   }
   switch (outcome) {
     case "ready":
-      return { kind: "ready", entryId: addMockEntry("ready", req) };
-    case "crisis":
-      return { kind: "crisis", entryId: addMockEntry("crisis", req) };
+    case "crisis": {
+      const entryId = addMockEntry(outcome, toMockRequest(item));
+      const entry = readEntries().find((candidate) => candidate.id === entryId);
+      if (entry === undefined) return { ok: false, code: "INTERNAL" };
+      return { ok: true, entry, affirmations: readAffirmations(entryId) };
+    }
     case "failed":
-      return { kind: "error", code: "AI_UNAVAILABLE" };
+      return { ok: false, code: "AI_UNAVAILABLE" };
+    case "too_short":
+      return { ok: false, code: "TOO_SHORT" };
     case "limit":
-      return { kind: "error", code: "LIMIT_REACHED" };
+      // TODO(25): the 402 body carries the entry the server saved (entryId) and usage.resetsAt
+      return { ok: false, code: "LIMIT_REACHED", resetsAt: nextWeekStart(new Date()).toISOString() };
   }
 }

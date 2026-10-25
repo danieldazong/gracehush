@@ -375,6 +375,11 @@ const row = ({
     fakes["@/store/playerStore"] = { usePlayerStore: { getState: () => ({ stop: () => undefined }) } };
     // expo-file-system cannot load in Node either; signOutCleanup only needs the recordings on the phone to be deleted.
     fakes["@/services/recordingFiles"] = { deleteAllRecordings: async () => void calls.recordingsDeleted++ };
+    // Step 24: account.ts and journalRepository.ts import the user's database and the sync session, and plain Node cannot
+    // load the native modules behind them. These checks are not about them.
+    fakes["@/db/database"] = { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined };
+    fakes["@/db/outbox"] = {};
+    fakes["@/services/offlineSession"] = { endOfflineSession: async () => undefined };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
     env.use("@/store/devStore").useDevStore.getState().setProfileSource(source);
@@ -950,6 +955,9 @@ const row = ({
       fakes: {
         "@/store/playerStore": { usePlayerStore: { getState: () => ({ stop: () => undefined }) } },
         "@/services/recordingFiles": { deleteAllRecordings: async () => undefined },
+        "@/db/database": { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined },
+        "@/db/outbox": {},
+        "@/services/offlineSession": { endOfflineSession: async () => undefined },
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();
@@ -1286,7 +1294,12 @@ const row = ({
     backend.table.set("user_a", row());
     const env = makeEnv({
       stored: { "gracehush.profilePrefs": JSON.stringify(v1) },
-      fakes: { "@/store/playerStore": { usePlayerStore: { getState: () => ({ stop: () => undefined }) } } },
+      fakes: {
+        "@/store/playerStore": { usePlayerStore: { getState: () => ({ stop: () => undefined }) } },
+        // Step 24: journalRepository.ts imports the user's database, which plain Node cannot load.
+        "@/db/database": { isDatabaseOpen: () => false },
+        "@/db/outbox": {},
+      },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();
     const prefs = env.use("@/store/profilePrefsStore").useProfilePrefsStore;

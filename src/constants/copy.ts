@@ -1,4 +1,4 @@
-import type { AmbientSound, PlaybackRate, TimeSlot } from "@/types";
+import type { AmbientSound, OutboxStatus, PlaybackRate, TimeSlot } from "@/types";
 
 // "1 day", "7 days". The paywall's trial lines and disclosures share it.
 const daysLabel = (days: number) => (days === 1 ? "1 day" : `${days} days`);
@@ -50,6 +50,7 @@ export const copy = {
   },
   common: {
     close: "Close",
+    dismiss: "Dismiss",
     today: "Today",
     yesterday: "Yesterday",
     defaultDevotionalTitle: "Your devotional",
@@ -162,6 +163,30 @@ export const copy = {
       failed: "We couldn’t finish this one.",
       tryAgain: "Try again",
       support: "Support resources",
+      // A reflection that is only on this phone never shows its words.
+      writtenReflection: "Written reflection",
+      review: "Review",
+      reviewLabel: "Review this reflection",
+      seePlans: "See plans",
+      seePlansLabel: "See plans to prepare this reflection",
+      // The status line of a reflection that is saved on this phone and has not been prepared yet (step 24). The card shows
+      // it and a screen reader speaks it. `weekday` is when the free limit's week ends.
+      pendingLine: (status: OutboxStatus, online: boolean | null, weekday: string | null) => {
+        switch (status) {
+          case "queued":
+            return online === false
+              ? "Saved on this phone · Waiting to connect"
+              : "Preparing your reflection…";
+          case "sending":
+            return "Preparing your reflection…";
+          case "needs_action":
+            return "We couldn’t finish this one.";
+          case "limit_reached":
+            return weekday ? `Saved · Unlocks with Pro or on ${weekday}` : "Saved · Unlocks with Pro";
+          case "paused_auth":
+            return "Saved · Sign in to continue";
+        }
+      },
       // The parts of a card's spoken summary. The transcript is never part of it.
       a11y: {
         from: (timestamp: string) => `Reflection from ${timestamp}`,
@@ -183,6 +208,26 @@ export const copy = {
             ? "You’re offline. 1 reflection is saved and will be prepared when you reconnect."
             : `You’re offline. ${unsynced} reflections are saved and will be prepared when you reconnect.`,
     },
+    // What "Review" on a refused reflection offers (one ConfirmDialog with two steps).
+    review: {
+      title: "We couldn’t finish this one",
+      edit: "Edit and resend",
+      deleteAction: "Delete",
+      close: "Close",
+      delete: {
+        title: "Delete this reflection?",
+        bodyText: "It will be deleted from this phone.",
+        bodyAudio: "The recording will be deleted from this phone.",
+        confirm: "Delete",
+        cancel: "Keep",
+      },
+    },
+    // The calm line New Entry leaves on Journal after it saved something that has not been prepared yet. It stays until
+    // it is dismissed or the list is refreshed, never on a timer.
+    notes: {
+      offline: "Saved. We’ll prepare your reflection when you’re back online.",
+      retry: "Saved. We’ll finish your reflection as soon as we can.",
+    },
     synced: "All reflections synced",
     empty: {
       title: "No reflections yet",
@@ -202,8 +247,6 @@ export const copy = {
   newEntry: {
     header: {
       title: "New Reflection",
-      // TODO(24): reflect real local save
-      saved: "Saved locally",
       private: "Private",
     },
     modes: {
@@ -300,16 +343,41 @@ export const copy = {
         reflecting: "Reflecting on what you shared.",
         preparing: "Preparing your devotional.",
       },
-      // TODO(25): "waiting in your Journal" is true once processing continues after the screen closes
-      note: "You can close the app. Your reflection will be waiting in your Journal.",
+      // The reflection is in the outbox before this screen shows. The app prepares it while it is open (never in the
+      // background), so this does not promise more than that.
+      note: "Your reflection is saved on this phone. If you leave this screen, it will finish in your Journal.",
       close: "Close",
-      error: {
-        title: "We couldn’t finish this reflection.",
-        // TODO(24): "Your words are safe" is true once the entry is saved on the device before it is sent
-        body: "Your words are safe. Try again, or save it and we’ll retry later.",
-        retry: "Try again",
-        saveAndClose: "Save and close",
+      // The two ways the overlay can fail now: the phone could not save the reflection, or the server refused it for a
+      // reason only the person can fix. Anything else is saved and retried by itself, with no error shown.
+      failures: {
+        save: {
+          title: "We couldn’t save this reflection.",
+          body: "Your words are still on this screen. Please try again.",
+          primary: "Try again",
+          secondary: "Keep editing",
+        },
+        refused: {
+          title: "We couldn’t finish this reflection.",
+          editText: "Edit",
+          recordAgain: "Record again",
+          close: "Close",
+        },
       },
+    },
+  },
+  // Why a refused reflection could not be prepared, for New Entry's overlay and for Journal's "Review".
+  problems: {
+    reason: (code: string | null) => {
+      switch (code) {
+        case "TOO_SHORT":
+          return "That reflection was too short to prepare. You can add a little more.";
+        case "NO_SPEECH":
+          return "We couldn’t hear anything in that recording. You can record it again.";
+        case "PAYLOAD_TOO_LARGE":
+          return "That reflection is too large to send. You can shorten it or record a shorter one.";
+        default:
+          return "Something about this reflection can’t be prepared. You can edit it, record it again or delete it.";
+      }
     },
   },
   reflection: {
@@ -388,7 +456,6 @@ export const copy = {
       },
       failed: {
         title: "We couldn’t finish this reflection.",
-        // TODO(24): "Your words are safe" is true once the entry is saved on the device before it is sent
         // TODO(25): "try again from your journal" is true once a failed entry has a "Try again"
         body: "Your words are safe. You can try again from your journal.",
       },
@@ -679,11 +746,19 @@ export const copy = {
     // One ConfirmDialog serves all of these (the delete one in two steps), so each is a set of strings.
     dialogs: {
       signOut: {
-        // TODO(24): the body says how many reflections on this phone have not been sent yet, when there are any
         title: "Sign out of Gracehush?",
         body: "Your journal stays safe in your account.",
         confirm: "Sign out",
         cancel: "Stay",
+      },
+      // The same dialog when reflections on this phone have not been sent yet: signing out deletes them from the phone.
+      signOutUnsent: {
+        body: (count: number) =>
+          count === 1
+            ? "1 reflection on this phone hasn’t been sent yet. If you sign out, it will be deleted from this phone."
+            : `${count} reflections on this phone haven’t been sent yet. If you sign out, they’ll be deleted from this phone.`,
+        confirm: "Sign out anyway",
+        cancel: "Stay signed in",
       },
       export: {
         // TODO(31): true once step 31 builds the download link

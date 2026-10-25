@@ -12,7 +12,9 @@ export type RootStackParamList = {
   Onboarding: undefined;
   SignIn: undefined;
   MainTabs: NavigatorScreenParams<MainTabParamList>;
-  NewEntry: { mode: "speak" | "write" };
+  // `resend` is the client entry id of a refused written reflection: New Entry opens with its words (Journal's
+  // "Edit and resend") and sends them again under the same id.
+  NewEntry: { mode: "speak" | "write"; resend?: string };
   Reflection: { entryId: string };
   NowPlaying: { entryId: string };
   // Nothing reads `source` in V1 (no analytics: a crisis view sends no events). It stays because step 15's

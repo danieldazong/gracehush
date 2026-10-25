@@ -20,7 +20,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AffirmationCard } from "@/components/AffirmationCard";
 import { Icon } from "@/components/Icon";
 import { JournalCard } from "@/components/JournalCard";
+import { NoticeBanner } from "@/components/NoticeBanner";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { PendingReviewDialog } from "@/components/PendingReviewDialog";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Skeleton } from "@/components/Skeleton";
@@ -32,12 +34,14 @@ import {
   filterEntries,
   getAffirmationForSlot,
   getGreeting,
+  getUnsentCount,
   type JournalFilter,
 } from "@/data/selectors";
 import { useJournalHome } from "@/hooks/useJournalHome";
 import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
-import type { JournalEntry } from "@/types";
+import { discardItem } from "@/services/syncEngine";
+import type { HomeEntry } from "@/types";
 import {
   formatLongDate,
   formatTime12,
@@ -230,23 +234,27 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
   const state = useJournalHome();
   const { width } = useWindowDimensions();
   const paddingBottom = useTabScreenBottomPadding();
-  const listRef = useRef<FlatList<JournalEntry>>(null);
+  const listRef = useRef<FlatList<HomeEntry>>(null);
   useScrollToTop(listRef);
 
   // Screen state, reset when the screen unmounts.
   const [filter, setFilter] = useState<JournalFilter>("all");
   const [sheetVisible, setSheetVisible] = useState(false);
+  // The refused reflection whose "Review" was tapped.
+  const [reviewing, setReviewing] = useState<HomeEntry | null>(null);
 
-  // The synced toast shows when the device goes from offline to online. The previous value is kept in
-  // state and compared during render, and only while the data is ready: a scenario switch shows the
-  // skeleton in between, and it must still count as offline to online.
+  // The synced toast shows when the device goes from offline to online and nothing is left to send. The previous
+  // value is kept in state and compared during render, and only while the data is ready: a scenario switch shows the
+  // skeleton in between, and it must still count as offline to online. With reflections still waiting, "All
+  // reflections synced" would not be true yet: their cards change instead.
+  const unsentCount = state.status === "ready" ? getUnsentCount(state.entries) : 0;
   const isOffline = state.status === "ready" ? state.isOffline : null;
   const [wasOffline, setWasOffline] = useState(false);
   const [syncedVisible, setSyncedVisible] = useState(false);
   if (isOffline !== null && isOffline !== wasOffline) {
     setWasOffline(isOffline);
     if (wasOffline) {
-      setSyncedVisible(true);
+      setSyncedVisible(unsentCount === 0);
     }
   }
   useEffect(() => {
@@ -289,8 +297,9 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
         })}
         reflectionDays={ready.reflectionDays}
       />
-      {ready.isOffline ? (
-        <OfflineBanner unsyncedCount={ready.entries.filter((entry) => entry.isLocalOnly).length} />
+      {ready.isOffline ? <OfflineBanner unsyncedCount={unsentCount} /> : null}
+      {ready.savedNote !== null ? (
+        <NoticeBanner message={copy.journal.notes[ready.savedNote]} onDismiss={ready.dismissNote} />
       ) : null}
       {affirmationCard}
       {hasNoEntries ? null : (
@@ -326,7 +335,15 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
             <JournalCard
               entry={item}
               now={ready.now}
+              online={ready.isOffline ? false : ready.isOnline}
               onOpen={(entryId) => navigation.navigate("Reflection", { entryId })}
+              onReview={setReviewing}
+              onUnlock={(entry) =>
+                navigation.navigate("Paywall", {
+                  source: "limit",
+                  entryId: entry.pending?.serverEntryId ?? entry.id,
+                })
+              }
             />
           ) : null
         }
@@ -360,6 +377,15 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
         filter={filter}
         onChange={setFilter}
         count={visibleEntries.length}
+      />
+      <PendingReviewDialog
+        entry={reviewing}
+        onClose={() => setReviewing(null)}
+        onEdit={(clientEntryId) => {
+          setReviewing(null);
+          navigation.navigate("NewEntry", { mode: "write", resend: clientEntryId });
+        }}
+        onDelete={discardItem}
       />
     </SafeAreaView>
   );

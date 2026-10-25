@@ -2,6 +2,8 @@ import { useAuth } from "@clerk/expo";
 import { useEffect, useLayoutEffect } from "react";
 import { AppState } from "react-native";
 
+import { startConnectivity, stopConnectivity } from "@/services/connectivity";
+import { endOfflineSession, startOfflineSession } from "@/services/offlineSession";
 import { syncProfile, syncProfileOnForeground, watchReminderEdits } from "@/services/profileSync";
 import { setSupabaseSession } from "@/services/supabaseClient";
 
@@ -19,9 +21,24 @@ export function SupabaseAuthBridge() {
     return () => setSupabaseSession(null);
   }, [signedInUserId, getToken]);
 
+  // NetInfo's answers go to the offline store for as long as the app runs (step 24).
+  useEffect(() => {
+    startConnectivity();
+    return stopConnectivity;
+  }, []);
+
+  // The signed-in user's own database and the sync engine that reads it (step 24). Opened before any screen reads it:
+  // the Journal waits for it. A different user closes the previous one first.
+  useEffect(() => {
+    if (signedInUserId === null) return;
+    void startOfflineSession(signedInUserId);
+    return () => {
+      void endOfflineSession();
+    };
+  }, [signedInUserId]);
+
   // The work that follows a sign-in, and again when the app returns to the foreground. A failure blocks nothing:
-  // the next foreground tries again. Later steps add their lines here (24 opens the user's database, 30 sets up
-  // purchases, 33 starts realtime).
+  // the next foreground tries again. Later steps add their lines here (30 sets up purchases, 33 starts realtime).
   useEffect(() => {
     if (signedInUserId === null) return;
     syncProfile();

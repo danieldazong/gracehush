@@ -2,6 +2,7 @@ import { copy } from "@/constants/copy";
 import type {
   Affirmation,
   EmotionKey,
+  HomeEntry,
   JournalEntry,
   PlaybackTrack,
   Prayer,
@@ -87,10 +88,27 @@ export function selectAnsweredPrayers(prayers: Prayer[]): Prayer[] {
 }
 
 // What Profile's "Offline Reflections" row shows. An entry that exists only on this device is pending, every
-// other one is synced. TODO(24): step 24 counts the outbox instead.
-export function getSyncSummary(entries: JournalEntry[]): { synced: number; pending: number } {
-  const pending = entries.filter((entry) => entry.isLocalOnly).length;
-  return { synced: entries.length - pending, pending };
+// other one is synced. `unsent` is how many reflections the outbox holds (step 24): they are not entries yet, so they
+// are pending and no part of the synced count.
+export function getSyncSummary(
+  entries: readonly JournalEntry[],
+  unsent: number = 0,
+): { synced: number; pending: number } {
+  const local = entries.filter((entry) => entry.isLocalOnly).length;
+  return { synced: entries.length - local, pending: local + unsent };
+}
+
+// How many reflections the phone will send by itself once it can: the ones waiting or being sent, and the mock's
+// local-only entries. A refused one (needs the person), one held by the free limit and one waiting for a sign-in are
+// not counted: reconnecting does not send them. The offline banner says this number.
+export function getUnsentCount(entries: readonly HomeEntry[]): number {
+  return entries.filter(
+    (entry) =>
+      entry.isLocalOnly &&
+      (entry.pending === undefined ||
+        entry.pending.status === "queued" ||
+        entry.pending.status === "sending"),
+  ).length;
 }
 
 // Whole local calendar days, never negative: a prayer started yesterday at 11 PM is 1 day old at 1 AM.
@@ -100,7 +118,7 @@ export function getDaysSince(iso: string, now: Date): number {
 
 // Any filter except "all" hides crisis, pending, uploading, processing and failed entries: they have
 // no emotion and no prayer (the mappers null both), so they never match.
-export function filterEntries(entries: JournalEntry[], filter: JournalFilter): JournalEntry[] {
+export function filterEntries<T extends JournalEntry>(entries: T[], filter: JournalFilter): T[] {
   if (filter === "all") return entries;
   if (filter === "prayers") return entries.filter((entry) => entry.prayer !== null);
   return entries.filter((entry) => entry.dominantEmotion?.toLowerCase() === filter);

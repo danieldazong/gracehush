@@ -13,8 +13,9 @@ export function getProfileSource(): ProfileSource {
   return supabaseEnv.status === "ok" ? useDevStore.getState().profileSource : "mock";
 }
 
-// What the next mock submit answers (step 10): a finished entry, a crisis entry, a failure or the free limit.
-export type MockSubmitOutcome = "ready" | "crisis" | "failed" | "limit";
+// What the next mock submit answers (step 10): a finished entry, a crisis entry, a failure, the free limit, or (step 24)
+// a refusal that only the person can fix.
+export type MockSubmitOutcome = "ready" | "crisis" | "failed" | "limit" | "too_short";
 
 // Production builds always use "default" until real data replaces the mocks.
 export function getMockScenario(): MockScenario {
@@ -29,6 +30,16 @@ export function takeMockSubmitOutcome(): MockSubmitOutcome {
   const outcome = dev.nextSubmitOutcome;
   dev.setNextSubmitOutcome("ready");
   return outcome;
+}
+
+// One-shot too (step 24): true when the next mock call to the server "gets no answer", so the engine's retries can be
+// seen. The flag clears in the same call.
+export function takeMockNetworkFailure(): boolean {
+  if (!__DEV__) return false;
+  const dev = useDevStore.getState();
+  if (!dev.nextNetworkFails) return false;
+  dev.setNextNetworkFails(false);
+  return true;
 }
 
 // What the next mock purchase answers (step 16).

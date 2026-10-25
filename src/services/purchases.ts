@@ -4,6 +4,7 @@ import { copy } from "@/constants/copy";
 import { getMockSubscriptionTier, setMockSubscriptionTier } from "@/data/journalRepository";
 import { buildMockOffering } from "@/data/mock/offerings";
 import { takeMockPurchaseOutcome } from "@/data/mock/scenario";
+import { resumeAfterUpgrade } from "@/services/syncEngine";
 import { useDevStore } from "@/store/devStore";
 import type { Offering, PurchaseErrorCode, PurchaseResult, RestoreResult } from "@/types";
 
@@ -75,6 +76,8 @@ export async function purchasePackage(packageId: string): Promise<PurchaseResult
       setMockSubscriptionTier(tier);
       if (tier === "trial") dev.setTrialEligible(false);
       dev.bumpMockProfileVersion();
+      // What the free limit held back goes now (step 24). Step 30's entitlement listener calls this too.
+      void resumeAfterUpgrade();
       return { ok: true, tier };
     }
   }
@@ -87,6 +90,7 @@ export async function restorePurchases(): Promise<RestoreResult> {
   if (dev.restoreFindsPurchase) {
     setMockSubscriptionTier("pro");
     dev.bumpMockProfileVersion();
+    void resumeAfterUpgrade();
     return { ok: true, restored: true, tier: "pro" };
   }
   return { ok: true, restored: false, tier: getMockSubscriptionTier() };

@@ -37,6 +37,7 @@ import { useAnnounce } from "@/hooks/useAnnounce";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
 import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
+import { countUnsentItems } from "@/data/journalRepository";
 import { deleteAccount, requestDataExport, signOutCleanup } from "@/services/account";
 import {
   openLegalPage,
@@ -97,7 +98,6 @@ const DIALOGS: Record<
     destructive: boolean;
   }
 > = {
-  // TODO(24): with unsent items in the outbox the body becomes "{n} reflections on this phone haven’t been sent yet…"
   signOut: { strings: text.dialogs.signOut, destructive: false },
   export: { strings: text.dialogs.export, icon: icons.document, destructive: false },
   delete1: { strings: text.dialogs.deleteFirst, icon: icons.warning, destructive: true },
@@ -349,6 +349,8 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  // How many reflections on this phone the server has never been given: signing out deletes them (step 24).
+  const [unsentCount, setUnsentCount] = useState(0);
   // "Restore purchases" is running. The ref blocks a second tap in the same tick, before the state has rendered.
   const [restoring, setRestoring] = useState(false);
   const restoreRunning = useRef(false);
@@ -459,6 +461,12 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
     setDialogOpen(true);
   }
 
+  // The count is read before the dialog opens, so its first frame already says the truth.
+  async function openSignOut() {
+    setUnsentCount(await countUnsentItems());
+    openDialog("signOut");
+  }
+
   // Sign out and account deletion both end here. deleteAccount has already run the cleanup. On success the
   // navigator shows Sign In and removes this screen, so nothing below sets state.
   async function endSession(runCleanup: boolean) {
@@ -516,6 +524,16 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
     ) : null;
 
   const dialogContent = DIALOGS[dialog];
+  const { signOutUnsent } = text.dialogs;
+  const dialogStrings =
+    dialog === "signOut" && unsentCount > 0
+      ? {
+          ...dialogContent.strings,
+          body: signOutUnsent.body(unsentCount),
+          confirm: signOutUnsent.confirm,
+          cancel: signOutUnsent.cancel,
+        }
+      : dialogContent.strings;
   const reminderTimes = SLOTS.map((slot) => ({
     name: rhythm.slots[slot].name,
     time: formatTime12(reminders[slot]),
@@ -675,7 +693,6 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
                     accessibilityHint={text.affirmations.subtitle}
                     accessibilityState={{ checked: ready.profile.affirmationsEnabled }}
                   />
-                  {/* TODO(24): the counts come from the outbox, not from the mock entries */}
                   <SettingsRow
                     icon={icons.cloud}
                     title={text.sync.title}
@@ -779,7 +796,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
                 iconTone="bare"
                 title={text.about.signOut}
                 titleTone="muted"
-                onPress={() => openDialog("signOut")}
+                onPress={openSignOut}
                 accessibilityLabel={text.about.signOut}
               />
             </SettingsGroup>
@@ -802,10 +819,10 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
         visible={dialogOpen}
         tone={dialogContent.destructive ? "destructive" : "default"}
         icon={dialogContent.icon}
-        title={dialogContent.strings.title}
-        body={dialogContent.strings.body}
-        confirmLabel={dialogContent.strings.confirm}
-        cancelLabel={dialogContent.strings.cancel}
+        title={dialogStrings.title}
+        body={dialogStrings.body}
+        confirmLabel={dialogStrings.confirm}
+        cancelLabel={dialogStrings.cancel}
         loading={busy}
         onConfirm={confirmDialog}
         onCancel={() => setDialogOpen(false)}

@@ -2,7 +2,13 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useRef, useState } from "react";
 import { AppState } from "react-native";
 
-import { getProfile, getUsage, listEntries, updateProfile } from "@/data/journalRepository";
+import {
+  getProfile,
+  getUsage,
+  listEntries,
+  listPendingItems,
+  updateProfile,
+} from "@/data/journalRepository";
 import { getSyncSummary } from "@/data/selectors";
 import { getNotificationPermission } from "@/services/notifications";
 import { getCurrentOffering, isTrialEligible } from "@/services/purchases";
@@ -92,10 +98,11 @@ export function useProfileSettings(): ProfileSettingsState {
     latestRequest.current += 1;
     const request = latestRequest.current;
     try {
-      const [profile, usage, entries, notificationStatus, trialEligible] = await Promise.all([
+      const [profile, usage, entries, pending, notificationStatus, trialEligible] = await Promise.all([
         getProfile(),
         getUsage(),
         listEntries(),
+        listPendingItems(),
         getNotificationPermission(),
         readTrialEligible(),
       ]);
@@ -105,7 +112,7 @@ export function useProfileSettings(): ProfileSettingsState {
         status: "ready",
         profile,
         usage,
-        syncSummary: getSyncSummary(entries),
+        syncSummary: getSyncSummary(entries, pending.length),
         notificationStatus,
         trialEligible,
       });

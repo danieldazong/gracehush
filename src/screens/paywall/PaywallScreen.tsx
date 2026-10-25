@@ -340,7 +340,7 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
       );
       break;
     case "done":
-      // TODO(25): with source "limit" and an entryId, resume that entry's devotional generation (step 25)
+      // A reflection the free limit held back goes by itself: services/purchases.ts calls resumeAfterUpgrade() (step 24)
       // TODO(34): purchase_completed { plan, trial } or restore_completed { found: true }
       body = (
         <MessageView

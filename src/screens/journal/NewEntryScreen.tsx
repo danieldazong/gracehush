@@ -22,17 +22,19 @@ import { SegmentedControl } from "@/components/SegmentedControl";
 import { MIN_RECORDING_MS, MIN_TEXT_LENGTH } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors, layout } from "@/constants/theme";
-import { submitEntry } from "@/data/journalRepository";
+import * as outbox from "@/db/outbox";
 import { useRecorder } from "@/hooks/useRecorder";
 import type { RootStackScreenProps } from "@/navigation/types";
 import { haptics } from "@/services/haptics";
-import type { ProcessEntryRequest, ProcessingStage } from "@/types";
+import { discardItem, syncAndWait, syncNow } from "@/services/syncEngine";
+import { selectIsOnline, useOfflineStore, type SavedNote } from "@/store/offlineStore";
+import type { ProcessingStage } from "@/types";
 
-import { ProcessingOverlay } from "./ProcessingOverlay";
+import { ProcessingOverlay, type OverlayFailure } from "./ProcessingOverlay";
 import { SpeakSection } from "./SpeakSection";
 import { WriteSection } from "./WriteSection";
 
-const { header, modes, footer, discard, discardRecording } = copy.newEntry;
+const { header, modes, footer, discard, discardRecording, processing } = copy.newEntry;
 
 // After the modal transition, as in EmailSheet: autoFocus inside a modal can leave the keyboard closed.
 const FOCUS_DELAY_MS = 350;
@@ -55,17 +57,25 @@ const modeItems = [
 
 type Phase = "editing" | "sending" | "error";
 type DialogKind = "leave" | "record-again";
+// The phone could not save the reflection, or the server refused it for a reason only the person can fix.
+type Failure = { kind: "save" } | { kind: "refused"; code: string };
+type QueuedItem = Parameters<typeof outbox.enqueue>[0];
 
 export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewEntry">) {
   const { width, fontScale } = useWindowDimensions();
-  // One id for the whole screen: "Try again" resubmits it, and the recording is named after it (recordings/{id}.m4a).
-  const [clientEntryId] = useState(() => randomUUID());
+  // One id per reflection: the recording is named after it (recordings/{id}.m4a), the outbox row is keyed by it, and the
+  // server treats a second request with it as the same reflection. "Edit and resend" opens this screen with the id of
+  // the item it edits. "Record again" after a refusal makes a new one, because the server has kept the old one.
+  const [clientEntryId, setClientEntryId] = useState(() => route.params.resend ?? randomUUID());
   const recorder = useRecorder(clientEntryId);
   const [mode, setMode] = useState(route.params.mode);
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>("editing");
   const [stage, setStage] = useState<ProcessingStage | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [dialog, setDialog] = useState<DialogKind | null>(null);
+  // True while a reflection is being saved on this phone with no overlay (the phone is offline).
+  const [saving, setSaving] = useState(false);
   const inputRef = useRef<TextInputInstance>(null);
   // The removal the guard stopped, kept until the dialog is answered.
   const pendingLeave = useRef<NavigationAction | null>(null);
@@ -74,7 +84,10 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
   const mounted = useRef(false);
   // Blocks a second press while a submit is on its way.
   const submitting = useRef(false);
-  const lastRequest = useRef<ProcessEntryRequest | null>(null);
+  // What was last saved, for "Try again" after the phone could not save it.
+  const lastItem = useRef<QueuedItem | null>(null);
+  // True once the reflection is in the outbox. Leaving on purpose with "Discard" then deletes it as well.
+  const inOutbox = useRef(false);
 
   // A take that is recording or paused is already something to keep, and the toggle stays locked until it is stopped.
   const recordingOpen = recorder.state === "recording" || recorder.state === "paused";
@@ -101,6 +114,26 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     return () => clearTimeout(timer);
   }, [route.params.mode]);
 
+  // "Edit and resend" from Journal: the words that were refused come back into the field, and sending them again
+  // reuses the same id (outbox.enqueue puts the refused item back in the queue with the new words).
+  const resend = route.params.resend;
+  useEffect(() => {
+    if (resend === undefined) return undefined;
+    let cancelled = false;
+    outbox.get(resend).then(
+      (item) => {
+        if (!cancelled && item?.text) {
+          inOutbox.current = true;
+          setText(item.text);
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [resend]);
+
   // Every removal fires this, replace() included, so deliberate exits set `leaving` first and the
   // guard passes the action straight on. While sending nothing may leave; otherwise ask first.
   usePreventRemove(phase !== "editing" || hasContent, ({ data }) => {
@@ -122,6 +155,8 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     pendingLeave.current = null;
     setDialog(null);
     await recorder.discard();
+    // Discarding deletes the reflection from this phone, the queued copy too.
+    if (inOutbox.current) await discardItem(clientEntryId);
     // The kept action already carries the routes the guard asked about, so it passes.
     if (action) navigation.dispatch(action);
   }
@@ -131,27 +166,76 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     await recorder.discard();
   }
 
-  async function run(request: ProcessEntryRequest) {
-    setPhase("sending");
-    setStage("receiving");
-    const result = await submitEntry(request, (next) => {
-      if (mounted.current) setStage(next);
+  // A reflection that is saved and not finished leaves this screen for Journal, where its card is, with one calm line.
+  function leaveToJournal(note: SavedNote | null) {
+    if (note !== null) useOfflineStore.getState().setSavedNote(note);
+    leaving.current = true;
+    navigation.popTo("MainTabs", { screen: "Journal" });
+  }
+
+  // Saves the reflection on this phone first, and only then tries the network: what is saved is never lost to a failed
+  // request. Online, the overlay shows while the sync engine prepares it. Offline, there is nothing to wait for.
+  async function save(item: QueuedItem) {
+    const online = selectIsOnline(useOfflineStore.getState()) !== false;
+    if (online) {
+      setFailure(null);
+      setPhase("sending");
+      setStage("receiving");
+    } else {
+      setSaving(true);
+    }
+    try {
+      // A refused written reflection is still in the outbox under this id. If the person has switched to Speak since,
+      // the recording replaces it: the old row goes (its words are not wanted any more), and the new one takes its id.
+      if (inOutbox.current) {
+        const existing = await outbox.get(item.clientEntryId);
+        if (existing !== null && existing.inputType !== item.inputType) await outbox.remove(item.clientEntryId);
+      }
+      await outbox.enqueue(item);
+      inOutbox.current = true;
+    } catch {
+      if (!mounted.current) return;
+      submitting.current = false;
+      setSaving(false);
+      setFailure({ kind: "save" });
+      setPhase("error");
+      return;
+    }
+    if (!mounted.current) return;
+    if (!online) {
+      void syncNow("submit");
+      leaveToJournal("offline");
+      return;
+    }
+    const result = await syncAndWait(item.clientEntryId, {
+      onStage: (next) => {
+        if (mounted.current) setStage(next);
+      },
     });
     if (!mounted.current) return;
-    // A crisis result is checked before any error: crisis support is never paywalled.
-    if (result.kind === "ready" || result.kind === "crisis") {
-      leaving.current = true;
-      // Only a finished devotional gets the success tap: a crisis result is as calm as the screen it opens.
-      if (result.kind === "ready") haptics.success();
-      // Reflection decides what to show; the crisis state is a data state (step 13).
-      navigation.replace("Reflection", { entryId: result.entryId });
-    } else if (result.code === "LIMIT_REACHED") {
-      leaving.current = true;
-      // TODO(25): read entryId from the 402 body (ProcessEntryLimitError) and pass { source: "limit", entryId }
-      navigation.replace("Paywall", { source: "limit" });
-    } else {
-      submitting.current = false;
-      setPhase("error");
+    switch (result.kind) {
+      case "ready":
+        leaving.current = true;
+        // Only a finished devotional gets the success tap: a crisis result is as calm as the screen it opens.
+        if (!result.isCrisis) haptics.success();
+        // Reflection decides what to show; the crisis state is a data state (step 13). A crisis is checked before the
+        // free limit, so it never reaches the Paywall.
+        navigation.replace("Reflection", { entryId: result.entryId });
+        break;
+      case "limit":
+        leaving.current = true;
+        // The reflection is saved (here, and on the server once step 25 sends it): the Paywall says so.
+        navigation.replace("Paywall", { source: "limit", entryId: result.entryId ?? item.clientEntryId });
+        break;
+      case "needs_action":
+        submitting.current = false;
+        setFailure({ kind: "refused", code: result.code });
+        setPhase("error");
+        break;
+      case "later":
+        // No answer yet (offline again, busy, a retry is scheduled): the engine goes on by itself.
+        leaveToJournal("retry");
+        break;
     }
   }
 
@@ -159,46 +243,82 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     if (!canSubmit || submitting.current) return;
     submitting.current = true;
     Keyboard.dismiss();
-    let request: ProcessEntryRequest;
+    let item: QueuedItem;
     if (mode === "speak") {
-      // Finish while recording or paused stops first (the file is then in recordings/), then sends what was recorded.
+      // Finish while recording or paused stops first (the file is then in recordings/), then queues what was recorded.
       const audio = recordingOpen ? await recorder.stop() : recorder.recording;
       if (!audio) {
         submitting.current = false;
         return;
       }
-      request = {
+      item = {
         clientEntryId,
         inputType: "audio",
-        // TODO(25): upload the file (uploadRawRecording), then send its storage path here, not this local address
-        audioPath: audio.uri,
         durationMs: audio.durationMs,
         mimeType: audio.mimeType,
       };
     } else {
-      request = { clientEntryId, inputType: "text", text: text.trim() };
+      item = { clientEntryId, inputType: "text", text: text.trim() };
     }
-    lastRequest.current = request;
-    await run(request);
+    lastItem.current = item;
+    await save(item);
   }
 
-  // The same request again, with the same clientEntryId.
-  function retry() {
-    if (!lastRequest.current || submitting.current) return;
+  // The phone could not save the reflection: the same item again, with the same id.
+  function retrySave() {
+    if (!lastItem.current || submitting.current) return;
     submitting.current = true;
-    run(lastRequest.current);
+    void save(lastItem.current);
+  }
+
+  // Back to what was on screen. A refused written reflection stays in the outbox until it is sent again or deleted.
+  function backToEditing() {
+    submitting.current = false;
+    setSaving(false);
+    setFailure(null);
+    setPhase("editing");
+  }
+
+  // A refused recording cannot be fixed: the item and its file go, and the next take gets a new id.
+  async function recordAgainAfterRefusal() {
+    await discardItem(clientEntryId);
+    await recorder.discard();
+    inOutbox.current = false;
+    lastItem.current = null;
+    setClientEntryId(randomUUID());
+    backToEditing();
+  }
+
+  // The item stays in the outbox: Journal shows it with "Review".
+  function closeAfterRefusal() {
+    leaveToJournal(null);
   }
 
   function closeWhileSending() {
-    leaving.current = true;
-    // TODO(25): keep processing after the screen closes and show the entry when it is ready
-    navigation.goBack();
+    // The engine goes on with it, and Journal shows its card.
+    leaveToJournal("retry");
   }
 
-  function saveAndClose() {
-    leaving.current = true;
-    // TODO(24): queue for retry
-    navigation.goBack();
+  let overlayFailure: OverlayFailure | null = null;
+  if (phase === "error" && failure !== null) {
+    const { save: saveFailure, refused } = processing.failures;
+    overlayFailure =
+      failure.kind === "save"
+        ? {
+            title: saveFailure.title,
+            body: saveFailure.body,
+            primary: { label: saveFailure.primary, onPress: retrySave },
+            secondary: { label: saveFailure.secondary, onPress: backToEditing },
+          }
+        : {
+            title: refused.title,
+            body: copy.problems.reason(failure.code),
+            primary:
+              mode === "speak"
+                ? { label: refused.recordAgain, onPress: () => void recordAgainAfterRefusal() }
+                : { label: refused.editText, onPress: backToEditing },
+            secondary: { label: refused.close, onPress: closeAfterRefusal },
+          };
   }
 
   const padding = width < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding;
@@ -228,12 +348,6 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
               <Text accessibilityRole="header" className="text-section text-plum-deep">
                 {header.title}
               </Text>
-              {hasContent ? (
-                <View className="flex-row items-center gap-1.5">
-                  <View className="size-1.5 rounded-full bg-rose" />
-                  <Text className="text-label-md text-mauve">{header.saved}</Text>
-                </View>
-              ) : null}
             </View>
             <View className="shrink-0 flex-row items-center gap-1 rounded-full bg-linen-deep px-2.5 py-1">
               <Icon name={icons.lock} size={14} color={colors.plumDeep} />
@@ -285,6 +399,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
                 label={mode === "speak" ? footer.finish : footer.submit}
                 iconRight={icons.arrow}
                 disabled={!canSubmit}
+                loading={saving}
                 onPress={submit}
               />
             </View>
@@ -295,10 +410,8 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
           <ProcessingOverlay
             entryKind={mode === "speak" ? "audio" : "text"}
             stage={stage}
-            error={phase === "error"}
+            failure={overlayFailure}
             onClose={closeWhileSending}
-            onRetry={retry}
-            onSaveAndClose={saveAndClose}
           />
         )}
       </KeyboardAvoidingView>

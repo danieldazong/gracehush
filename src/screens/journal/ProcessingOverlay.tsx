@@ -95,28 +95,27 @@ function StepCard({ state, title, description }: StepCardProps) {
   );
 }
 
+// The overlay's one failure view (step 24): what went wrong, and the two things the person can do about it.
+export type OverlayFailure = {
+  title: string;
+  body: string;
+  primary: { label: string; onPress: () => void };
+  secondary: { label: string; onPress: () => void };
+};
+
 type ProcessingOverlayProps = {
   entryKind: "audio" | "text";
   stage: ProcessingStage | null;
-  error: boolean;
+  failure: OverlayFailure | null;
   onClose: () => void;
-  onRetry: () => void;
-  onSaveAndClose: () => void;
 };
 
 // Fills the screen over the editing view, which stays mounted underneath so nothing the user wrote or
 // recorded is lost. The mock progress is real in shape: each stage is a step the server will report.
-export function ProcessingOverlay({
-  entryKind,
-  stage,
-  error,
-  onClose,
-  onRetry,
-  onSaveAndClose,
-}: ProcessingOverlayProps) {
+export function ProcessingOverlay({ entryKind, stage, failure, onClose }: ProcessingOverlayProps) {
   const { width } = useWindowDimensions();
   const [opacity] = useState(() => new Animated.Value(0));
-  const haloScale = usePulse(1.08, !error);
+  const haloScale = usePulse(1.08, failure === null);
   const audio = entryKind === "audio";
 
   useEffect(() => {
@@ -141,7 +140,7 @@ export function ProcessingOverlay({
         : audio
           ? processing.announce.receivingAudio
           : processing.announce.receivingText;
-  const announcement = error ? processing.error.title : stageMessage;
+  const announcement = failure ? failure.title : stageMessage;
   useAnnounce(announcement);
 
   const padding = width < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding;
@@ -152,28 +151,28 @@ export function ProcessingOverlay({
         contentContainerStyle={[styles.content, { paddingHorizontal: padding }]}
         showsVerticalScrollIndicator={false}
       >
-        {error ? (
+        {failure ? (
           <>
             <Text
               accessibilityRole="header"
               className="text-center text-headline text-plum-deep"
               style={styles.title}
             >
-              {processing.error.title}
+              {failure.title}
             </Text>
             <Text className="mt-2 text-center text-body text-mauve" style={styles.subtitle}>
-              {processing.error.body}
+              {failure.body}
             </Text>
             <View className="mt-6 w-full">
-              <PrimaryButton label={processing.error.retry} onPress={onRetry} />
+              <PrimaryButton label={failure.primary.label} onPress={failure.primary.onPress} />
             </View>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={processing.error.saveAndClose}
+              accessibilityLabel={failure.secondary.label}
               className="mt-2 min-h-11 items-center justify-center px-4"
-              onPress={onSaveAndClose}
+              onPress={failure.secondary.onPress}
             >
-              <Text className="btn-text__label">{processing.error.saveAndClose}</Text>
+              <Text className="btn-text__label">{failure.secondary.label}</Text>
             </Pressable>
           </>
         ) : (

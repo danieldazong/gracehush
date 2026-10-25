@@ -20,6 +20,10 @@ interface DevState {
   // What the next New Entry submit answers. A submit puts it back to "ready" (takeMockSubmitOutcome).
   nextSubmitOutcome: MockSubmitOutcome;
   setNextSubmitOutcome: (outcome: MockSubmitOutcome) => void;
+  // The next call the sync engine makes to the (mock) server gets no answer, once, so its retries can be seen
+  // (takeMockNetworkFailure). Step 24.
+  nextNetworkFails: boolean;
+  setNextNetworkFails: (value: boolean) => void;
   // The next Reflection load fails once, so its error state can be reached.
   nextReflectionLoadFails: boolean;
   setNextReflectionLoadFails: (value: boolean) => void;
@@ -65,6 +69,8 @@ export const useDevStore = create<DevState>()((set) => ({
   setNextHomeLoadFails: (nextHomeLoadFails) => set({ nextHomeLoadFails }),
   nextSubmitOutcome: "ready",
   setNextSubmitOutcome: (nextSubmitOutcome) => set({ nextSubmitOutcome }),
+  nextNetworkFails: false,
+  setNextNetworkFails: (nextNetworkFails) => set({ nextNetworkFails }),
   nextReflectionLoadFails: false,
   setNextReflectionLoadFails: (nextReflectionLoadFails) => set({ nextReflectionLoadFails }),
   nextCrisisLinkFails: false,

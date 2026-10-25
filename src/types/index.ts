@@ -231,10 +231,49 @@ export type RecordedAudio = {
   sizeBytes: number;
 };
 export type ProcessingStage = "receiving" | "reflecting" | "preparing";
-export type SubmitResult =
-  | { kind: "ready"; entryId: string }
-  | { kind: "crisis"; entryId: string }
-  | { kind: "error"; code: ProcessEntryErrorCode };
+
+// The offline queue (step 24). An item is a reflection that is saved on this phone and has not been prepared yet.
+//   queued         waiting its turn, or for the next retry
+//   sending        being prepared now
+//   needs_action   the server refused it for a reason only the person can fix (no speech heard, too short, ...)
+//   limit_reached  the free limit stopped it: it goes again when the plan is paid or the week resets
+//   paused_auth    the session was refused: it goes again at the next sign-in
+export type OutboxStatus = "queued" | "sending" | "needs_action" | "limit_reached" | "paused_auth";
+export type OutboxItem = {
+  clientEntryId: string;
+  inputType: InputType;
+  text: string | null; // a written entry's words. null for a recording, and for words that could not be read
+  durationMs: number | null; // a recording's length
+  mimeType: AudioMimeType | null; // a recording's type
+  status: OutboxStatus;
+  attempts: number;
+  nextAttemptAt: number; // epoch ms
+  lastErrorCode: string | null;
+  serverEntryId: string | null; // the entry the server saved when the free limit stopped this one
+  limitResetsAt: number | null; // epoch ms: when the week that holds it back ends
+  createdAt: number; // epoch ms
+};
+
+// What Journal Home knows about an entry that is still in the outbox: it is listed as an entry-shaped card.
+export type PendingInfo = {
+  status: OutboxStatus;
+  lastErrorCode: string | null;
+  serverEntryId: string | null;
+  resetsAt: string | null; // ISO 8601
+};
+export type HomeEntry = JournalEntry & { pending?: PendingInfo };
+
+// What preparing one item gives back (services/entryProcessor.ts). `code` is a process-entry error code, NETWORK when
+// no answer came, or UNKNOWN for an answer the app does not know. A LIMIT_REACHED answer carries the entry the server
+// saved and when the week resets.
+export type ProcessOutcome =
+  | { ok: true; entry: JournalEntry; affirmations: Affirmation[] }
+  | {
+      ok: false;
+      code: ProcessEntryErrorCode | "NETWORK" | "UNKNOWN";
+      entryId?: string;
+      resetsAt?: string;
+    };
 
 // The player (step 12). Steps 15, 26 and 27 read these names: they may add to them, never rename.
 export type PlaybackStatus = "idle" | "playing" | "paused" | "ended";

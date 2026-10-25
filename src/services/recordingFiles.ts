@@ -72,8 +72,8 @@ export type LocalRecording = {
   modifiedAt: number; // milliseconds since the epoch, 0 when unknown
 };
 
-// Every finished recording on the phone. The developer panel uses it now.
-// TODO(24): delete a recording that has no queue item and is older than 7 days (`modifiedAt` is there for that).
+// Every finished recording on the phone. The developer panel and services/recordingCleanup.ts (which deletes a recording
+// that has no queue item and is older than 7 days, by `modifiedAt`) use it.
 export function listRecordings(): LocalRecording[] {
   const directory = folder();
   if (!directory.exists) return [];
