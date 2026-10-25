@@ -24,7 +24,7 @@ What the app needs from this: two pages at real addresses (`PRIVACY_POLICY_URL`,
 | Reminder times, time zone, affirmations on or off, ambient sound and volume | the user | Supabase Postgres, and the device | none | reminders and playback defaults |
 | Plan (free, trial, pro) and when it ends | the store, through RevenueCat | RevenueCat; the tier and its end date are mirrored to Postgres by a webhook (step 30) | RevenueCat, Apple, Google | the free limit and Pro |
 | Anonymous usage events (**planned, step 34, off until the user opts in**) | the app | PostHog (**TODO:** EU or US region, step 34 asks) | PostHog | to see which features are used |
-| A copy of the entries on the device (**planned, step 24**), the sign-in token, onboarding flags | the app | SQLite, SecureStore, AsyncStorage (**TODO:** is the SQLite copy encrypted? `AGENTS.md` says recommend it and ask) | none | offline use |
+| Reflections not prepared yet (the words of a written one, and a voice recording as an audio file) and a copy of the entries the app has seen (step 24), the sign-in token, onboarding flags | the app | SQLite (the words sealed with AES-256-GCM, the key in the phone's secure storage, this device only and not in backups), the app's document folder (recordings, **not encrypted by the app**), SecureStore, AsyncStorage | none | offline use |
 | Affirmation notifications | the device schedules them | the device | none | reminders. No push server in V1. The text is the affirmation only, never the transcript |
 
 Not collected, as far as the plans go (**TODO:** re-check before saying so): location, contacts, the advertising id, advertising or cross-app tracking SDKs, ads of any kind. Payment card data never reaches the app: Apple and Google take the payment. Bible text comes from the HelloAO Bible API, which is sent a passage reference and no user data; the Berean Standard Bible is public domain.
@@ -67,7 +67,7 @@ As built (the Paywall, step 16): a yearly and a monthly plan. The prices on scre
 3. The minimum age.
 4. The Supabase region and backup retention, and the PostHog region.
 5. A billed Google Cloud account (one account pays for Gemini and for Text-to-Speech), and whether Google's statement about Text-to-Speech data is enough.
-6. Whether the on-device copy is encrypted.
+6. The on-device copy (decided in the step 24 review): the words are encrypted, ids, statuses and times are not, and a recording waiting to be sent is an audio file the app does not encrypt (it is deleted once the reflection is prepared, at sign-out, and after 7 days if nothing refers to it). The database and the recordings are in the phone's own backups (iCloud or a computer backup); a restored phone cannot read the encrypted words. Is that fine to say as written?
 7. Whether onboarding takes explicit consent for sensitive data.
 8. Apple's standard EULA, or your own Terms, for the iPhone.
 9. Whether to offer a "hide the text on the lock screen" option: reminders show an affirmation written from the user's own prayers, and the drafts disclose that either way.
@@ -83,7 +83,7 @@ The drafts describe the app as designed. These statements depend on a step that 
 | The database holds an account ID and not the email address | 17, 18 |
 | Recordings are in private storage, and encryption at rest is the provider's default | 18, 22 |
 | Google's paid Gemini terms apply, and Google says it does not log Cloud Text-to-Speech text or audio (its data-logging page, 2026-10-23) | 19, 22, 32 (and the live terms at https://ai.google.dev/terms) |
-| A local copy of entries on the device is removed at sign-out; whether it is encrypted | 24 |
+| Unsent reflections and the copy of entries on the device are removed at sign-out and at account deletion; the words are encrypted, recordings are not | 24 |
 | Reminders are local notifications that show an affirmation, with no push server | 28 |
 | Plan and trial status come through RevenueCat, and the tier and its end date are mirrored | 30 |
 | Export is a ZIP (data, readable text, audio) with a 24-hour link and one per 10 minutes; deleting removes storage, rows, the RevenueCat customer and the Clerk user, and does not cancel a store subscription | 31 |

@@ -39,7 +39,7 @@ If you tap "Share usage data" (at the end of setup, or later in Profile), we rec
 
 ### 1.5 What stays on your device
 
-A copy of your entries so you can use Gracehush offline, your sign-in token in your phone's secure storage, and your preferences. Signing out removes the copy of your entries from the device. **[TODO: confirm, and decide whether the on-device copy is encrypted and say so.]**
+A copy of your entries so you can use Gracehush offline, your sign-in token in your phone's secure storage, and your preferences. Signing out removes the copy of your entries from the device. The words in that copy are encrypted on your phone, with a key that stays on your phone. **[TODO: confirm with the final build. A recording waiting to be sent is stored on the phone as an audio file that the app does not encrypt, and the phone's own backups may include the copy: decide how to say this.]**
 
 ### 1.6 What we do not collect
 
