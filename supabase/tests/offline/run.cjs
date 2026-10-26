@@ -62,12 +62,12 @@ const count = async (db, table = "outbox") => (await db.getFirstAsync(`SELECT CO
 
 // ================================================================== database
 async function databaseChecks() {
-  await test("the file is named after a hash of the user id, in WAL mode, migrated to version 1, with a key in the keychain", async (w) => {
+  await test("the file is named after a hash of the user id, in WAL mode, migrated to version 2, with a key in the keychain", async (w) => {
     const { db } = await openAs(w, "user_secret_id");
     const hash = sha16("user_secret_id");
     assert.deepEqual(w.sqlite.stats.opens, [`gracehush-${hash}.db`]);
     assert.ok(!w.sqlite.files().join(" ").includes("secret"));
-    assert.equal((await db.getFirstAsync("PRAGMA user_version")).user_version, 1);
+    assert.equal((await db.getFirstAsync("PRAGMA user_version")).user_version, 2);
     assert.equal((await db.getFirstAsync("PRAGMA journal_mode")).journal_mode, "wal");
     const tables = (await db.getAllAsync("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).map((r) => r.name);
     for (const name of ["outbox", "entries_cache", "affirmations_cache"]) assert.ok(tables.includes(name), name);

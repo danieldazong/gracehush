@@ -1,5 +1,4 @@
 import type { SymbolViewProps } from "expo-symbols";
-import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Icon } from "@/components/Icon";
@@ -18,12 +17,15 @@ type AffirmationCardProps = {
   affirmation: Affirmation;
   // "8:00 AM • Tied to yesterday's prayer", built by the screen.
   footer: string;
+  // The heart was pressed. Journal Home's hook saves it (step 25): it shows the new state at once and puts the old one back
+  // when the save fails, so the heart here is whatever `affirmation.isFavorite` says.
+  onToggleFavorite: () => void;
+  // The last save failed and was put back: a calm line says so until the next press.
+  saveFailed: boolean;
 };
 
-// The favorite is optimistic local state. The screen passes key={affirmation.id}, so a new
-// affirmation starts from its own saved value.
-export function AffirmationCard({ affirmation, footer }: AffirmationCardProps) {
-  const [favorite, setFavorite] = useState(affirmation.isFavorite);
+export function AffirmationCard({ affirmation, footer, onToggleFavorite, saveFailed }: AffirmationCardProps) {
+  const favorite = affirmation.isFavorite;
   const slotName = copy.onboarding.rhythm.slots[affirmation.slot].name;
 
   return (
@@ -37,8 +39,7 @@ export function AffirmationCard({ affirmation, footer }: AffirmationCardProps) {
           }
           // The icon is 18, so 13 on every side makes a 44 touch area.
           hitSlop={13}
-          // TODO(25): persist is_favorite
-          onPress={() => setFavorite((current) => !current)}
+          onPress={onToggleFavorite}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Icon
@@ -54,6 +55,11 @@ export function AffirmationCard({ affirmation, footer }: AffirmationCardProps) {
         <Icon name={icons.clock} size={14} color={colors.mauve} />
         <Text className="flex-1 text-body-sm text-mauve">{footer}</Text>
       </View>
+      {saveFailed ? (
+        <Text accessibilityLiveRegion="polite" className="text-body-sm text-rosewood">
+          {copy.journal.affirmation.saveError}
+        </Text>
+      ) : null}
     </View>
   );
 }

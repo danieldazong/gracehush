@@ -6,6 +6,7 @@ import { startConnectivity, stopConnectivity } from "@/services/connectivity";
 import { endOfflineSession, startOfflineSession } from "@/services/offlineSession";
 import { syncProfile, syncProfileOnForeground, watchReminderEdits } from "@/services/profileSync";
 import { setSupabaseSession } from "@/services/supabaseClient";
+import { watchPlan } from "@/services/upgradeWatcher";
 
 // Connects the signed-in Clerk user to Supabase and renders nothing. It sits above the navigator, inside
 // ClerkProvider and after the splash gate, so the stores it uses have loaded.
@@ -43,12 +44,15 @@ export function SupabaseAuthBridge() {
     if (signedInUserId === null) return;
     syncProfile();
     const stopWatchingReminders = watchReminderEdits();
+    // A plan that turns paid sends what the free limit held back (step 25).
+    const stopWatchingPlan = watchPlan(signedInUserId);
     const subscription = AppState.addEventListener("change", (status) => {
       if (status === "active") syncProfileOnForeground();
     });
     return () => {
       subscription.remove();
       stopWatchingReminders();
+      stopWatchingPlan();
     };
   }, [signedInUserId]);
 

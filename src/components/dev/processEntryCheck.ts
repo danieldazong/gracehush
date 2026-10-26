@@ -12,8 +12,8 @@ import type {
 } from "@/types";
 
 // Developer check (shown by DevToolsPanel, never to users, so its strings stay inline). It calls the deployed
-// process-entry and confirm-scripture functions from this phone, through supabase.functions.invoke (the path step 25
-// will use), with made-up text, and prints one line per case: a verdict, a status, a code, counts and a time. It never
+// process-entry and confirm-scripture functions from this phone, through supabase.functions.invoke (the path the app itself
+// uses since step 25), with made-up text, and prints one line per case: a verdict, a status, a code, counts and a time. It never
 // shows or logs a token, an id, a link or the text of a reflection. Each case that reaches the model takes 5 to 40 seconds,
 // and up to about 90 while the model is busy (the function tries again for that long before it answers AI_UNAVAILABLE).
 //

@@ -1,3 +1,4 @@
+import { STALE_PROCESSING_MS } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import type {
   Affirmation,
@@ -109,6 +110,33 @@ export function getUnsentCount(entries: readonly HomeEntry[]): number {
         entry.pending.status === "queued" ||
         entry.pending.status === "sending"),
   ).length;
+}
+
+// Whether the Journal lists an entry that comes from the server (step 25): a finished one (a crisis entry included), or one that
+// is still being prepared and was touched lately. A "processing" entry that nothing has touched for STALE_PROCESSING_MS belongs to
+// a request that died, and would be a card that never finishes. A failed entry is not listed: the phone that made it shows it as a
+// card of its own until it is prepared (step 24), and one that was refused or deleted is no reflection.
+export function isListedEntry(entry: JournalEntry, nowMs: number): boolean {
+  if (entry.status === "ready") return true;
+  return entry.status === "processing" && nowMs - Date.parse(entry.updatedAt) < STALE_PROCESSING_MS;
+}
+
+// `incoming` joins `existing`, and newest first. An entry that is in both is the incoming one, which is the newer read.
+export function mergeEntries(
+  existing: readonly JournalEntry[],
+  incoming: readonly JournalEntry[],
+): JournalEntry[] {
+  const byId = new Map<string, JournalEntry>();
+  for (const entry of existing) byId.set(entry.id, entry);
+  for (const entry of incoming) byId.set(entry.id, entry);
+  return [...byId.values()].sort(
+    (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+  );
+}
+
+// The newest finished entry that is not a crisis, from a list that is newest first: the one whose affirmations Journal Home shows.
+export function getNewestReadyEntry(entries: readonly JournalEntry[]): JournalEntry | null {
+  return entries.find((entry) => entry.status === "ready" && !entry.isCrisis) ?? null;
 }
 
 // Whole local calendar days, never negative: a prayer started yesterday at 11 PM is 1 day old at 1 AM.

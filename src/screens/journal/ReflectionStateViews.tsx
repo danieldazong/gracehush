@@ -68,7 +68,8 @@ export function ReflectionLoading() {
   );
 }
 
-// Pending, uploading and processing entries. Nothing polls yet (step 25).
+// Pending, uploading and processing entries. Reflection reads an entry that a server is preparing again every few seconds
+// while it is in front (useReflection, step 25), so this view turns into the reflection by itself.
 export function ReflectionPreparing({ onReturn }: { onReturn: () => void }) {
   return (
     <MessageView title={states.preparing.title} body={states.preparing.body} busy>
@@ -81,7 +82,6 @@ export function ReflectionPreparing({ onReturn }: { onReturn: () => void }) {
 export function ReflectionFailed({ onReturn }: { onReturn: () => void }) {
   return (
     <MessageView title={states.failed.title} body={states.failed.body}>
-      {/* TODO(25): "Try again" on this view */}
       <PrimaryButton label={footer.returnToJournal} onPress={onReturn} />
     </MessageView>
   );

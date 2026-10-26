@@ -379,10 +379,12 @@ const row = ({
     // load the native modules behind them. These checks are not about them.
     fakes["@/db/database"] = { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined };
     fakes["@/db/outbox"] = {};
+    // Step 25: journalRepository.ts also imports the read cache, which needs the same native modules.
+    fakes["@/db/cache"] = {};
     fakes["@/services/offlineSession"] = { endOfflineSession: async () => undefined };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
-    env.use("@/store/devStore").useDevStore.getState().setProfileSource(source);
+    env.use("@/store/devStore").useDevStore.getState().setDataSource(source);
     return { env, calls, remote, session };
   }
   // As the app does: both persisted stores have loaded before anything runs.
@@ -957,6 +959,7 @@ const row = ({
         "@/services/recordingFiles": { deleteAllRecordings: async () => undefined },
         "@/db/database": { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined },
         "@/db/outbox": {},
+        "@/db/cache": {},
         "@/services/offlineSession": { endOfflineSession: async () => undefined },
       },
     });
@@ -964,7 +967,7 @@ const row = ({
     await env.use("@/store/profilePrefsStore").useProfilePrefsStore.persist.rehydrate();
     const client = env.use("@/services/supabaseClient");
     const remote = env.use("@/data/profileRemote");
-    env.use("@/store/devStore").useDevStore.getState().setProfileSource("supabase");
+    env.use("@/store/devStore").useDevStore.getState().setDataSource("supabase");
     const warnings = [];
     const originalWarn = console.warn;
     console.warn = (...args) => warnings.push(args.map(String).join(" "));
@@ -1299,12 +1302,13 @@ const row = ({
         // Step 24: journalRepository.ts imports the user's database, which plain Node cannot load.
         "@/db/database": { isDatabaseOpen: () => false },
         "@/db/outbox": {},
+        "@/db/cache": {},
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();
     const prefs = env.use("@/store/profilePrefsStore").useProfilePrefsStore;
     await prefs.persist.rehydrate();
-    env.use("@/store/devStore").useDevStore.getState().setProfileSource("supabase");
+    env.use("@/store/devStore").useDevStore.getState().setDataSource("supabase");
     const client = env.use("@/services/supabaseClient");
     client.setSupabaseSession({ userId: "user_a", getToken: async () => "tokA" });
     const originalWarn = console.warn;

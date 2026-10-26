@@ -1,10 +1,12 @@
 import { create } from "zustand";
 
+import { ENTRIES_PAGE_SIZE } from "@/constants/app";
+
 import type {
+  DataSource,
   MockPurchaseOutcome,
   MockScenario,
   MockSubmitOutcome,
-  ProfileSource,
 } from "@/data/mock/scenario";
 import type { PermissionResult } from "@/types";
 
@@ -56,10 +58,14 @@ interface DevState {
   // The store has no offering to show, so the paywall's "plans aren't available" state can be reached.
   offeringUnavailable: boolean;
   setOfferingUnavailable: (value: boolean) => void;
-  // Where the profile comes from (step 17): the real Supabase row, or the step 06 mock with its plans and scenarios.
-  // Read through getProfileSource(), which also falls back to the mock when .env.local has no Supabase address.
-  profileSource: ProfileSource;
-  setProfileSource: (source: ProfileSource) => void;
+  // Where the data comes from (steps 17 and 25): the real Supabase (the profile, the entries, the affirmations and the
+  // processing of a reflection), or the step 06 mock with its plans, scenarios and outcomes. Read through getDataSource(),
+  // which also falls back to the mock when .env.local has no Supabase address.
+  dataSource: DataSource;
+  setDataSource: (source: DataSource) => void;
+  // How many entries one page of the Journal holds (getEntriesPageSize), so the second page can be reached with a few entries.
+  pageSize: number;
+  setPageSize: (size: number) => void;
 }
 
 export const useDevStore = create<DevState>()((set) => ({
@@ -90,6 +96,8 @@ export const useDevStore = create<DevState>()((set) => ({
   setRestoreFindsPurchase: (restoreFindsPurchase) => set({ restoreFindsPurchase }),
   offeringUnavailable: false,
   setOfferingUnavailable: (offeringUnavailable) => set({ offeringUnavailable }),
-  profileSource: "supabase",
-  setProfileSource: (profileSource) => set({ profileSource }),
+  dataSource: "supabase",
+  setDataSource: (dataSource) => set({ dataSource }),
+  pageSize: ENTRIES_PAGE_SIZE,
+  setPageSize: (pageSize) => set({ pageSize }),
 }));

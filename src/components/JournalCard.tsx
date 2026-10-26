@@ -286,12 +286,12 @@ function CardFooter({
         </View>
       );
     case "failed":
-      // An entry the server marked failed, which has no copy of its words on this phone to send again. (A refused
-      // reflection that is still on this phone has `pending`, and the Review button in PendingFooter.)
+      // An entry the server marked failed, which has no copy of its words on this phone to send again. Only the mock data
+      // lists one: the real Journal does not list failed entries (step 25), and a refused or retrying reflection that is
+      // still on this phone has `pending`, with the Review button in PendingFooter.
       return (
         <View className="flex-row items-center gap-3 pt-0.5">
           <Text className="flex-1 text-body-sm text-rosewood">{card.failed}</Text>
-          {/* TODO(25): retry a failed entry from the server copy of its words */}
           <Pressable
             disabled
             accessibilityRole="button"

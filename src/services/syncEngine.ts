@@ -4,7 +4,7 @@ import { getKnownTier } from "@/data/journalRepository";
 import * as cache from "@/db/cache";
 import { isDatabaseOpen } from "@/db/database";
 import * as outbox from "@/db/outbox";
-import { processItem, processorIsMock } from "@/services/entryProcessor";
+import { isProcessorMock, processItem } from "@/services/entryProcessor";
 import { cleanOldRecordings } from "@/services/recordingCleanup";
 import { deleteRecording } from "@/services/recordingFiles";
 import { markReachable, markUnreachable } from "@/services/connectivity";
@@ -161,7 +161,7 @@ function runProcessor(item: OutboxItem): Promise<ProcessOutcome> {
 
 async function applySuccess(item: OutboxItem, outcome: Extract<ProcessOutcome, { ok: true }>): Promise<void> {
   const id = item.clientEntryId;
-  if (!processorIsMock) {
+  if (!isProcessorMock()) {
     await cache.upsertEntry(outcome.entry);
     await cache.upsertAffirmations(outcome.entry.id, outcome.affirmations);
   }

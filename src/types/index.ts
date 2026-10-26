@@ -218,7 +218,8 @@ export interface ConfirmScriptureError {
   error: { code: ConfirmScriptureErrorCode; message: string; requestId: string };
 }
 
-// New Entry (step 10). Step 23 swapped the mock recorder for the real one without changing these; step 25 swaps the mock submit.
+// New Entry (step 10). Step 23 swapped the mock recorder for the real one without changing these; step 24 moved the submit to the
+// sync engine, and step 25 gave the engine the real server.
 export type RecorderStatus = { isRecording: boolean; durationMs: number; metering: number }; // metering 0..1
 export type RecordingResult = { uri: string; durationMs: number; mimeType: AudioMimeType };
 // A finished recording as the rest of the app sees it (step 23): the file is recordings/{clientEntryId}.m4a on this
@@ -252,6 +253,7 @@ export type OutboxItem = {
   serverEntryId: string | null; // the entry the server saved when the free limit stopped this one
   limitResetsAt: number | null; // epoch ms: when the week that holds it back ends
   createdAt: number; // epoch ms
+  uploaded: boolean; // a recording is already in the journal_media bucket (step 25): it is not uploaded again
 };
 
 // What Journal Home knows about an entry that is still in the outbox: it is listed as an entry-shaped card.

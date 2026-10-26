@@ -224,7 +224,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
         break;
       case "limit":
         leaving.current = true;
-        // The reflection is saved (here, and on the server once step 25 sends it): the Paywall says so.
+        // The reflection is saved (on this phone, and on the server: the 402 names the entry it saved): the Paywall says so.
         navigation.replace("Paywall", { source: "limit", entryId: result.entryId ?? item.clientEntryId });
         break;
       case "needs_action":

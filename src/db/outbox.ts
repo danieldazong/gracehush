@@ -24,10 +24,11 @@ type Row = {
   server_entry_id: string | null;
   limit_resets_at: number | null;
   created_at: number;
+  uploaded: number;
 };
 
 const COLUMNS = `client_entry_id, input_type, text, duration_ms, mime_type, status, attempts, next_attempt_at,
-  last_error_code, server_entry_id, limit_resets_at, created_at`;
+  last_error_code, server_entry_id, limit_resets_at, created_at, uploaded`;
 
 const MIME_TYPES: readonly string[] = ["audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac"];
 
@@ -50,6 +51,7 @@ async function toItem(row: Row): Promise<OutboxItem> {
     serverEntryId: row.server_entry_id,
     limitResetsAt: row.limit_resets_at,
     createdAt: row.created_at,
+    uploaded: row.uploaded === 1,
   };
 }
 
@@ -135,6 +137,11 @@ export async function markSending(clientEntryId: string, now: number): Promise<b
     clientEntryId,
   );
   return result.changes > 0;
+}
+
+// The recording of this item is in the bucket (step 25), so a later attempt goes straight to process-entry.
+export async function markUploaded(clientEntryId: string): Promise<void> {
+  await getDb().runAsync("UPDATE outbox SET uploaded = 1 WHERE client_entry_id = ?", clientEntryId);
 }
 
 export async function markQueued(

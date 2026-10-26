@@ -281,9 +281,7 @@ function makeProcessor() {
   };
   processor.module = {
     __esModule: true,
-    get processorIsMock() {
-      return processor.isMock;
-    },
+    isProcessorMock: () => processor.isMock,
     processItem: async (item, onStage) => {
       processor.calls.push({ id: item.clientEntryId, attempts: item.attempts, status: item.status, at: Date.now() });
       processor.concurrent += 1;
@@ -356,6 +354,9 @@ module.exports = {
   makeWorld,
   makeSqlite,
   makeCrypto,
+  makeSecureStore,
+  makeNetInfo,
+  makeRecordings,
   entryFor,
   affirmationsFor,
   clock,

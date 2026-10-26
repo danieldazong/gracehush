@@ -30,6 +30,23 @@ export const WAVEFORM_BAR_COUNT = 9;
 export const MAX_GRATITUDE_NOTE_LENGTH = 1_000;
 export const GRATITUDE_COUNTER_FROM = 900;
 
+// Journal data (step 25). The Journal asks the server for ENTRIES_PAGE_SIZE entries at a time and keeps the newest
+// ENTRY_CACHE_LIMIT on the phone (the read cache of step 24).
+export const ENTRIES_PAGE_SIZE = 30;
+export const ENTRY_CACHE_LIMIT = 200;
+// An entry that the server still calls "processing" this long after it was last touched belongs to a request that died
+// (the server's claim lapses after 3 minutes, step 19): the Journal does not list it, or it would be a card that never finishes.
+export const STALE_PROCESSING_MS = 10 * 60_000;
+// A reflection whose passage is not verified asks the server to read it again at most this often (confirm-scripture, step 20).
+export const SCRIPTURE_RETRY_MS = 60_000;
+// A reflection that a server is still preparing is read again this often, for at most REFLECTION_POLL_MAX_MS (step 25).
+export const REFLECTION_POLL_MS = 5_000;
+export const REFLECTION_POLL_MAX_MS = 120_000;
+// How long a call to an Edge Function may take. process-entry stops itself at about 145 seconds (the platform stops a function at
+// 150, step 22), and the sync engine's own ceiling (200 seconds, step 24) is above this one.
+export const PROCESS_ENTRY_TIMEOUT_MS = 155_000;
+export const CONFIRM_SCRIPTURE_TIMEOUT_MS = 15_000;
+
 // The player (step 12). Back and forward skip this far; the speed chips and the ambient chips show these,
 // in this order.
 export const SKIP_MS = 15_000;

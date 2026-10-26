@@ -1,16 +1,24 @@
+import { ENTRIES_PAGE_SIZE } from "@/constants/app";
 import { supabaseEnv } from "@/constants/env";
 import { useDevStore } from "@/store/devStore";
 
 export type MockScenario = "default" | "empty" | "offline";
 
-// Where the profile comes from (step 17). A release build always uses Supabase. In development the dev panel
-// chooses, and a development build whose .env.local has no Supabase address falls back to the mock, so the app
-// still runs before the Supabase project exists.
-export type ProfileSource = "supabase" | "mock";
+// Where the data comes from: the profile (step 17), and the entries, the affirmations and the processing of a reflection
+// (step 25). A release build always uses Supabase. In development the dev panel chooses, and a development build whose
+// .env.local has no Supabase address falls back to the mock, so the app still runs before the Supabase project exists. The
+// mock is the step 06 data with its scenarios and the dev store's outcomes: it never reaches the server and never the cache.
+export type DataSource = "supabase" | "mock";
 
-export function getProfileSource(): ProfileSource {
+export function getDataSource(): DataSource {
   if (!__DEV__) return "supabase";
-  return supabaseEnv.status === "ok" ? useDevStore.getState().profileSource : "mock";
+  return supabaseEnv.status === "ok" ? useDevStore.getState().dataSource : "mock";
+}
+
+// How many entries one page of the Journal holds. The developer panel can make it small, so the second page can be reached
+// with a few entries.
+export function getEntriesPageSize(): number {
+  return __DEV__ ? useDevStore.getState().pageSize : ENTRIES_PAGE_SIZE;
 }
 
 // What the next mock submit answers (step 10): a finished entry, a crisis entry, a failure, the free limit, or (step 24)

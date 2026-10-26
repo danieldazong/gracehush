@@ -3,6 +3,8 @@ import { useNavigation } from "@react-navigation/native";
 import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
+import { getLastFunctionCall, type FunctionCall } from "@/api/journalApi";
+import { ENTRIES_PAGE_SIZE } from "@/constants/app";
 import {
   getLatestAffirmations,
   getProfile,
@@ -13,16 +15,17 @@ import {
 } from "@/data/journalRepository";
 import { runProcessEntryCheck } from "@/components/dev/processEntryCheck";
 import { supabaseEnv } from "@/constants/env";
+import { getLastEntriesError } from "@/data/entriesRemote";
 import {
   countVisibleProfileRows,
   getLastProfileError,
   selectProfileRow,
 } from "@/data/profileRemote";
 import type {
+  DataSource,
   MockPurchaseOutcome,
   MockScenario,
   MockSubmitOutcome,
-  ProfileSource,
 } from "@/data/mock/scenario";
 import {
   getAffirmationForSlot,
@@ -63,7 +66,9 @@ const SCENARIOS: MockScenario[] = ["default", "empty", "offline"];
 const SUBMIT_OUTCOMES: MockSubmitOutcome[] = ["ready", "crisis", "failed", "limit", "too_short"];
 const OUTBOX_STATES: OutboxStatus[] = ["queued", "sending", "needs_action", "limit_reached", "paused_auth"];
 const PLANS: SubscriptionTier[] = ["free", "trial", "pro"];
-const PROFILE_SOURCES: ProfileSource[] = ["supabase", "mock"];
+const DATA_SOURCES: DataSource[] = ["supabase", "mock"];
+// The Journal's page size: the real one, and a small one that reaches the second page with a few entries.
+const PAGE_SIZES: number[] = [ENTRIES_PAGE_SIZE, 5];
 
 // The count of finished recordings kept on this phone (recordings/ in the app's own folder).
 function recordingsLine(): string {
@@ -172,12 +177,19 @@ async function loadDataCheck(
   return { lines, targets: getReflectionTargets(entries), tier: usage.tier };
 }
 
+// The last Edge Function call as one line: its name, what came back and how long it took. No body, no id.
+function describeFunctionCall(call: FunctionCall | null): string {
+  if (call === null) return "none";
+  const answer = call.status === 0 ? "no answer" : String(call.status);
+  return `${call.name} ${answer}${call.code === null ? "" : ` ${call.code}`}, ${Math.round(call.ms / 100) / 10} s`;
+}
+
 // What the Supabase check shows on screen: yes or no and a code, never an id, a token or a row.
-async function runSupabaseCheck(source: ProfileSource): Promise<string[]> {
+async function runSupabaseCheck(source: DataSource): Promise<string[]> {
   const signedIn = getSupabaseUserId() !== null;
   const lines = [
     `Supabase keys in .env.local: ${supabaseEnv.status === "ok" ? "yes" : "no"}`,
-    `profile source: ${source}`,
+    `data source: ${source}`,
     `signed in: ${signedIn ? "yes" : "no"}`,
   ];
   if (supabaseEnv.status !== "ok" || !signedIn) return lines;
@@ -206,6 +218,8 @@ async function runSupabaseCheck(source: ProfileSource): Promise<string[]> {
   const unsent = userId === null ? [] : Object.keys(useProfilePrefsStore.getState().byUser[userId]?.unsent ?? {});
   lines.push(`unsent settings: ${unsent.length === 0 ? "none" : unsent.join(", ")}`);
   lines.push(`last error: ${getLastProfileError() ?? "none"}`);
+  lines.push(`last entries error: ${getLastEntriesError() ?? "none"}`);
+  lines.push(`last function call: ${describeFunctionCall(getLastFunctionCall())}`);
   return lines;
 }
 
@@ -274,10 +288,12 @@ function DevToolsContent() {
   const setRestoreFindsPurchase = useDevStore((state) => state.setRestoreFindsPurchase);
   const offeringUnavailable = useDevStore((state) => state.offeringUnavailable);
   const setOfferingUnavailable = useDevStore((state) => state.setOfferingUnavailable);
-  const chosenProfileSource = useDevStore((state) => state.profileSource);
-  const setProfileSource = useDevStore((state) => state.setProfileSource);
-  // Without a Supabase address in .env.local the mock is what the app really uses (getProfileSource).
-  const profileSource: ProfileSource = supabaseEnv.status === "ok" ? chosenProfileSource : "mock";
+  const chosenDataSource = useDevStore((state) => state.dataSource);
+  const setDataSource = useDevStore((state) => state.setDataSource);
+  const pageSize = useDevStore((state) => state.pageSize);
+  const setPageSize = useDevStore((state) => state.setPageSize);
+  // Without a Supabase address in .env.local the mock is what the app really uses (getDataSource).
+  const dataSource: DataSource = supabaseEnv.status === "ok" ? chosenDataSource : "mock";
   const [lines, setLines] = useState<string[]>([]);
   const [targets, setTargets] = useState<ReflectionTarget[]>([]);
   const [tier, setTier] = useState<SubscriptionTier | null>(null);
@@ -330,16 +346,17 @@ function DevToolsContent() {
     void resumeAfterUpgrade();
   }
 
-  // Profile and this panel reload through the mock profile version, as for a mock plan change.
-  function changeProfileSource(next: ProfileSource) {
-    setProfileSource(next);
+  // Profile and this panel reload through the mock profile version, as for a mock plan change. Journal Home follows the
+  // data source itself.
+  function changeDataSource(next: DataSource) {
+    setDataSource(next);
     setSupabaseLines([]);
     bumpMockProfileVersion();
   }
 
   async function checkSupabase() {
     setChecking(true);
-    setSupabaseLines(await runSupabaseCheck(profileSource));
+    setSupabaseLines(await runSupabaseCheck(dataSource));
     setChecking(false);
   }
 
@@ -515,23 +532,38 @@ function DevToolsContent() {
           <DevButton label="Sync now (dev)" onPress={() => void syncNow("manual")} />
         </View>
         <View className="gap-2">
-          <Text className="text-center text-body-sm text-mauve">Profile source (dev)</Text>
+          <Text className="text-center text-body-sm text-mauve">Data source (dev)</Text>
           <View className="flex-row flex-wrap justify-center gap-2">
-            {PROFILE_SOURCES.map((name) => (
+            {DATA_SOURCES.map((name) => (
               <DevButton
                 key={name}
                 label={name}
-                accessibilityLabel={`Profile source ${name} (dev)`}
-                selected={name === profileSource}
-                onPress={() => changeProfileSource(name)}
+                accessibilityLabel={`Data source ${name} (dev)`}
+                selected={name === dataSource}
+                onPress={() => changeDataSource(name)}
               />
             ))}
           </View>
+          <Text className="text-center text-body-sm text-mauve">
+            supabase: the real profile, entries and processing. mock: the step 06 data and the outcomes above.
+          </Text>
           {supabaseEnv.status !== "ok" ? (
             <Text className="text-center text-body-sm text-mauve">
-              No Supabase address in .env.local, so the profile uses the mock.
+              No Supabase address in .env.local, so the app uses the mock.
             </Text>
           ) : null}
+          <Text className="text-center text-body-sm text-mauve">Page size (dev)</Text>
+          <View className="flex-row flex-wrap justify-center gap-2">
+            {PAGE_SIZES.map((size) => (
+              <DevButton
+                key={size}
+                label={String(size)}
+                accessibilityLabel={`Page size ${size} (dev)`}
+                selected={size === pageSize}
+                onPress={() => setPageSize(size)}
+              />
+            ))}
+          </View>
           <View className="items-center gap-2">
             <DevButton label="Supabase check (dev)" disabled={checking} onPress={checkSupabase} />
             {supabaseLines.map((line) => (

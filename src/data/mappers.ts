@@ -14,7 +14,8 @@ import type {
   TimeSlot,
   UserProfile,
 } from "@/types";
-import type { DailyAffirmationRow, JournalEntryRow, UserProfileRow } from "@/types/database";
+import type { AffirmationRow, EntryRow } from "@/data/columns";
+import type { UserProfileRow } from "@/types/database";
 
 const TIME_SLOTS: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 const INPUT_TYPES: readonly InputType[] = ["text", "audio"];
@@ -84,7 +85,7 @@ export function toUserProfile(row: UserProfileRow): UserProfile {
   };
 }
 
-export function toAffirmation(row: DailyAffirmationRow): Affirmation {
+export function toAffirmation(row: AffirmationRow): Affirmation {
   return {
     id: row.id,
     entryId: row.entry_id,
@@ -95,16 +96,16 @@ export function toAffirmation(row: DailyAffirmationRow): Affirmation {
   };
 }
 
-function getStatus(row: JournalEntryRow): ProcessingStatus {
+function getStatus(row: EntryRow): ProcessingStatus {
   return pick(STATUSES, row.processing_status) ?? "ready";
 }
 
 // Scripture, devotional, prayer and emotion exist only on a finished entry that is not a crisis.
-function isFinished(row: JournalEntryRow): boolean {
+function isFinished(row: EntryRow): boolean {
   return getStatus(row) === "ready" && row.is_crisis !== true;
 }
 
-function toScripture(row: JournalEntryRow): Scripture | null {
+function toScripture(row: EntryRow): Scripture | null {
   if (!row.scripture_reference) return null;
   const verified = row.scripture_verified === true;
   return {
@@ -116,7 +117,7 @@ function toScripture(row: JournalEntryRow): Scripture | null {
   };
 }
 
-function toDevotional(row: JournalEntryRow): Devotional | null {
+function toDevotional(row: EntryRow): Devotional | null {
   if (!row.devotional_script) return null;
   return {
     title: row.devotional_title || copy.common.defaultDevotionalTitle,
@@ -128,7 +129,7 @@ function toDevotional(row: JournalEntryRow): Devotional | null {
 }
 
 // is_active_prayer means "tracked as a prayer"; an answered prayer may or may not keep it.
-export function toPrayer(row: JournalEntryRow): Prayer | null {
+export function toPrayer(row: EntryRow): Prayer | null {
   const isAnswered = row.is_answered === true;
   if (!isFinished(row) || !(row.is_active_prayer === true || isAnswered)) return null;
   return {
@@ -144,7 +145,7 @@ export function toPrayer(row: JournalEntryRow): Prayer | null {
   };
 }
 
-export function toJournalEntry(row: JournalEntryRow): JournalEntry {
+export function toJournalEntry(row: EntryRow): JournalEntry {
   const status = getStatus(row);
   const finished = isFinished(row);
   return {

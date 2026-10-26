@@ -45,4 +45,6 @@ export const MIGRATIONS: readonly (readonly string[])[] = [
     )`,
     "CREATE INDEX affirmations_cache_entry ON affirmations_cache (entry_id)",
   ],
+  // Version 2 (step 25): a recording that is already uploaded is not uploaded again when its reflection is sent again.
+  ["ALTER TABLE outbox ADD COLUMN uploaded INTEGER NOT NULL DEFAULT 0"],
 ];

@@ -1,4 +1,4 @@
-// TEMP(25/29): internals move to Supabase and the SQLite read cache (built in step 24, filled by step 25). Keep the names and argument order; those steps widen some return types to RepoResult. The profile is real since step 17.
+// TEMP(29): the prayer writes are mocks until step 29 replaces them. The profile (step 17), and the entries, the affirmations and the usage (step 25), are real: they come from Supabase through the read cache of step 24, unless the data source is the mock (a development switch). Keep the names and argument order.
 import {
   AMBIENT_SOUNDS,
   FREE_DEVOTIONALS_PER_WEEK,
@@ -6,10 +6,12 @@ import {
   WEEK_STARTS_ON,
 } from "@/constants/app";
 import { copy } from "@/constants/copy";
+import * as live from "@/data/entriesLive";
 import { getDeviceTimezone, toAffirmation, toJournalEntry, toPrayer, toUserProfile } from "@/data/mappers";
 import { addMockEntry, getMockDb } from "@/data/mock/db";
 import {
-  getProfileSource,
+  getDataSource,
+  getEntriesPageSize,
   takeMockNetworkFailure,
   takeMockPrayerMutationFailure,
   takeMockSubmitOutcome,
@@ -41,6 +43,7 @@ import type {
 } from "@/types";
 import type { JournalEntryRow } from "@/types/database";
 import { answeredDateToTimestamp, isValidAnsweredDate } from "@/utils/prayerDates";
+import { weekWindow } from "@/utils/week";
 
 const SLOT_ORDER: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 
@@ -116,7 +119,7 @@ function readLocalProfile(userId: string): UserProfile | null {
 // Failing to read the profile at all throws: the hooks that call this already show their error state and retry on the
 // next focus.
 export async function getProfile(): Promise<UserProfile> {
-  if (getProfileSource() === "mock") {
+  if (getDataSource() === "mock") {
     await simulateLatency();
     return readMockProfile();
   }
@@ -132,31 +135,89 @@ export async function getProfile(): Promise<UserProfile> {
   return afterSync;
 }
 
+// What Profile and the Paywall show of the plan. The mock data says what the Profile design says ("2 of 3 audio devotionals
+// used this week"). Otherwise the plan is the one this device knows (getKnownTier), and on the free plan the count is of the
+// devotionals this phone has this week, in the time zone of the profile and with the week the server uses (utils/week.ts):
+// it needs no network, so Profile opens offline. It is a number to show and nothing more. Only the server's 402 opens the
+// Paywall, because only the server counts every device.
 export async function getUsage(): Promise<PlanUsage> {
-  await simulateLatency();
-  const { subscriptionTier: tier } = toUserProfile(getMockDb().profile);
-  const resetsAt = nextWeekStart(new Date()).toISOString();
-  // Fixed mock data (the Profile design's "2 of 3 audio devotionals used this week"), not counted
-  // from the entries, which would give a different number on each weekday. Both paid tiers are unlimited.
-  return tier === "free"
-    ? { tier, used: 2, limit: FREE_DEVOTIONALS_PER_WEEK, resetsAt }
-    : { tier, used: 0, limit: null, resetsAt };
+  if (getDataSource() === "mock") {
+    await simulateLatency();
+    const { subscriptionTier: tier } = toUserProfile(getMockDb().profile);
+    const resetsAt = nextWeekStart(new Date()).toISOString();
+    // Fixed mock data, not counted from the entries, which would give a different number on each weekday. Both paid tiers are
+    // unlimited.
+    return tier === "free"
+      ? { tier, used: 2, limit: FREE_DEVOTIONALS_PER_WEEK, resetsAt }
+      : { tier, used: 0, limit: null, resetsAt };
+  }
+  const tier = getKnownTier() ?? "free";
+  const zone = await getProfile().then(
+    (profile) => profile.timezone,
+    () => getDeviceTimezone(),
+  );
+  const week = weekWindow(new Date(), zone);
+  const resetsAt = week.end.toISOString();
+  if (tier !== "free") return { tier, used: 0, limit: null, resetsAt };
+  // A person who was paying earlier in the week and lapsed can have made more than the limit: the card shows the limit.
+  const made = await live.countDevotionalsSince(week.start);
+  return { tier, used: Math.min(made, FREE_DEVOTIONALS_PER_WEEK), limit: FREE_DEVOTIONALS_PER_WEEK, resetsAt };
 }
 
-// Newest first, every status included.
+// What this phone has, newest first: Profile counts it and the developer panel reads it. The mock data: every entry, every
+// status. The real source: the entries the Journal lists, from the read cache.
 export async function listEntries(): Promise<JournalEntry[]> {
-  await simulateLatency();
-  return readEntries();
+  if (getDataSource() === "mock") {
+    await simulateLatency();
+    return readEntries();
+  }
+  return live.readCachedEntries();
+}
+
+// The first thing Journal Home and Reflection show is what the phone already has, so these read the read cache and nothing
+// else (step 25). The mock data has no cache: they answer nothing, and the screens go straight to the mock reads below.
+export async function readCachedEntries(): Promise<JournalEntry[]> {
+  return getDataSource() === "mock" ? [] : live.readCachedEntries(getEntriesPageSize());
+}
+
+export async function readCachedEntry(id: string): Promise<JournalEntry | null> {
+  return getDataSource() === "mock" ? null : live.readCachedEntry(id);
+}
+
+export async function readCachedAffirmations(entryId: string): Promise<Affirmation[]> {
+  return getDataSource() === "mock" ? [] : live.readCachedAffirmations(entryId);
+}
+
+export async function readCachedLatestAffirmations(): Promise<Affirmation[]> {
+  return getDataSource() === "mock" ? [] : live.readCachedLatestAffirmations();
+}
+
+// One page of the Journal (step 25): the entries it lists, newest first, the cursor of the next page (null when there is no
+// older entry) and, for the first page, how many entries there are in all. A failed read is a RepoResult, so a screen keeps
+// what it has. The real source writes what it read to the cache. The mock data is one page.
+export async function loadEntriesPage(cursor: string | null): Promise<RepoResult<live.EntriesPage>> {
+  if (getDataSource() === "mock") {
+    await simulateLatency();
+    return { ok: true, data: { entries: readEntries(), nextCursor: null, total: null } };
+  }
+  return live.loadEntriesPage(cursor, getEntriesPageSize());
 }
 
 // A reflection that is still only on this phone has no server id: its id is its client entry id, and it is an entry
-// that is not finished yet (Reflection shows "still being prepared"), never "not found" (step 24).
+// that is not finished yet (Reflection shows "still being prepared"), never "not found" (step 24). Otherwise the real source
+// asks the server (null when it has no such entry) and falls back to the cached copy when there is no answer; with neither,
+// it throws, and the screen shows its error state.
 export async function getEntry(id: string): Promise<HomeEntry | null> {
-  await simulateLatency();
-  const found = readEntries().find((entry) => entry.id === id);
-  if (found) return found;
-  const item = await findPendingItem(id);
-  return item === null ? null : toPendingEntry(item);
+  if (getDataSource() === "mock") {
+    await simulateLatency();
+    const found = readEntries().find((entry) => entry.id === id);
+    if (found) return found;
+    const waiting = await findPendingItem(id);
+    return waiting === null ? null : toPendingEntry(waiting);
+  }
+  const waiting = await findPendingItem(id);
+  if (waiting !== null) return toPendingEntry(waiting);
+  return live.fetchEntry(id);
 }
 
 async function findPendingItem(clientEntryId: string): Promise<OutboxItem | null> {
@@ -194,7 +255,7 @@ export async function countUnsentItems(): Promise<number> {
 // plan until step 30 (TEMP(30)); otherwise it is the plan the last profile sync read, or null before the first sync.
 export function getKnownTier(): SubscriptionTier | null {
   const mock = getMockSubscriptionTier();
-  if (mock !== "free" || getProfileSource() === "mock") return mock;
+  if (mock !== "free" || getDataSource() === "mock") return mock;
   const userId = getSupabaseUserId();
   return userId === null ? null : (readLocalProfile(userId)?.subscriptionTier ?? null);
 }
@@ -324,7 +385,7 @@ function checkProfilePatch(patch: ProfilePatch): RepoResult<ProfilePatch> {
 // write. The mock mode writes the mock row. Otherwise the change is kept on this device as an unsent edit for the
 // signed-in user and a sync sends it to users_profile 800 ms later, so it also works offline (step 18).
 export async function updateProfile(patch: ProfilePatch): Promise<RepoResult<UserProfile>> {
-  const isMock = getProfileSource() === "mock";
+  const isMock = getDataSource() === "mock";
   if (isMock) await simulateWrite(PROFILE_CHANGE_MS);
   if (takeMockPrayerMutationFailure()) return failure("NETWORK", copy.profile.errors.save);
   const checked = checkProfilePatch(patch);
@@ -357,17 +418,42 @@ export function getMockSubscriptionTier(): SubscriptionTier {
   return toUserProfile(getMockDb().profile).subscriptionTier;
 }
 
-// Ordered morning, afternoon, evening.
+// Ordered morning, afternoon, evening. The real source asks the server and falls back to the cached copy; with neither it throws.
+// A reflection that is only in this phone's outbox has no affirmations yet and no row on the server, so nobody is asked.
 export async function listAffirmationsForEntry(entryId: string): Promise<Affirmation[]> {
-  await simulateLatency();
-  return readAffirmations(entryId);
+  if (getDataSource() === "mock") {
+    await simulateLatency();
+    return readAffirmations(entryId);
+  }
+  if ((await findPendingItem(entryId)) !== null) return [];
+  return live.fetchAffirmations(entryId);
 }
 
-// From the newest ready, non-crisis entry.
+// From the newest ready, non-crisis entry. The real source never throws: with no answer it is the cached copy (fetchAffirmations
+// falls back to it), or nothing when there is none, and Journal Home then shows no affirmation card.
 export async function getLatestAffirmations(): Promise<Affirmation[]> {
+  if (getDataSource() === "mock") {
+    await simulateLatency();
+    const latest = readEntries().find((entry) => entry.status === "ready" && !entry.isCrisis);
+    return latest ? readAffirmations(latest.id) : [];
+  }
+  try {
+    return await live.fetchLatestAffirmations();
+  } catch {
+    return [];
+  }
+}
+
+// Saves the heart on an affirmation: the one column of daily_affirmations the app may write (step 18). The mock data changes
+// the mock row, and fails when the developer panel's "Fail next save" is armed, like the other mock writes.
+export async function setAffirmationFavorite(id: string, value: boolean): Promise<RepoResult<Affirmation>> {
+  if (getDataSource() !== "mock") return live.saveFavorite(id, value);
   await simulateLatency();
-  const latest = readEntries().find((entry) => entry.status === "ready" && !entry.isCrisis);
-  return latest ? readAffirmations(latest.id) : [];
+  if (takeMockPrayerMutationFailure()) return failure("NETWORK", copy.journal.affirmation.saveError);
+  const row = getMockDb().affirmations.find((candidate) => candidate.id === id);
+  if (row === undefined) return failure("NOT_FOUND", copy.journal.affirmation.saveError);
+  row.is_favorite = value;
+  return { ok: true, data: toAffirmation(row) };
 }
 
 // What the mock database needs of an outbox item. It reads the words of a written entry and nothing else.
@@ -384,10 +470,10 @@ function toMockRequest(item: OutboxItem): ProcessEntryRequest {
   };
 }
 
-// TEMP(25): the real processor uploads the recording and calls process-entry (services/entryProcessor.ts)
-// A mock run for the sync engine: it reports each stage 1.2 s apart, then answers with what the dev store asked for (one
-// shot, see takeMockSubmitOutcome), or with no answer at all when the dev panel failed the network. A finished or crisis
-// outcome adds an entry to the mock database and answers with it, as the server does.
+// A mock run for the sync engine, used while the data source is the mock (services/entryProcessor.ts): it reports each
+// stage 1.2 s apart, then answers with what the dev store asked for (one shot, see takeMockSubmitOutcome), or with no answer at
+// all when the dev panel failed the network. A finished or crisis outcome adds an entry to the mock database and answers with
+// it, as the server does.
 export async function processMock(
   item: OutboxItem,
   onStage: (stage: ProcessingStage) => void,
@@ -419,7 +505,7 @@ export async function processMock(
     case "too_short":
       return { ok: false, code: "TOO_SHORT" };
     case "limit":
-      // TODO(25): the 402 body carries the entry the server saved (entryId) and usage.resetsAt
+      // The real 402 also names the entry the server saved; the mock data has no server entry.
       return { ok: false, code: "LIMIT_REACHED", resetsAt: nextWeekStart(new Date()).toISOString() };
   }
 }

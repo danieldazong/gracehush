@@ -4,7 +4,8 @@ import type { Affirmation, JournalEntry } from "@/types";
 
 // The read cache (step 24): the entries and affirmations this phone has seen, so Journal and Reflection can open without a
 // network. Rows hold the mapped models (the same JournalEntry and Affirmation the screens use) as an encrypted JSON token.
-// Step 25 fills it from Supabase; until then nothing writes here, and it is tested on its own.
+// Step 25 fills it: the pages of the Journal and the entries Reflection opens are written here (data/entriesLive.ts), and so is
+// every reflection the sync engine has prepared.
 //
 // A row that cannot be read (damaged, changed, or not the shape of a model) is deleted and counted as "cache_row_invalid" in
 // the development log. It never breaks a list and it never logs what was in it.
@@ -107,6 +108,16 @@ export async function listEntries(limit: number = 30): Promise<JournalEntry[]> {
   const rows = await getDb().getAllAsync<EntryRow>(
     "SELECT id, row_json FROM entries_cache ORDER BY created_at DESC, id DESC LIMIT ?",
     limit,
+  );
+  return readEntries(rows);
+}
+
+// The entries created since `sinceIso` (compared as text with created_at, so a UTC time with a margin of a day or so is the
+// right bound: the caller filters again on the dates), newest first. The week's count of devotionals reads them (step 25).
+export async function listEntriesSince(sinceIso: string): Promise<JournalEntry[]> {
+  const rows = await getDb().getAllAsync<EntryRow>(
+    "SELECT id, row_json FROM entries_cache WHERE created_at >= ? ORDER BY created_at DESC, id DESC",
+    sinceIso,
   );
   return readEntries(rows);
 }

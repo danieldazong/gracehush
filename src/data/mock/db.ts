@@ -40,9 +40,9 @@ export function getMockDb(): MockDb {
   return mockDb;
 }
 
-// TEMP(25): the server creates the entry. Here a finished (or crisis) fixture is cloned under a new id, so
-// Journal and Reflection have something real to show after a submit. Like the server it is idempotent on
-// client_entry_id: a retried submit never adds a second row.
+// The mock data's stand-in for the server (data source "mock"): the server creates the entry. Here a finished (or crisis)
+// fixture is cloned under a new id, so Journal and Reflection have something to show after a submit. Like the server it is
+// idempotent on client_entry_id: a retried submit never adds a second row.
 export function addMockEntry(kind: "ready" | "crisis", req: ProcessEntryRequest): string {
   const db = getMockDb();
   const existing = db.entries.find((row) => row.client_entry_id === req.clientEntryId);

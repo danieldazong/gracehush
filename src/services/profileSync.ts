@@ -1,5 +1,5 @@
 import { getDeviceTimezone, toUserProfile } from "@/data/mappers";
-import { getProfileSource } from "@/data/mock/scenario";
+import { getDataSource } from "@/data/mock/scenario";
 import {
   fetchOrCreateProfileRow,
   pushProfileColumns,
@@ -84,7 +84,7 @@ async function runOnce(): Promise<RepoResult<null>> {
   const userId = getSupabaseUserId();
   if (userId === null) return unauthorized();
   // The mock profile needs no network.
-  if (getProfileSource() !== "supabase") return { ok: true, data: null };
+  if (getDataSource() !== "supabase") return { ok: true, data: null };
 
   const fetched = await fetchOrCreateProfileRow();
   if (!fetched.ok) return fetched;

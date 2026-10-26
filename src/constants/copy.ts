@@ -124,6 +124,8 @@ export const copy = {
       eyebrow: (slotName: string) => `${slotName} affirmation`,
       save: "Save affirmation",
       unsave: "Remove from saved",
+      // Shown under the card when saving the heart failed and the heart went back (step 25).
+      saveError: "We couldn’t save that. Please try again.",
       footer: (time: string, source: string | null) =>
         source ? `${time} • Tied to ${source}` : time,
       sourceToday: "today’s prayer",
@@ -239,6 +241,8 @@ export const copy = {
       clear: "Clear filter",
     },
     loading: "Loading your reflections",
+    // The small spinner under the last card while older reflections come.
+    loadingMore: "Loading more reflections",
     error: {
       message: "We couldn’t load your reflections.",
       retry: "Try again",
@@ -451,13 +455,13 @@ export const copy = {
       loading: "Loading your reflection",
       preparing: {
         title: "Your devotional is still being prepared.",
-        // TODO(25): "waiting in your Journal" is true once processing continues after the screen closes
         body: "It will be waiting in your Journal when it’s ready.",
       },
       failed: {
         title: "We couldn’t finish this reflection.",
-        // TODO(25): "try again from your journal" is true once a failed entry has a "Try again"
-        body: "Your words are safe. You can try again from your journal.",
+        // A failed entry is not listed in the real Journal, and the phone has no copy of its words to send again: the
+        // person records or writes it again.
+        body: "Your words are safe. Please record or write this reflection again.",
       },
       notFound: "This reflection couldn’t be found.",
       error: {

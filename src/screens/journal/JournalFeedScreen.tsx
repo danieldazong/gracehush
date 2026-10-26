@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import type { SymbolViewProps } from "expo-symbols";
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   RefreshControl,
@@ -229,6 +230,20 @@ function ItemSeparator() {
   return <View className="h-3.5" />;
 }
 
+// The small spinner under the last card while the next page of older entries comes (step 25).
+function LoadingMore() {
+  return (
+    <View
+      accessible
+      accessibilityLabel={copy.journal.loadingMore}
+      accessibilityState={{ busy: true }}
+      className="items-center py-5"
+    >
+      <ActivityIndicator size="small" color={colors.plum} />
+    </View>
+  );
+}
+
 export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">) {
   const { user } = useUser();
   const state = useJournalHome();
@@ -282,6 +297,8 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
             formatTime12(ready.profile.reminders[affirmation.slot]),
             source ? getAffirmationSource(source.createdAt, ready.now) : null,
           )}
+          onToggleFavorite={() => ready.toggleFavorite(affirmation)}
+          saveFailed={ready.favoriteFailed}
         />
       );
     }
@@ -304,7 +321,7 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
       {affirmationCard}
       {hasNoEntries ? null : (
         <SectionRow
-          count={visibleEntries.length}
+          count={filter === "all" ? ready.entryCount : visibleEntries.length}
           filterName={filter === "all" ? null : copy.journal.filter.chips[filter]}
           onFilter={() => setSheetVisible(true)}
         />
@@ -352,6 +369,9 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
         ItemSeparatorComponent={ItemSeparator}
         ListHeaderComponent={header ?? undefined}
         ListEmptyComponent={emptyState ?? undefined}
+        ListFooterComponent={ready?.loadingMore ? <LoadingMore /> : undefined}
+        onEndReached={ready ? ready.loadMore : undefined}
+        onEndReachedThreshold={0.5}
         contentContainerStyle={{
           flexGrow: 1,
           paddingHorizontal:
