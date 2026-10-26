@@ -230,6 +230,9 @@ export const copy = {
       offline: "Saved. We’ll prepare your reflection when you’re back online.",
       retry: "Saved. We’ll finish your reflection as soon as we can.",
     },
+    // A text link under either note: the reflection has not been screened yet (offline, or the service had no answer),
+    // so a way to reach someone stays one tap away. It opens Support Resources, which works offline (step 25 follow-up).
+    noteSupport: "Support resources",
     synced: "All reflections synced",
     empty: {
       title: "No reflections yet",

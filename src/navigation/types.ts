@@ -18,8 +18,8 @@ export type RootStackParamList = {
   Reflection: { entryId: string };
   NowPlaying: { entryId: string };
   // Nothing reads `source` in V1 (no analytics: a crisis view sends no events). It stays because step 15's
-  // Profile row passes "profile".
-  CrisisResources: { source: "reflection" | "profile" };
+  // Profile row passes "profile", and Journal's saved note passes "journal" (step 25 follow-up).
+  CrisisResources: { source: "reflection" | "profile" | "journal" };
   // `entryId` is the reflection the free limit stopped. When it is a crisis entry the Paywall replaces itself
   // with Reflection: crisis support is never paywalled.
   Paywall: { source: "profile" | "limit"; entryId?: string };

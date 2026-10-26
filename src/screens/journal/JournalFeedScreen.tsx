@@ -316,7 +316,16 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
       />
       {ready.isOffline ? <OfflineBanner unsyncedCount={unsentCount} /> : null}
       {ready.savedNote !== null ? (
-        <NoticeBanner message={copy.journal.notes[ready.savedNote]} onDismiss={ready.dismissNote} />
+        <NoticeBanner
+          message={copy.journal.notes[ready.savedNote]}
+          onDismiss={ready.dismissNote}
+          // The reflection has not been screened yet (offline, or the service had no answer), so a way to reach someone
+          // stays one tap away (step 25 follow-up). Like every way into Support Resources: no haptic and no log.
+          link={{
+            label: copy.journal.noteSupport,
+            onPress: () => navigation.navigate("CrisisResources", { source: "journal" }),
+          }}
+        />
       ) : null}
       {affirmationCard}
       {hasNoEntries ? null : (
