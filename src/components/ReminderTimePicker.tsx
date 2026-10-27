@@ -1,7 +1,7 @@
 import { DateTimePicker } from "@expo/ui/community/datetime-picker";
 import { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { Modal, Platform, Pressable, StyleSheet, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { copy } from "@/constants/copy";
@@ -50,26 +50,29 @@ export function ReminderTimePicker({ slot, value, onChange, onClose }: ReminderT
 
   return (
     <Modal visible={slot !== null} transparent animationType="fade" onRequestClose={onClose}>
-      <View className="flex-1 justify-end bg-ink/40">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={done}
-          className="flex-1"
-          onPress={onClose}
-        />
-        <SafeAreaView edges={["bottom"]} style={styles.sheet}>
-          {slot ? (
-            <DateTimePicker
-              value={toDate(value)}
-              mode="time"
-              display="spinner"
-              themeVariant="light"
-              onValueChange={(_event, date) => onChange(toTimeString(date))}
-            />
-          ) : null}
-          <PrimaryButton label={done} onPress={onClose} />
-        </SafeAreaView>
-      </View>
+      {/* A Modal is presented outside the app's root view on iOS, so a SafeAreaView in it needs a provider of its own. */}
+      <SafeAreaProvider>
+        <View className="flex-1 justify-end bg-ink/40">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={done}
+            className="flex-1"
+            onPress={onClose}
+          />
+          <SafeAreaView edges={["bottom"]} style={styles.sheet}>
+            {slot ? (
+              <DateTimePicker
+                value={toDate(value)}
+                mode="time"
+                display="spinner"
+                themeVariant="light"
+                onValueChange={(_event, date) => onChange(toTimeString(date))}
+              />
+            ) : null}
+            <PrimaryButton label={done} onPress={onClose} />
+          </SafeAreaView>
+        </View>
+      </SafeAreaProvider>
     </Modal>
   );
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { copy } from "@/constants/copy";
 import { colors, radii, shadows } from "@/constants/theme";
@@ -23,20 +23,23 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
       navigationBarTranslucent
       onRequestClose={onClose}
     >
-      <KeyboardAvoidingView behavior="padding" style={[styles.root, { paddingTop: top }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={copy.common.close}
-          className="absolute inset-0 bg-ink/40"
-          onPress={onClose}
-        />
-        <SafeAreaView edges={["bottom"]} style={[styles.sheet, shadows.sheet]}>
-          <View style={styles.handle} />
-          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-            {children}
-          </ScrollView>
-        </SafeAreaView>
-      </KeyboardAvoidingView>
+      {/* A Modal is presented outside the app's root view on iOS, so a SafeAreaView in it needs a provider of its own. */}
+      <SafeAreaProvider>
+        <KeyboardAvoidingView behavior="padding" style={[styles.root, { paddingTop: top }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copy.common.close}
+            className="absolute inset-0 bg-ink/40"
+            onPress={onClose}
+          />
+          <SafeAreaView edges={["bottom"]} style={[styles.sheet, shadows.sheet]}>
+            <View style={styles.handle} />
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {children}
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
+      </SafeAreaProvider>
     </Modal>
   );
 }

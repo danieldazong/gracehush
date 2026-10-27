@@ -3,8 +3,9 @@ import {
   createNativeStackNavigator,
   type NativeStackNavigationOptions,
 } from "@react-navigation/native-stack";
-import { useEffect } from "react";
+import { useEffect, type ReactElement } from "react";
 import { Platform } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { colors } from "@/constants/theme";
 import { SignInScreen } from "@/screens/auth/SignInScreen";
@@ -33,6 +34,11 @@ const nowPlayingOptions: NativeStackNavigationOptions = {
   presentation: Platform.OS === "ios" ? "fullScreenModal" : "modal",
   animation: "slide_from_bottom",
 };
+
+// A screen shown as a modal is presented outside the app's root view on iOS, so a SafeAreaView in it cannot find the root
+// SafeAreaProvider: it reads its own insets once, often before the modal is in place, and the Close row then sat under the
+// status bar (seen on the iPhone, 2026-10-27). A provider of its own follows the modal's real insets.
+const modalLayout = ({ children }: { children: ReactElement }) => <SafeAreaProvider>{children}</SafeAreaProvider>;
 
 export function RootNavigator() {
   const { isLoaded, isSignedIn } = useAuth();
@@ -69,22 +75,26 @@ export function RootNavigator() {
             name="NewEntry"
             component={NewEntryScreen}
             options={{ presentation: "fullScreenModal" }}
+            layout={modalLayout}
           />
           <Stack.Screen name="Reflection" component={ReflectionScreen} />
           <Stack.Screen
             name="NowPlaying"
             component={NowPlayingScreen}
             options={nowPlayingOptions}
+            layout={modalLayout}
           />
           <Stack.Screen
             name="CrisisResources"
             component={CrisisResourcesScreen}
             options={{ presentation: "modal", animation: "slide_from_bottom" }}
+            layout={modalLayout}
           />
           <Stack.Screen
             name="Paywall"
             component={PaywallScreen}
             options={{ presentation: "modal", animation: "slide_from_bottom" }}
+            layout={modalLayout}
           />
         </>
       ) : (
