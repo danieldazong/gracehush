@@ -2,7 +2,6 @@ import {
   AudioModule,
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
-  setAudioModeAsync,
   type AudioRecorder,
   type RecorderState,
 } from "expo-audio";
@@ -16,6 +15,8 @@ import {
   RECORDING_MIME_TYPE,
   RECORDING_OPTIONS,
 } from "@/constants/audio";
+import { setSessionMode } from "@/services/audioSession";
+import { usePlayerStore } from "@/store/playerStore";
 import type { PermissionResult, RecorderStatus, RecordingResult } from "@/types";
 import { meterToLevel, smoothLevel } from "@/utils/audioLevels";
 
@@ -84,18 +85,6 @@ function keepAwake(on: boolean) {
   done.catch(() => undefined);
 }
 
-// On iOS the audio session must allow recording while a take runs, and go back afterwards so the next playback
-// uses the speaker and not the earpiece (step 26 replaces these calls with its session modes).
-async function allowRecording(allowed: boolean) {
-  try {
-    await setAudioModeAsync(
-      allowed ? { allowsRecording: true, playsInSilentMode: true } : { allowsRecording: false },
-    );
-  } catch {
-    // Best effort. A start that really cannot record fails at prepare or record, which the caller sees.
-  }
-}
-
 function releaseQuietly(recorder: AudioRecorder | null) {
   try {
     recorder?.release();
@@ -121,7 +110,9 @@ async function endSession() {
   clearInterval(current.timer);
   releaseQuietly(current.recorder);
   keepAwake(false);
-  await allowRecording(false);
+  // Back to the playback mode, so the next devotional uses the speaker, plays with the silent switch on and keeps the lock
+  // screen (audioSession.ts). Best effort: a recorder that really cannot record fails at prepare or record.
+  await setSessionMode("playback");
 }
 
 // One read of the native recorder, handed to the hook as the step 10 status shape. `metering` is 0 to 1 and smoothed;
@@ -153,15 +144,17 @@ function read(current: Session, onStatus: (status: RecorderStatus) => void) {
 
 export async function startRecording(onStatus: (status: RecorderStatus) => void): Promise<void> {
   await endSession();
+  // A devotional that is playing stops: the take must not hear it, and the microphone takes the audio session.
+  usePlayerStore.getState().pause();
   let recorder: AudioRecorder | null = null;
   try {
-    await allowRecording(true);
+    await setSessionMode("recording");
     recorder = new nativeAudio.AudioRecorder(createRecordingOptions(RECORDING_OPTIONS));
     await recorder.prepareToRecordAsync();
     recorder.record();
   } catch (error) {
     releaseQuietly(recorder);
-    await allowRecording(false);
+    await setSessionMode("playback");
     throw error;
   }
   keepAwake(true);
@@ -193,7 +186,7 @@ export function pauseRecording(): void {
 export async function resumeRecording(): Promise<void> {
   const current = session;
   if (!current) throw new Error("No recording is running");
-  await allowRecording(true);
+  await setSessionMode("recording");
   current.recorder.record();
   current.advancedAt = Date.now();
   current.idleReads = 0;

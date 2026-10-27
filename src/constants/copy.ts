@@ -1,7 +1,13 @@
-import type { AmbientSound, OutboxStatus, PlaybackRate, TimeSlot } from "@/types";
+import type { AmbientSound, OutboxStatus, PlaybackError, PlaybackRate, TimeSlot } from "@/types";
 
 // "1 day", "7 days". The paywall's trial lines and disclosures share it.
 const daysLabel = (days: number) => (days === 1 ? "1 day" : `${days} days`);
+
+// What the mini player and Now Playing say when a devotional's audio could not be had (step 26). Tapping play tries again.
+const playbackErrors = {
+  offline: "Audio needs a connection.",
+  unavailable: "We couldn’t load the audio. Tap play to try again.",
+} satisfies Record<PlaybackError, string>;
 
 export const copy = {
   onboarding: {
@@ -171,6 +177,9 @@ export const copy = {
       reviewLabel: "Review this reflection",
       seePlans: "See plans",
       seePlansLabel: "See plans to prepare this reflection",
+      // The screen-reader action of a card with a play pill (step 26). The pill is not a stop of its own: the card is the one
+      // element, and this is an action on it.
+      playAction: "Play devotional",
       // The status line of a reflection that is saved on this phone and has not been prepared yet (step 24). The card shows
       // it and a screen reader speaks it. `weekday` is when the free limit's week ends.
       pendingLine: (status: OutboxStatus, online: boolean | null, weekday: string | null) => {
@@ -411,6 +420,8 @@ export const copy = {
       openLink: "Tap to open player",
       // The spoken time: "34 seconds of 1 minute 15 seconds".
       position: (elapsed: string, total: string) => `${elapsed} of ${total}`,
+      // Shown in place of the length when the audio could not be had.
+      errors: playbackErrors,
     },
     scripture: {
       translation: "Berean Standard Bible",
@@ -548,8 +559,10 @@ export const copy = {
       },
       close: "Close",
     },
-    // Shown in development only: it is true only with real audio (the guard is in NowPlayingScreen).
-    devFooter: "Audio keeps playing when you close this screen.",
+    // True now that the audio is real: the player keeps playing when this screen closes, and in the background.
+    footer: "Audio keeps playing when you close this screen.",
+    // Under the controls when the audio could not be had.
+    errors: playbackErrors,
   },
   prayers: {
     title: "Sanctuary Prayers",

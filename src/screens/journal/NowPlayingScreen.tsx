@@ -3,6 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import type { SymbolViewProps } from "expo-symbols";
 import { useEffect, useState, type ReactElement } from "react";
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -159,6 +160,8 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
   const isAmbientOff = ambientSound === "off";
 
   const orb = orbByStatus[status];
+  // "Playing" while the sound has not started yet: the audio is being downloaded or opened. The button stays a pause button.
+  const isBuffering = playback.isBuffering && status === "playing";
 
   return (
     <ScrollView
@@ -231,6 +234,7 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={orb.label}
+          accessibilityState={isBuffering ? { busy: true } : undefined}
           onPress={playback.toggle}
           style={({ pressed }) => pressed && styles.orbPressed}
         >
@@ -238,7 +242,11 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
             className="size-16 items-center justify-center rounded-full bg-plum"
             style={shadows.orb}
           >
-            <Icon name={orb.icon} size={34} color="white" />
+            {isBuffering ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Icon name={orb.icon} size={34} color="white" />
+            )}
           </View>
         </Pressable>
         <Pressable
@@ -252,6 +260,16 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
           </View>
         </Pressable>
       </View>
+
+      {playback.error !== null ? (
+        <Text
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          className="text-center text-body-sm text-rosewood"
+        >
+          {nowPlaying.errors[playback.error]}
+        </Text>
+      ) : null}
 
       <View className="flex-row items-center justify-center gap-2">
         {PLAYBACK_RATES.map((value) => (
@@ -325,10 +343,7 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
         </View>
       </View>
 
-      {/* TODO(26): show it to everyone once background playback works */}
-      {__DEV__ ? (
-        <Text className="text-center text-body-sm text-mauve">{nowPlaying.devFooter}</Text>
-      ) : null}
+      <Text className="text-center text-body-sm text-mauve">{nowPlaying.footer}</Text>
     </ScrollView>
   );
 }

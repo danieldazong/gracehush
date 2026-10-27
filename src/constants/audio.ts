@@ -38,3 +38,36 @@ export const MIN_RECORDING_FILE_BYTES = 1_024;
 // Mirrors MAX_AUDIO_BYTES in supabase/functions/process-entry/constants.ts: the function refuses a larger file, so
 // the phone does not upload one. Keep the two in sync.
 export const MAX_RECORDING_FILE_BYTES = 12 * 1024 * 1024;
+
+// ---- Playing a devotional (step 26)
+
+// How often the player reports its position. Each report redraws the two places that show the clock.
+export const PLAYER_UPDATE_MS = 250;
+
+// Whether the audio session stays active while a devotional is paused or has finished. On iOS the lock-screen card
+// belongs to the app that holds the session: with false the card goes away as soon as the player pauses, and the lock
+// screen can no longer resume it. The price of true is that another app's music, which the devotional stopped, does not
+// start again by itself: a devotional is a short, deliberate listen, and the session goes back to the system when the
+// player is released (sign-out).
+export const KEEP_SESSION_ACTIVE = true;
+
+// How long a new player has to say that it has loaded its file before the audio counts as unavailable.
+export const LOAD_TIMEOUT_MS = 10_000;
+
+// The devotionals downloaded to the phone live in the cache folder (services/devotionalAudio.ts). Step 22 makes them WAV.
+export const DEVOTIONAL_CACHE_FOLDER = "devotionals";
+export const DEVOTIONAL_EXTENSION = ".wav";
+
+// A download under this is not audio (a WAV header alone is 44 bytes).
+export const MIN_DEVOTIONAL_FILE_BYTES = 1_024;
+
+// The newest this many downloads are kept (about 5 MB each); older ones are deleted when a new one arrives.
+export const MAX_CACHED_DEVOTIONALS = 12;
+
+// How long the link that downloads one devotional is valid. It is used at once and never kept.
+export const DEVOTIONAL_LINK_SECONDS = 300;
+
+// How long the app waits for that link before the audio counts as needing a connection. A request with no connection can
+// wait for minutes (a session token that cannot be refreshed), and a play that waited that long would start by itself when
+// the connection came back.
+export const DEVOTIONAL_LINK_TIMEOUT_MS = 15_000;

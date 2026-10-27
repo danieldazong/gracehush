@@ -200,7 +200,8 @@ export interface ProcessEntryLimitError {
 }
 
 // A crisis entry comes back with `affirmations: []`. A devotional's `audioPath` and `durationMs` are a path and a number:
-// the function returns and stores no link (step 22), and the app asks Supabase for its own signed link (step 26).
+// the function returns and stores no link (step 22), and the app asks Supabase for a short-lived link of its own to download
+// the file once (step 26).
 export type ProcessEntryResponse = { entry: JournalEntry; affirmations: Affirmation[] };
 
 // confirm-scripture (step 20): asked again for the passage of a reflection whose text could not be read when it was made.
@@ -280,8 +281,18 @@ export type ProcessOutcome =
 // The player (step 12). Steps 15, 26 and 27 read these names: they may add to them, never rename.
 export type PlaybackStatus = "idle" | "playing" | "paused" | "ended";
 export type PlaybackRate = 0.8 | 1 | 1.2;
-// `subtitle` is "Gracehush • Philippians 4:6–7", the same string step 26 puts on the lock screen.
-export type PlaybackTrack = { entryId: string; title: string; subtitle: string; durationMs: number };
+// Why a devotional's audio could not be had (step 26): the phone has no connection ("offline"), or the file is missing or
+// would not open ("unavailable"). The next play tries again.
+export type PlaybackError = "offline" | "unavailable";
+// `subtitle` is "Gracehush • Philippians 4:6–7", the same string step 26 puts on the lock screen. `audioPath` is where the
+// file is in Storage (step 22): the player downloads it once and plays it from the phone.
+export type PlaybackTrack = {
+  entryId: string;
+  title: string;
+  subtitle: string;
+  durationMs: number;
+  audioPath: string;
+};
 export type AmbientDefault = Pick<UserProfile, "ambientSound" | "ambientVolume">;
 
 // Crisis support (step 13). The data is in constants/crisisResources.ts.

@@ -250,8 +250,8 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
   await matchesPublicBible("passage matches the public Bible", asSuccess(first)?.entry.scripture);
 
   // 1c. The spoken devotional (step 22). With speech on, the reflection comes back with an audio path and a measured length,
-  // the app's own signed link plays it, and the bucket is private. The link is made here with this phone's session, with
-  // the call step 26 will make, and it is never printed.
+  // the app's own signed link reaches it, and the bucket is private. The link is made here with this phone's session, the
+  // way the player makes the link it downloads the file with (step 26), and it is never printed.
   const firstEntry = asSuccess(first)?.entry;
   const audioPath = firstEntry?.devotional?.audioPath ?? null;
   if (firstEntry && audioPath) {

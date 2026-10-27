@@ -3,6 +3,7 @@ import { copy } from "@/constants/copy";
 import { simulateWrite } from "@/data/journalRepository";
 import { takeMockPrayerMutationFailure } from "@/data/mock/scenario";
 import { deleteUserDatabase } from "@/db/database";
+import { deleteAllDevotionalAudio } from "@/services/devotionalAudio";
 import { endOfflineSession } from "@/services/offlineSession";
 import { cancelProfileSync } from "@/services/profileSync";
 import { deleteAllRecordings } from "@/services/recordingFiles";
@@ -58,9 +59,11 @@ export async function signOutCleanup(): Promise<void> {
   await endOfflineSession();
   if (userId !== null) await deleteUserDatabase(userId);
   await deleteAllRecordings();
-  // A full reset of the player: the position, the speed and the session's ambient choice.
+  // A full reset of the player: the sound stops, the lock screen is cleared and the player is released, and the position,
+  // the speed and the session's ambient choice go. Then the devotionals downloaded to this phone, and any download still
+  // running (step 26): a prayer's audio must not outlive the session either.
   usePlayerStore.getState().stop();
-  // TODO(26): clear the lock screen and release the player
+  await deleteAllDevotionalAudio();
   // TODO(27): stop the ambient preview
   // TODO(28): cancel the scheduled affirmation notifications
   // TODO(30): Purchases.logOut()

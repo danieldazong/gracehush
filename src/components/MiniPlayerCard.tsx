@@ -1,5 +1,5 @@
 import type { SymbolViewProps } from "expo-symbols";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Icon } from "@/components/Icon";
 import { copy } from "@/constants/copy";
@@ -35,6 +35,9 @@ function AudioCard({ track, ambientDefault, onOpen }: AudioCardProps) {
   const isCurrent = playback.entryId === track.entryId;
   const positionMs = isCurrent ? playback.positionMs : 0;
   const isPlaying = isCurrent && playback.status === "playing";
+  // "Playing" while the sound has not started yet: the audio is being downloaded or opened. The button stays a pause button.
+  const isBuffering = isPlaying && playback.isBuffering;
+  const errorLine = isCurrent && playback.error !== null ? player.errors[playback.error] : null;
   const percent = Math.min(100, (positionMs / durationMs) * 100);
   const minutes = Math.max(1, Math.round(durationMs / 60000));
 
@@ -64,15 +67,20 @@ function AudioCard({ track, ambientDefault, onOpen }: AudioCardProps) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? player.pause : player.play(title)}
+            accessibilityState={isBuffering ? { busy: true } : undefined}
             onPress={toggle}
             style={({ pressed }) => pressed && styles.pressed}
           >
             <View className="size-12 items-center justify-center rounded-full bg-rose">
-              <Icon
-                name={isPlaying ? icons.pause : icons.play}
-                size={28}
-                color={colors.plumDeep}
-              />
+              {isBuffering ? (
+                <ActivityIndicator size="small" color={colors.plumDeep} />
+              ) : (
+                <Icon
+                  name={isPlaying ? icons.pause : icons.play}
+                  size={28}
+                  color={colors.plumDeep}
+                />
+              )}
             </View>
           </Pressable>
           <View className="flex-1 flex-row items-center gap-3">
@@ -80,7 +88,12 @@ function AudioCard({ track, ambientDefault, onOpen }: AudioCardProps) {
               <Text className="text-section text-white" numberOfLines={2}>
                 {title}
               </Text>
-              <Text className="text-body-sm text-white/70">{player.subtitle(minutes)}</Text>
+              <Text
+                accessibilityLiveRegion={errorLine === null ? undefined : "polite"}
+                className={errorLine === null ? "text-body-sm text-white/70" : "text-body-sm text-white"}
+              >
+                {errorLine ?? player.subtitle(minutes)}
+              </Text>
             </View>
             <Icon name={icons.expand} size={22} color={colors.rose} />
           </View>
@@ -152,8 +165,7 @@ type MiniPlayerCardProps = {
   onOpen: () => void;
 };
 
-// Reads the shared player store (usePlayback), so this card and Now Playing always agree. Playback is
-// mocked until step 26.
+// Reads the shared player store (usePlayback), so this card and Now Playing always agree.
 export function MiniPlayerCard({ devotional, track, ambientDefault, onOpen }: MiniPlayerCardProps) {
   if (track === null) {
     return <NoAudioCard title={devotional.title} />;

@@ -46,6 +46,8 @@ function world() {
   const storage = W.makeStorage();
   const { react, renderHook } = W.makeReact();
   const session = { client: storage.client, userId: "user_a" };
+  // Step 26: starting a take pauses a devotional that is playing. The store itself is checked in playback/run.cjs.
+  const player = { pauses: 0 };
   const fakes = {
     "expo-audio": audio.module,
     "expo-audio/build/utils/options": audio.options,
@@ -56,10 +58,22 @@ function world() {
     expo: { PermissionStatus: { GRANTED: "granted", DENIED: "denied", UNDETERMINED: "undetermined" } },
     "@supabase/supabase-js": { StorageApiError },
     "@/services/supabaseClient": { getSupabase: () => session.client, getSupabaseUserId: () => session.userId },
+    "@/store/playerStore": { usePlayerStore: { getState: () => ({ pause: () => void (player.pauses += 1) }) } },
   };
   const env = W.makeEnv({ fakes });
-  return { env, fs, audio, keep, appState, storage, renderHook, session };
+  return { env, fs, audio, keep, appState, storage, renderHook, session, player };
 }
+// The two audio session modes of step 26 (services/audioSession.ts): every call carries all six fields, because on iOS a
+// missing field is not "unchanged" but the native default.
+const PLAYBACK_MODE = {
+  playsInSilentMode: true,
+  interruptionMode: "doNotMix",
+  allowsRecording: false,
+  shouldPlayInBackground: true,
+  shouldRouteThroughEarpiece: false,
+  allowsBackgroundRecording: false,
+};
+const RECORDING_MODE = { ...PLAYBACK_MODE, allowsRecording: true, shouldPlayInBackground: false };
 const ID = "11111111-2222-4333-8444-555555555555";
 const FINAL = `file:///docs/recordings/${ID}.m4a`;
 
@@ -210,7 +224,8 @@ const FINAL = `file:///docs/recordings/${ID}.m4a`;
       assert.equal(rec.options.bitRate, 64000);
       assert.equal(rec.options.sampleRate, 44100);
       assert.equal(rec.recording, true);
-      assert.deepEqual(w.audio.log.modes[0], { allowsRecording: true, playsInSilentMode: true });
+      assert.deepEqual(w.audio.log.modes[0], RECORDING_MODE);
+      assert.equal(w.player.pauses, 1, "a devotional that is playing stops before the microphone is taken");
       assert.deepEqual(w.keep.calls, [["on", TAG]]);
       await svc(w).cancelRecording();
     });
@@ -280,7 +295,7 @@ const FINAL = `file:///docs/recordings/${ID}.m4a`;
       await svc(w).resumeRecording();
       assert.equal(rec.recording, true);
       assert.equal(rec.records, 2);
-      assert.deepEqual(w.audio.log.modes.at(-1), { allowsRecording: true, playsInSilentMode: true });
+      assert.deepEqual(w.audio.log.modes.at(-1), RECORDING_MODE);
       assert.deepEqual(w.keep.calls.at(-1), ["on", TAG]);
       await W.advance(500);
       assert.equal(seen.last().durationMs, 1500);
@@ -329,7 +344,7 @@ const FINAL = `file:///docs/recordings/${ID}.m4a`;
       const raw = await svc(w).stopRecording();
       assert.deepEqual(raw, { uri: W.IN_PROGRESS_URI, durationMs: 2500, mimeType: "audio/mp4" });
       assert.equal(rec.released, true);
-      assert.deepEqual(w.audio.log.modes.at(-1), { allowsRecording: false });
+      assert.deepEqual(w.audio.log.modes.at(-1), PLAYBACK_MODE);
       assert.deepEqual(w.keep.calls.at(-1), ["off", TAG]);
       const count = seen.list.length;
       await W.advance(1000);
@@ -344,7 +359,7 @@ const FINAL = `file:///docs/recordings/${ID}.m4a`;
         w.audio.flags[flag] = true;
         await assert.rejects(svc(w).stopRecording());
         assert.equal(w.audio.log.instances[0].released, true, flag);
-        assert.deepEqual(w.audio.log.modes.at(-1), { allowsRecording: false }, flag);
+        assert.deepEqual(w.audio.log.modes.at(-1), PLAYBACK_MODE, flag);
         assert.equal(W.clock.timers.size, 0, flag);
       }
     });
@@ -376,7 +391,7 @@ const FINAL = `file:///docs/recordings/${ID}.m4a`;
         w.audio.flags[flag] = true;
         await assert.rejects(svc(w).startRecording(() => undefined));
         assert.equal(w.audio.log.instances[0].released, true, flag);
-        assert.deepEqual(w.audio.log.modes.at(-1), { allowsRecording: false }, flag);
+        assert.deepEqual(w.audio.log.modes.at(-1), PLAYBACK_MODE, flag);
         assert.ok(!w.keep.calls.some((c) => c[0] === "on"), flag);
         assert.equal(W.clock.timers.size, 0, flag);
         w.audio.flags[flag] = false;

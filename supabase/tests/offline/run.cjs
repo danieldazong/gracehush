@@ -784,6 +784,8 @@ async function accountChecks() {
       "@/services/supabaseClient": { __esModule: true, getSupabaseUserId: () => "user_a" },
       "@/store/onboardingStore": { __esModule: true, useOnboardingStore: { getState: () => ({ discardUnsyncedReminders: () => order.push("reminders") }) } },
       "@/store/playerStore": { __esModule: true, usePlayerStore: { getState: () => ({ stop: () => order.push("player") }) } },
+      // Step 26: the devotionals downloaded to the phone go too (expo-file-system cannot load in plain Node).
+      "@/services/devotionalAudio": { __esModule: true, deleteAllDevotionalAudio: async () => void order.push("devotional audio") },
       "@/store/profilePrefsStore": { __esModule: true, useProfilePrefsStore: { getState: () => ({ forgetUser: () => undefined }) } },
     };
     const mod = makeWorld2(w, extra);
@@ -811,6 +813,7 @@ async function accountChecks() {
     assert.equal(w.secure.items.size, 0);
     assert.equal(w.recordings.files.size, 0);
     assert.ok(order.includes("player") && order.includes("reminders") && order.includes("cancel profile sync"));
+    assert.ok(order.indexOf("player") < order.indexOf("devotional audio"), `the player stops before its files go: ${order.join(" > ")}`);
     await mod.use("@/services/account").signOutCleanup();
   });
 }

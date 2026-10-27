@@ -35,6 +35,7 @@ import {
   filterEntries,
   getAffirmationForSlot,
   getGreeting,
+  getPlaybackTrack,
   getUnsentCount,
   type JournalFilter,
 } from "@/data/selectors";
@@ -42,6 +43,7 @@ import { useJournalHome } from "@/hooks/useJournalHome";
 import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
 import { discardItem } from "@/services/syncEngine";
+import { usePlayerStore } from "@/store/playerStore";
 import type { HomeEntry } from "@/types";
 import {
   formatLongDate,
@@ -363,6 +365,16 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
               now={ready.now}
               online={ready.isOffline ? false : ready.isOnline}
               onOpen={(entryId) => navigation.navigate("Reflection", { entryId })}
+              onPlay={(entry) => {
+                const track = getPlaybackTrack(entry);
+                if (track === null) return;
+                // What the mini player's play button does, then the reflection opens with its player showing. The player
+                // is read without subscribing: this screen must not redraw on every tick of the clock.
+                const player = usePlayerStore.getState();
+                player.load(track, ready.profile);
+                player.play();
+                navigation.navigate("Reflection", { entryId: entry.id });
+              }}
               onReview={setReviewing}
               onUnlock={(entry) =>
                 navigation.navigate("Paywall", {

@@ -167,6 +167,7 @@ export function getPlaybackTrack(entry: JournalEntry): PlaybackTrack | null {
     title: devotional.title,
     subtitle: copy.nowPlaying.subtitle(entry.scripture?.reference ?? null),
     durationMs,
+    audioPath,
   };
 }
 

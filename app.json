@@ -46,7 +46,7 @@
           "microphonePermission": "Gracehush uses the microphone so you can pray out loud. Your recording is used only to create your reflection.",
           "recordAudioAndroid": true,
           "enableBackgroundRecording": false,
-          "enableBackgroundPlayback": false
+          "enableBackgroundPlayback": true
         }
       ],
       ["expo-notifications", { "color": "#5B3A5E" }]

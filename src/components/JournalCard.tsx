@@ -113,10 +113,17 @@ function Excerpt({ entry }: { entry: HomeEntry }) {
 }
 
 // durationMs is nullable (audio can exist without a measured length), so then it shows the icon alone.
-// A plain View while the whole card opens Reflection.
-// TODO(26): play in place (its own Pressable, with hitSlop so the touch area is 44)
-function DurationPill({ durationMs }: { durationMs: number | null | undefined }) {
-  return (
+// With onPlay it is a button of its own: it opens the reflection and starts the devotional (the rest of the card only
+// opens it). For a screen reader the card stays the one element and "Play devotional" is an action on it (see
+// JournalCard), so the pill is not a second stop.
+function DurationPill({
+  durationMs,
+  onPlay,
+}: {
+  durationMs: number | null | undefined;
+  onPlay?: () => void;
+}) {
+  const pill = (
     <View className="min-h-[26px] flex-row items-center gap-1.5 rounded-full bg-plum-deep px-3 py-1">
       <Icon name={icons.play} size={14} color="white" />
       {durationMs ? (
@@ -128,6 +135,18 @@ function DurationPill({ durationMs }: { durationMs: number | null | undefined })
         </Text>
       ) : null}
     </View>
+  );
+  if (onPlay === undefined) return pill;
+  return (
+    <Pressable
+      accessible={false}
+      // The pill is 26 tall, so 9 above and below makes a 44 touch area.
+      hitSlop={{ top: 9, bottom: 9, left: 8, right: 8 }}
+      onPress={onPlay}
+      style={({ pressed }) => pressed && styles.pressedSoft}
+    >
+      {pill}
+    </Pressable>
   );
 }
 
@@ -224,6 +243,7 @@ function CardFooter({
   online,
   onReview,
   onUnlock,
+  onPlay,
 }: {
   entry: HomeEntry;
   kind: CardKind;
@@ -231,6 +251,7 @@ function CardFooter({
   online: boolean | null;
   onReview?: (entry: HomeEntry) => void;
   onUnlock?: (entry: HomeEntry) => void;
+  onPlay?: (entry: HomeEntry) => void;
 }) {
   const { card } = copy.journal;
   if (pendingLine !== null) {
@@ -258,7 +279,10 @@ function CardFooter({
             </Text>
           ) : null}
           {kind === "ready" ? (
-            <DurationPill durationMs={entry.devotional?.durationMs} />
+            <DurationPill
+              durationMs={entry.devotional?.durationMs}
+              onPlay={onPlay === undefined ? undefined : () => onPlay(entry)}
+            />
           ) : (
             <View className="chip">
               <Text className="chip__label">{card.textOnly}</Text>
@@ -328,9 +352,19 @@ type JournalCardProps = {
   onReview?: (entry: HomeEntry) => void;
   // A reflection the free limit is holding back: "See plans" opens the Paywall.
   onUnlock?: (entry: HomeEntry) => void;
+  // The play pill of a finished devotional (step 26): open the reflection and start playing.
+  onPlay?: (entry: HomeEntry) => void;
 };
 
-export function JournalCard({ entry, now, online, onOpen, onReview, onUnlock }: JournalCardProps) {
+export function JournalCard({
+  entry,
+  now,
+  online,
+  onOpen,
+  onReview,
+  onUnlock,
+  onPlay,
+}: JournalCardProps) {
   const kind = getKind(entry);
   const timestamp = formatEntryTimestamp(entry.createdAt, now);
   const pendingLine = getPendingLine(entry, online);
@@ -339,6 +373,8 @@ export function JournalCard({ entry, now, online, onOpen, onReview, onUnlock }: 
   // A card with a button of its own is not one grouped element: a button inside it must be reachable on its own.
   const hasButton =
     entry.pending?.status === "needs_action" || entry.pending?.status === "limit_reached";
+  // Only a devotional that has audio can be played from its card.
+  const play = kind === "ready" ? onPlay : undefined;
 
   const card = (
     <View className="card gap-2.5" style={shadows.card}>
@@ -358,6 +394,7 @@ export function JournalCard({ entry, now, online, onOpen, onReview, onUnlock }: 
         online={online}
         onReview={onReview}
         onUnlock={onUnlock}
+        onPlay={play}
       />
     </View>
   );
@@ -375,6 +412,14 @@ export function JournalCard({ entry, now, online, onOpen, onReview, onUnlock }: 
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityActions={play ? [{ name: "play", label: copy.journal.card.playAction }] : undefined}
+      onAccessibilityAction={
+        play
+          ? (event) => {
+              if (event.nativeEvent.actionName === "play") play(entry);
+            }
+          : undefined
+      }
       onPress={() => onOpen(entry.id)}
       style={({ pressed }) => pressed && styles.pressed}
     >
