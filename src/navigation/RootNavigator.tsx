@@ -4,6 +4,7 @@ import {
   type NativeStackNavigationOptions,
 } from "@react-navigation/native-stack";
 import { useEffect } from "react";
+import { Platform } from "react-native";
 
 import { colors } from "@/constants/theme";
 import { SignInScreen } from "@/screens/auth/SignInScreen";
@@ -23,6 +24,14 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const screenOptions: NativeStackNavigationOptions = {
   headerShown: false,
   contentStyle: { backgroundColor: colors.linen },
+};
+
+// Now Playing is a full-screen page on iOS, not a sheet: a sheet's swipe-down gesture takes a sideways drag of the
+// scrubber from the finger as soon as it drifts downward (seen on the iPhone in the step 26 walk-through), and nothing in
+// the app can stop that gesture. Close closes it. Android has no such gesture, so it stays a modal there.
+const nowPlayingOptions: NativeStackNavigationOptions = {
+  presentation: Platform.OS === "ios" ? "fullScreenModal" : "modal",
+  animation: "slide_from_bottom",
 };
 
 export function RootNavigator() {
@@ -65,7 +74,7 @@ export function RootNavigator() {
           <Stack.Screen
             name="NowPlaying"
             component={NowPlayingScreen}
-            options={{ presentation: "modal", animation: "slide_from_bottom" }}
+            options={nowPlayingOptions}
           />
           <Stack.Screen
             name="CrisisResources"

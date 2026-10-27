@@ -76,16 +76,6 @@ function CloseRow({ onClose }: { onClose: () => void }) {
           <Text className="text-label-md text-mauve">{nowPlaying.close}</Text>
         </View>
       </Pressable>
-      {/* Only iOS swipes a modal down, so only iOS gets a handle. It is centered on the row, not between the button and a spacer. */}
-      {Platform.OS === "ios" ? (
-        <View
-          pointerEvents="none"
-          accessibilityElementsHidden
-          className="absolute inset-0 items-center justify-center"
-        >
-          <View className="h-1 w-10 rounded-full bg-petal" />
-        </View>
-      ) : null}
     </View>
   );
 }
