@@ -51,15 +51,22 @@ The flows to run, the cases to try, and the checks to pass, ending with an end-t
 
 ## Phone walk-through
 
-Write one for every step that changes what the person sees or does on the phone, or what the app stores. It is a guided, human-in-the-loop test on the user's iPhone: the user does the physical actions and the dashboard actions, and the agent verifies every result itself by reading the running app (through the dev server's inspector, read-only) and the database, then reports PASS or FAIL with evidence. The protocol, and the rule that the implementing agent asks the user whether to start it when the step is done, are under "Guided phone walk-through" in AGENTS.md: do not restate them in the prompt, write only the checks.
+Write one for every step that changes what the person sees or does on the phone, or what the app stores, and list only checks in it. It is a guided, human-in-the-loop test on the user's iPhone: the user does the physical actions and the dashboard actions, and the agent checks every result itself by reading the running app (through the dev server's inspector, read-only) and the database, then reports PASS or FAIL with evidence. The protocol, its project setup, and the rule that the implementing agent asks the user whether to start it when the step is done are under "Guided phone walk-through" in AGENTS.md: do not restate them in the prompt.
 
-Number the checks B0, B1, and so on. B0 is always the start: sign in, the data source and the keys. Each check has three lines:
+Say once, before B0:
 
-- **Do** (the user): ONE action, with exact values: a tap, a spoken sentence, Airplane mode on, or a SQL statement or Table Editor change (write the statement, or the table, row, column and value).
-- **Expect**: what must be true afterwards, as something that can be read: a store value, a count, a status, a column of a row, the text of a card. Mark what can only be seen or heard (the sound, the lock screen, haptics, how a screen looks): for those the agent asks for a screenshot or a one-word answer.
-- **Read** (the agent): how it verifies: which store value or repository function the inspector probe calls, which row or count the database check reads, or "ask the user".
+- whether anything needs a restart or a fresh install (`npx expo start -c` and a force-quit of Expo Go when the step adds files or assets, or changes `app.json`, `metro.config.js`, `global.css` or `package.json`)
+- which account, plan and test data the walk-through needs (for example a reflection with real audio, or a free account that has used its weekly devotionals)
+- what it costs (Gemini and Text-to-Speech calls, emails sent, real charges), or that it costs nothing new
+- that the app stays open and in front for the whole run (iOS pauses the app's JavaScript when Expo Go is minimized or the phone is locked, and the agent can read nothing then)
 
-Say once, before B0: whether the dev server needs a restart (`npx expo start -c`), which account and plan the walk-through needs, what it costs, and that the app stays open on screen for the whole walk-through (iOS pauses the app's JavaScript when Expo Go is minimized or the phone is locked, and the agent can read nothing then). A check that nothing can read stays "not verified" in the report unless the user answered it.
+Number the checks B0, B1, and so on. B0 is always the starting state: signed in as the right account, the right data source, and the keys present. Each check has three lines:
+
+- **Do** (the user): ONE action, with exact values: what to tap, what to type or say, which setting to change (Airplane mode on), or the exact SQL statement, or the table, row, column and value to change in the Table Editor.
+- **Expect**: what must be true afterwards, as something that can be read: a store value, a count, a status, a column of a row, the text on screen, a log line, an HTTP status. Mark anything that can only be seen or heard (the sound, an animation, how a screen looks, haptics, what the lock screen or a notification shows, an OS dialog): for those the agent asks for a screenshot or a one-word answer.
+- **Read** (the agent): exactly how it checks: which store value or repository function the inspector probe calls, which query or request it runs (or the SQL the user runs and sends back), or "ask the user".
+
+A check that nothing can read and the user did not answer is "not verified" in the report, never PASS. Do not write a check for something that cannot work on this target (Siri on the user's iPhone, lock-screen or background audio in Expo Go, anything that needs the iOS development build of step 35): list it under "not verified", with where it can be tested.
 
 ## AGENTS.md updates
 
