@@ -10,6 +10,7 @@ What the app needs from this: two pages at real addresses (`PRIVACY_POLICY_URL`,
 - Audience: practicing Christian adults, 25 to 45. **TODO:** the minimum age (13, 16 or 18?) and the store age ratings.
 - Free plan: 3 audio devotionals a week (resets Monday). Gracehush Pro: unlimited audio devotionals, and nothing else is advertised as Pro.
 - Not a medical, therapy, pastoral or crisis service. An entry that shows risk of self-harm, abuse or immediate danger gets a support screen (988 Suicide & Crisis Lifeline, Crisis Text Line, 911, a worldwide directory) and no devotional.
+- The app bundles three ambient sound loops (soft rain, gentle piano, morning birds) under licenses that allow a sold app and need no credit (CC0, the Pixabay Content License or the owner's own recording); each source, author and license is in `assets/audio/ambient/LICENSES.md`. They play on the phone and are never sent anywhere.
 
 ## 2. What the app handles, and where it goes
 
