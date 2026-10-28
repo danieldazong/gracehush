@@ -1437,14 +1437,14 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       assert.deepEqual(mentioning(/setAudioModeAsync\(/), ["src/services/audioSession.ts"]);
     });
 
-    await test("contract: only the player store makes a player, and no screen or component imports expo-audio", () => {
-      assert.deepEqual(mentioning(/createAudioPlayer\(/), ["src/store/playerStore.ts"]);
+    await test("contract: only the player store and the ambient player make a player, and no screen or component imports expo-audio", () => {
+      assert.deepEqual(mentioning(/createAudioPlayer\(/), ["src/services/ambientPlayer.ts", "src/store/playerStore.ts"]);
       const importers = mentioning(/from "expo-audio/);
       for (const file of importers) assert.ok(!file.startsWith("src/screens/") && !file.startsWith("src/components/"), `${file} imports expo-audio`);
     });
 
     await test("contract: the player files never log a link, a path, a title or an id", () => {
-      for (const file of ["src/store/playerStore.ts", "src/services/devotionalAudio.ts", "src/services/lockScreen.ts", "src/services/audioSession.ts"]) {
+      for (const file of ["src/store/playerStore.ts", "src/services/devotionalAudio.ts", "src/services/lockScreen.ts", "src/services/audioSession.ts", "src/services/ambientPlayer.ts"]) {
         const text = fs.readFileSync(path.join(REPO, file), "utf8");
         const logs = text.match(/console\.[a-z]+\([^;]*;/g) ?? [];
         for (const call of logs) assert.ok(!/(url|uri|path|title|entryId|subtitle|link)/i.test(call.replace(/the \$\{mode\} session mode/, "")), `${file}: ${call}`);

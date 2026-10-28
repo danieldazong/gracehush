@@ -46,8 +46,9 @@ function world() {
   const storage = W.makeStorage();
   const { react, renderHook } = W.makeReact();
   const session = { client: storage.client, userId: "user_a" };
-  // Step 26: starting a take pauses a devotional that is playing. The store itself is checked in playback/run.cjs.
-  const player = { pauses: 0 };
+  // Step 26: starting a take pauses a devotional that is playing, and step 27 stops the ambient bed at once. The store and
+  // the bed themselves are checked in playback/run.cjs and ambient/run.cjs.
+  const player = { pauses: 0, ambientStops: 0 };
   const fakes = {
     "expo-audio": audio.module,
     "expo-audio/build/utils/options": audio.options,
@@ -59,6 +60,7 @@ function world() {
     "@supabase/supabase-js": { StorageApiError },
     "@/services/supabaseClient": { getSupabase: () => session.client, getSupabaseUserId: () => session.userId },
     "@/store/playerStore": { usePlayerStore: { getState: () => ({ pause: () => void (player.pauses += 1) }) } },
+    "@/services/ambientPlayer": { stopAmbient: () => void (player.ambientStops += 1) },
   };
   const env = W.makeEnv({ fakes });
   return { env, fs, audio, keep, appState, storage, renderHook, session, player };
@@ -226,6 +228,7 @@ const FINAL = `file:///docs/recordings/${ID}.m4a`;
       assert.equal(rec.recording, true);
       assert.deepEqual(w.audio.log.modes[0], RECORDING_MODE);
       assert.equal(w.player.pauses, 1, "a devotional that is playing stops before the microphone is taken");
+      assert.equal(w.player.ambientStops, 1, "and the ambient bed stops at once, with no fade");
       assert.deepEqual(w.keep.calls, [["on", TAG]]);
       await svc(w).cancelRecording();
     });

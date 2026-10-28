@@ -1,7 +1,9 @@
 // Fakes for the step 26 checks: expo-audio's AudioPlayer shaped like 58.0.x on iOS and on Android (the two platforms say
 // "waiting for data" differently), expo-file-system's download, Storage's createSignedUrl, expo-asset and the lock screen.
 // The app's real player store, audio session, devotional files and lock screen run on top of them, on the recording checks'
-// virtual clock, so a download, a buffering pause or the end of a devotional takes no real time.
+// virtual clock, so a download, a buffering pause or the end of a devotional takes no real time. Step 27's checks
+// (ambient/run.cjs) use the same world: a player made from a require() number is an ambient loop, with `loop`, `volume`
+// and `replace`, and AppState keeps the state it last sent.
 const path = require("node:path");
 
 // The loader reads GRACEHUSH_REPO when it is first required: default to this repo, or run against a copy of it.
@@ -142,10 +144,15 @@ function makePlayers(flags) {
       this.id = `player-${players.length + 1}`;
       this.source = source;
       this.options = options;
+      // A bundled sound (step 27's ambient loops) is a number from require(); a devotional is a { uri } on the phone.
+      this.isBundled = typeof source === "number";
       this.released = false;
       this.suspended = false; // JS asleep: events are sent and lost
       this.listeners = [];
-      this.duration = flags.durationMs / 1000;
+      this.duration = (this.isBundled ? flags.ambientDurationMs : flags.durationMs) / 1000;
+      this.loop = false;
+      this._volume = 1;
+      this.volumes = []; // every volume the app set, with the virtual time: [ms, value]
       this.pos = 0; // seconds at `rebased`
       this.rebased = clock.now;
       this.rate = 1;
@@ -161,26 +168,41 @@ function makePlayers(flags) {
       this.bufferedOnce = false;
       this.timer = null;
       this.willFail = false;
-      this.calls = { play: 0, pause: 0, seekTo: [], setRate: [], setActive: [], updateMeta: [], clear: 0, release: 0 };
+      this.calls = { play: 0, pause: 0, seekTo: [], setRate: [], setActive: [], updateMeta: [], clear: 0, release: 0, replace: [] };
       players.push(this);
       created.push({ source, options });
-      if (flags.failNextLoads > 0) {
-        flags.failNextLoads -= 1;
+      if (this.isBundled ? flags.ambientFailNextLoads > 0 : flags.failNextLoads > 0) {
+        if (this.isBundled) flags.ambientFailNextLoads -= 1;
+        else flags.failNextLoads -= 1;
         this.willFail = true;
       }
-      if (flags.preloaded) this.loaded = true;
-      else if (!flags.loadNever) {
-        setTimeout(() => {
-          if (this.released) return;
-          if (this.willFail) {
-            this.failed = true;
-            this._emit({ error: "The operation could not be completed" });
-          } else {
-            this.loaded = true;
-            this._emit();
-          }
-        }, flags.loadMs);
-      }
+      if (flags.preloaded && !this.isBundled) this.loaded = true;
+      else if (!flags.loadNever) this._load();
+    }
+
+    _load() {
+      const generation = (this.loadGeneration = (this.loadGeneration ?? 0) + 1);
+      setTimeout(() => {
+        if (this.released || generation !== this.loadGeneration) return;
+        if (this.willFail) {
+          this.failed = true;
+          this._emit({ error: "The operation could not be completed" });
+        } else {
+          this.loaded = true;
+          this._update();
+          this._emit();
+        }
+      }, this.isBundled ? flags.ambientLoadMs : flags.loadMs);
+    }
+
+    get volume() {
+      this._alive();
+      return this._volume;
+    }
+    set volume(value) {
+      this._alive();
+      this._volume = value;
+      this.volumes.push([clock.now, value]);
     }
 
     _alive() {
@@ -221,7 +243,7 @@ function makePlayers(flags) {
         id: this.id,
         currentTime: time,
         mute: false,
-        loop: false,
+        loop: this.loop,
         didJustFinish: false,
         playbackRate: this.rate,
         shouldCorrectPitch: true,
@@ -252,7 +274,8 @@ function makePlayers(flags) {
         duration: this.loaded ? this.duration : 0,
         playing,
         isBuffering,
-        isLoaded: this.loaded || this.ended,
+        // AudioPlayer.kt: loaded only when ExoPlayer is READY (or ENDED), so not while it buffers.
+        isLoaded: state === "ready" || this.ended,
       };
     }
 
@@ -281,7 +304,7 @@ function makePlayers(flags) {
         return;
       }
       if (this.sound || !this.loaded || this.buffering) return;
-      if (flags.bufferMs > 0 && !this.bufferedOnce) {
+      if (flags.bufferMs > 0 && !this.bufferedOnce && !this.isBundled) {
         this.buffering = true;
         this.bufferedOnce = true;
         setTimeout(() => {
@@ -309,8 +332,17 @@ function makePlayers(flags) {
       this._emit();
     }
     _tick() {
-      if (this._now() >= this.duration) this._end();
-      else this._emit();
+      if (this._now() >= this.duration) {
+        // A looping player starts again at once, with no report of an end (expo-audio sends none while looping).
+        if (this.loop) {
+          this.pos = this._now() % this.duration;
+          this.rebased = clock.now;
+          this.loops = (this.loops ?? 0) + 1;
+          this._emit();
+          return;
+        }
+        this._end();
+      } else this._emit();
     }
     _end() {
       this.pos = this.duration;
@@ -375,6 +407,27 @@ function makePlayers(flags) {
       this.calls.setRate.push([rate, quality]);
       this._rebase();
       this.rate = rate;
+    }
+    // Another file in the same player: it loads again, from its start, and plays when loaded if it was playing (iOS
+    // replaceCurrentSource, Android setMediaSource; the loop setting is the player's and stays).
+    replace(source) {
+      this._alive();
+      this.calls.replace.push(source);
+      this.source = source;
+      if (this.sound) {
+        this._rebase();
+        this.sound = false;
+        clearInterval(this.timer);
+        this.timer = null;
+      }
+      this.pos = 0;
+      this.rebased = clock.now;
+      this.loaded = false;
+      this.ended = false;
+      this.failed = false;
+      this.willFail = this.isBundled && flags.ambientFailNextLoads > 0;
+      if (this.willFail) flags.ambientFailNextLoads -= 1;
+      this._load();
     }
     setActiveForLockScreen(active, metadata, options) {
       this._alive();
@@ -473,8 +526,15 @@ function newFlags(platform) {
     emptyBufferWhenPaused: false,
     artworkFails: false,
     artworkMs: 0,
+    // Step 27's ambient loops.
+    ambientDurationMs: 75_000,
+    ambientLoadMs: 30,
+    ambientFailNextLoads: 0,
   };
 }
+
+// The ambient loops of step 27: what src/constants/sounds.ts gives each sound (require() numbers in the app).
+const SOUNDS = { "soft-rain": 101, "gentle-piano": 102, "morning-birds": 103 };
 
 // ------------------------------------------------------------------ the whole world
 function world({ platform = "ios", extraFakes = {} } = {}) {
@@ -484,6 +544,12 @@ function world({ platform = "ios", extraFakes = {} } = {}) {
   const recorderAudio = makeAudio(fs);
   const keep = makeKeepAwake();
   const appState = makeAppState();
+  // React Native sets AppState.currentState before it calls the listeners.
+  const emitAppState = appState.emit;
+  appState.emit = (status) => {
+    appState.module.AppState.currentState = status;
+    emitAppState(status);
+  };
   const supa = makeSupabase();
   const asset = makeAsset(flags);
   const { FakePlayer, players, created } = makePlayers(flags);
@@ -511,6 +577,7 @@ function world({ platform = "ios", extraFakes = {} } = {}) {
     "@supabase/supabase-js": { StorageApiError: storageJs.StorageApiError },
     "@/services/supabaseClient": { getSupabase: () => session.client, getSupabaseUserId: () => session.userId },
     "@/constants/images": { images: { playerArtwork: 7 } },
+    "@/constants/sounds": { sounds: SOUNDS },
     expo: { PermissionStatus: { GRANTED: "granted", DENIED: "denied", UNDETERMINED: "undetermined" } },
     ...extraFakes,
   };
@@ -531,9 +598,13 @@ function world({ platform = "ios", extraFakes = {} } = {}) {
     created,
     session,
     store: () => env.use("@/store/playerStore").usePlayerStore,
+    ambientService: () => env.use("@/services/ambientPlayer"),
     modes: () => recorderAudio.log.modes,
-    // The newest player that has not been released, or null.
-    live: () => players.filter((player) => !player.released).at(-1) ?? null,
+    // The newest devotional player that has not been released, or null.
+    live: () => players.filter((player) => !player.released && !player.isBundled).at(-1) ?? null,
+    // The newest ambient player (step 27) that has not been released, or null; and every one ever made.
+    ambient: () => players.filter((player) => !player.released && player.isBundled).at(-1) ?? null,
+    ambients: () => players.filter((player) => player.isBundled),
   };
 }
 
@@ -550,6 +621,7 @@ function track(n = 1, extra = {}) {
 }
 
 module.exports = {
+  SOUNDS,
   makeEnv,
   storageJs,
   clock,
