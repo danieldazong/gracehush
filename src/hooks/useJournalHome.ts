@@ -159,10 +159,10 @@ export function useJournalHome(): HomeState {
         const page = await loadEntriesPage(null);
         if (request !== latestRequest.current) return;
         if (!page.ok) throw new Error(page.code);
-        // The newest reflection may be new to this phone (made on another phone, or a crisis entry): the affirmation
-        // notifications are planned again from what the phone now holds (step 28).
-        requestAffirmationReschedule();
         const affirmations = await getLatestAffirmations();
+        // The newest reflection may be new to this phone (made on another phone, or a crisis entry): the affirmation
+        // notifications are planned again from what the phone now holds (step 28), once its affirmations are here too.
+        requestAffirmationReschedule();
         if (request !== latestRequest.current) return;
         const paged = pagesLoaded.current > 0;
         setResult((previous) => {

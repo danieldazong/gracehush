@@ -1323,6 +1323,25 @@ async function journalChecks() {
     handle.unmount();
   });
 
+  // Step 28, found on the iPhone: after a sign-in the cache is empty, and a plan made before the newest reflection's
+  // affirmations are on the phone finds no headlines and schedules nothing (or cancels what was scheduled).
+  await test("journal: the notifications are planned again only once the newest reflection's affirmations are on this phone", async (w) => {
+    seedServer(w, 3);
+    const name = w.sqlite.files().find((file) => file.endsWith(".db"));
+    const raw = w.sqlite.raw(name);
+    const newest = serverRow(1).id;
+    const seen = [];
+    w.use("@/services/affirmationScheduler").requestAffirmationReschedule = () => {
+      seen.push(raw.prepare("SELECT COUNT(*) AS n FROM affirmations_cache WHERE entry_id = ?").get(newest).n);
+    };
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 3 && s.affirmations.length === 3, "the server's page");
+    raw.close();
+    assert.ok(seen.length > 0, "Journal asks for the notifications to be planned again after its first page");
+    assert.deepEqual(seen, seen.map(() => 3), "each time, the newest reflection's three affirmations are already on this phone");
+    handle.unmount();
+  });
+
   await test("journal: with no network the cached entries stay on screen; with nothing cached it is the error state, and Try again works", async (w) => {
     seedServer(w, 3);
     w.server.state.offline = true;
