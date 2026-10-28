@@ -17,6 +17,8 @@ export type SubscriptionTier = "free" | "trial" | "pro";
 export type ProcessingStatus = "pending" | "uploading" | "processing" | "ready" | "failed";
 export type EmotionKey = "anxious" | "weary" | "grateful" | "grieving" | "hopeful";
 export type AmbientSound = "off" | "soft-rain" | "gentle-piano" | "morning-birds";
+// A sound that has a file to loop (step 27): every choice but "off".
+export type AmbientLoop = Exclude<AmbientSound, "off">;
 export type PrayerCategory =
   | "FAMILY & HEALING"
   | "VOCATION & CALLING"

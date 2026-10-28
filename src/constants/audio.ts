@@ -71,3 +71,28 @@ export const DEVOTIONAL_LINK_SECONDS = 300;
 // wait for minutes (a session token that cannot be refreshed), and a play that waited that long would start by itself when
 // the connection came back.
 export const DEVOTIONAL_LINK_TIMEOUT_MS = 15_000;
+
+// ---- The ambient bed under a devotional (step 27)
+
+// The loudest the ambient sound gets, as a share of its file's level: 0.17 is about 15 dB down. The loops are made at the
+// spoken devotional's own loudness (-22 LUFS, measured on the real WAV files), so at 100% the voice is still clearly on top.
+// The volume is squared first (ambientGain in services/ambientPlayer.ts). It was 0.35 until the step 27 walk-through, where
+// the rain drowned the voice at 100% and the level the user chose (35%) is the middle of the slider at 0.17.
+export const MAX_AMBIENT_GAIN = 0.17;
+
+// The fades: in when the voice is heard, out when it pauses or ends, and a short dip when the sound is changed while it plays.
+export const AMBIENT_FADE_IN_MS = 600;
+export const AMBIENT_FADE_OUT_MS = 800;
+export const AMBIENT_SWITCH_MS = 250;
+// One step of a fade.
+export const AMBIENT_FADE_STEP_MS = 30;
+
+// How long Profile's preview plays, its fade in included, before it fades out by itself.
+export const AMBIENT_PREVIEW_MS = 8_000;
+
+// How often the ambient player reports. Nothing draws from it, so once a second is plenty.
+export const AMBIENT_UPDATE_MS = 1_000;
+
+// A start or a stop of the ambient player that comes this long after the app's own last call to it was made by something
+// else: the system around a call, or a headset or car button on Android (services/ambientPlayer.ts).
+export const AMBIENT_REMOTE_GRACE_MS = 1_500;

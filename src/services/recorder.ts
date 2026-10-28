@@ -15,6 +15,7 @@ import {
   RECORDING_MIME_TYPE,
   RECORDING_OPTIONS,
 } from "@/constants/audio";
+import { stopAmbient } from "@/services/ambientPlayer";
 import { setSessionMode } from "@/services/audioSession";
 import { usePlayerStore } from "@/store/playerStore";
 import type { PermissionResult, RecorderStatus, RecordingResult } from "@/types";
@@ -144,8 +145,10 @@ function read(current: Session, onStatus: (status: RecorderStatus) => void) {
 
 export async function startRecording(onStatus: (status: RecorderStatus) => void): Promise<void> {
   await endSession();
-  // A devotional that is playing stops: the take must not hear it, and the microphone takes the audio session.
+  // A devotional that is playing stops: the take must not hear it, and the microphone takes the audio session. The ambient
+  // bed stops at once as well, with no fade, which would still be playing from the speaker when the microphone opens.
   usePlayerStore.getState().pause();
+  stopAmbient();
   let recorder: AudioRecorder | null = null;
   try {
     await setSessionMode("recording");

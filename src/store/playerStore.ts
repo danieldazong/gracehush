@@ -3,6 +3,7 @@ import { AppState } from "react-native";
 import { create } from "zustand";
 
 import { KEEP_SESSION_ACTIVE, LOAD_TIMEOUT_MS, PLAYER_UPDATE_MS } from "@/constants/audio";
+import { setAmbientBed, setAmbientRemoteHandler, stopAmbient } from "@/services/ambientPlayer";
 import { setSessionMode } from "@/services/audioSession";
 import { forgetDevotionalFile, getDevotionalFile } from "@/services/devotionalAudio";
 import { activateLockScreen, clearLockScreen } from "@/services/lockScreen";
@@ -30,6 +31,7 @@ type PlayerState = {
   isBuffering: boolean;
   error: PlaybackError | null;
   rate: PlaybackRate;
+  // The session's ambient bed (step 27): services/ambientPlayer.ts plays it under the voice (see the end of this file).
   ambientSound: AmbientSound;
   ambientVolume: number; // 0–1
   // Synchronous, and the caller passes the profile: the store never fetches for a screen. The audio itself is fetched
@@ -43,7 +45,8 @@ type PlayerState = {
   setRate: (rate: PlaybackRate) => void;
   setAmbient: (sound: AmbientSound) => void;
   setAmbientVolume: (volume: number) => void;
-  // A full reset, for sign-out (step 15): the sound stops, the lock screen is cleared and the player is released.
+  // A full reset, for sign-out (step 15): the sound stops, the lock screen is cleared and the player is released, and so
+  // are the ambient bed and Profile's preview (step 27).
   stop: () => void;
   // Profile calls it after a successful ambient save (step 15): the next load of a different devotional copies
   // the profile's ambient choice again. It changes no state, so nothing that is playing changes.
@@ -437,10 +440,10 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     }
   },
 
-  // TODO(27): persist the ambient choice to users_profile
+  // The bed follows at once (the subscription at the end of this file). Now Playing also saves the choice as the default
+  // the next devotional starts with; Profile changes only that default (step 15).
   setAmbient: (sound) => set({ ambientSound: sound }),
 
-  // TODO(27): persist the ambient choice to users_profile
   setAmbientVolume: (volume) => set({ ambientVolume: clamp(volume, 0, 1) }),
 
   stop: () => {
@@ -450,6 +453,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     refetched = false;
     track = null;
     releasePlayer();
+    stopAmbient();
     ambientSeeded = false;
     set({
       entryId: null,
@@ -480,4 +484,23 @@ AppState.addEventListener("change", (state) => {
   } catch {
     // Released.
   }
+});
+
+// ---- the ambient bed (step 27). It is heard only with the voice: it comes in when the voice is heard (not while the file is
+// downloaded or opened), stays while the voice waits for data again, and goes when the devotional pauses, ends or another
+// one is loaded. Because it follows this store, the lock screen, a headset and a call move it too.
+let bedOn = false;
+usePlayerStore.subscribe((state) => {
+  if (state.status !== "playing") bedOn = false;
+  else if (!state.isBuffering) bedOn = true;
+  setAmbientBed({ sound: state.ambientSound, volume: state.ambientVolume, on: bedOn });
+});
+
+// A button that reached the ambient player instead of the devotional's (Android gives every player a media session) moves
+// the devotional the same way, so the two never go apart.
+// (play and pause do nothing when there is nothing to do.)
+setAmbientRemoteHandler((command) => {
+  const { play, pause } = usePlayerStore.getState();
+  if (command === "pause") pause();
+  else play();
 });

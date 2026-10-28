@@ -42,7 +42,8 @@ export async function deleteAccount(): Promise<RepoResult<null>> {
 
 // Everything that belongs to the signed-in user and must not outlive the session. It runs before Clerk's
 // signOut() for both sign out and account deletion, and never touches the onboarding store: that one is
-// device-level (AGENTS.md, Authentication Rules). Steps 17, 24, 26, 27, 28, 30, 33 and 34 each add their line.
+// device-level (AGENTS.md, Authentication Rules). Steps 17, 24, 26, 28, 30, 33 and 34 each add their line (step 27's is
+// inside the player store's stop()).
 export async function signOutCleanup(): Promise<void> {
   // TODO(33): stopRealtime() first, before the database and the token go
   // A reminder edit that has not reached the server belongs to the account that made it: it must never be sent to
@@ -60,11 +61,11 @@ export async function signOutCleanup(): Promise<void> {
   if (userId !== null) await deleteUserDatabase(userId);
   await deleteAllRecordings();
   // A full reset of the player: the sound stops, the lock screen is cleared and the player is released, and the position,
-  // the speed and the session's ambient choice go. Then the devotionals downloaded to this phone, and any download still
-  // running (step 26): a prayer's audio must not outlive the session either.
+  // the speed and the session's ambient choice go, with the ambient bed and Profile's preview (step 27). Then the
+  // devotionals downloaded to this phone, and any download still running (step 26): a prayer's audio must not outlive the
+  // session either.
   usePlayerStore.getState().stop();
   await deleteAllDevotionalAudio();
-  // TODO(27): stop the ambient preview
   // TODO(28): cancel the scheduled affirmation notifications
   // TODO(30): Purchases.logOut()
   // TODO(34): resetAnalytics()
