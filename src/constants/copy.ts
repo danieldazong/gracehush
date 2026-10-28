@@ -728,6 +728,12 @@ export const copy = {
       helper: "This is the sound your next devotional starts with.",
       showHint: "Shows the sounds",
       hideHint: "Hides the sounds",
+      // The preview (step 27): a few seconds of the chosen sound, while no devotional is playing.
+      preview: "Preview",
+      previewLabel: (label: string) => `Preview ${label}`,
+      stop: "Stop",
+      stopLabel: "Stop the preview",
+      previewBlocked: "Pause your devotional to preview.",
     },
     affirmations: {
       title: "Daily Affirmations",

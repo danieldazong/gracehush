@@ -3,7 +3,7 @@ import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
 import Constants from "expo-constants";
 import { Image } from "expo-image";
 import type { SymbolViewProps } from "expo-symbols";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   Linking,
   Platform,
@@ -39,6 +39,7 @@ import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
 import { countUnsentItems } from "@/data/journalRepository";
 import { deleteAccount, requestDataExport, signOutCleanup } from "@/services/account";
+import { isPreviewing, previewAmbient, stopPreview, subscribePreview } from "@/services/ambientPlayer";
 import {
   openLegalPage,
   openManageSubscription,
@@ -355,9 +356,20 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const [restoring, setRestoring] = useState(false);
   const restoreRunning = useRef(false);
   useAnnounce(dialogError);
+  // The ambient preview (step 27) plays only while no devotional is playing.
+  const previewing = useSyncExternalStore(subscribePreview, isPreviewing);
+  const devotionalPlaying = usePlayerStore((store) => store.status === "playing");
 
-  // Leaving the tab (or opening a screen over it) clears every notice.
-  useFocusEffect(useCallback(() => () => setNotices([]), []));
+  // Leaving the tab (or opening a screen over it) clears every notice and stops a preview.
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        setNotices([]);
+        stopPreview();
+      },
+      [],
+    ),
+  );
 
   const ready = state.status === "ready" ? state : null;
   const isPaid = ready !== null && ready.usage.tier !== "free";
@@ -402,7 +414,6 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
       hideNotice("saveAffirmations", "saveAmbient");
       // The saved choice is what the next devotional starts with. What is playing keeps its sound and volume.
       usePlayerStore.getState().reseedAmbient();
-      // TODO(27): a Preview button next to the chips
       // TODO(34): ambient_changed { sound, source: 'profile' }
     } else {
       showNotice("saveAmbient");
@@ -660,9 +671,25 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
                       <AmbientPanel
                         sound={ready.profile.ambientSound}
                         volume={ready.profile.ambientVolume}
-                        onChangeSound={(ambientSound) => changeAmbient({ ambientSound })}
-                        onChangeVolume={(ambientVolume) => changeAmbient({ ambientVolume })}
+                        // A preview that is playing follows a new choice at once (Off stops it).
+                        onChangeSound={(ambientSound) => {
+                          if (previewing) previewAmbient(ambientSound, ready.profile.ambientVolume);
+                          changeAmbient({ ambientSound });
+                        }}
+                        onChangeVolume={(ambientVolume) => {
+                          if (previewing) previewAmbient(ready.profile.ambientSound, ambientVolume);
+                          changeAmbient({ ambientVolume });
+                        }}
                         onSeekingChange={setIsSeeking}
+                        previewing={previewing}
+                        previewBlocked={devotionalPlaying}
+                        onTogglePreview={() => {
+                          if (previewing) stopPreview();
+                          else previewAmbient(ready.profile.ambientSound, ready.profile.ambientVolume);
+                        }}
+                        onDragVolume={(ambientVolume) => {
+                          if (previewing) previewAmbient(ready.profile.ambientSound, ambientVolume);
+                        }}
                       />
                     ) : null}
                   </View>

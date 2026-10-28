@@ -23,6 +23,7 @@ import { AMBIENT_SOUNDS, PLAYBACK_RATES, SKIP_MS } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { images } from "@/constants/images";
 import { colors, gradients, layout, radii, shadows } from "@/constants/theme";
+import { updateProfile } from "@/data/journalRepository";
 import { getPlaybackTrack } from "@/data/selectors";
 import { usePlayback } from "@/hooks/usePlayback";
 import { useReflection } from "@/hooks/useReflection";
@@ -297,7 +298,13 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
               label={copy.ambient.labels[sound]}
               accessibilityLabel={nowPlaying.ambientChip(copy.ambient.labels[sound])}
               selected={sound === ambientSound}
-              onPress={() => playback.setAmbient(sound)}
+              onPress={() => {
+                playback.setAmbient(sound);
+                // What is chosen here is also the sound the next devotional starts with (step 27). A save that fails
+                // changes nothing on this screen: the next change saves again.
+                void updateProfile({ ambientSound: sound });
+                // TODO(34): ambient_changed { sound, source: 'now_playing' }
+              }}
             />
           ))}
         </View>
@@ -325,6 +332,8 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
               onSeekChange={playback.setAmbientVolume}
               onSeekEnd={(volume) => {
                 playback.setAmbientVolume(volume);
+                // Saved once, when the finger lifts.
+                void updateProfile({ ambientVolume: volume });
                 setIsTouching(false);
               }}
             />

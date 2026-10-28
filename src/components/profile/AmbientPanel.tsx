@@ -1,6 +1,6 @@
 import type { SymbolViewProps } from "expo-symbols";
 import { useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { ChoiceChip } from "@/components/ChoiceChip";
 import { Icon } from "@/components/Icon";
@@ -11,10 +11,13 @@ import { colors } from "@/constants/theme";
 import type { AmbientSound } from "@/types";
 
 const { nowPlaying } = copy;
+const text = copy.profile.ambient;
 
 const icons = {
   quieter: { android: "volume_down", ios: "speaker.fill" },
   louder: { android: "volume_up", ios: "speaker.wave.3.fill" },
+  preview: { android: "play_circle", ios: "play.circle" },
+  stop: { android: "stop_circle", ios: "stop.circle" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 type AmbientPanelProps = {
@@ -26,17 +29,27 @@ type AmbientPanelProps = {
   // A finger is on the volume track. The screen stops its ScrollView while it is, or Android's ScrollView takes
   // the drag once the finger drifts about 8dp vertically (found in step 12).
   onSeekingChange: (seeking: boolean) => void;
+  // The preview (step 27): `previewing` while it plays, and `previewBlocked` while a devotional is playing, when there is
+  // no preview. The volume under the finger is passed on while dragging, so a preview that is playing follows it.
+  previewing: boolean;
+  previewBlocked: boolean;
+  onTogglePreview: () => void;
+  onDragVolume: (volume: number) => void;
 };
 
 // What the Ambient Soundscape row opens in place: the same chips and volume as Now Playing, for the sound the
-// next devotional starts with. The volume is dimmed and disabled while the sound is off, so the panel never
-// changes height.
+// next devotional starts with, and a short preview of it. The volume is dimmed and disabled while the sound is
+// off, so the panel never changes height.
 export function AmbientPanel({
   sound,
   volume,
   onChangeSound,
   onChangeVolume,
   onSeekingChange,
+  previewing,
+  previewBlocked,
+  onTogglePreview,
+  onDragVolume,
 }: AmbientPanelProps) {
   // The volume under the finger while dragging. Only the end of the drag is saved.
   const [dragVolume, setDragVolume] = useState<number | null>(null);
@@ -79,7 +92,10 @@ export function AmbientPanel({
             accessibilityLabel={nowPlaying.volume.label}
             formatValueText={(next) => nowPlaying.volume.text(Math.round(next * 100))}
             onSeekStart={() => onSeekingChange(true)}
-            onSeekChange={setDragVolume}
+            onSeekChange={(next) => {
+              setDragVolume(next);
+              onDragVolume(next);
+            }}
             onSeekEnd={(next) => {
               setDragVolume(null);
               onSeekingChange(false);
@@ -97,11 +113,41 @@ export function AmbientPanel({
           {nowPlaying.volume.short(Math.round(shown * 100))}
         </Text>
       </View>
-      <Text className="text-body-sm text-mauve">{copy.profile.ambient.helper}</Text>
+      {/* Nothing to preview while the sound is off. While a devotional plays the button stays in place, dimmed, with the reason under it. */}
+      {isOff ? null : (
+        <View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              previewing ? text.stopLabel : text.previewLabel(copy.ambient.labels[sound])
+            }
+            accessibilityState={{ disabled: previewBlocked }}
+            disabled={previewBlocked}
+            onPress={onTogglePreview}
+            style={({ pressed }) => [
+              styles.preview,
+              pressed && styles.pressed,
+              previewBlocked && styles.disabled,
+            ]}
+          >
+            <View className="min-h-11 flex-row items-center gap-1.5">
+              <Icon name={previewing ? icons.stop : icons.preview} size={18} color={colors.plum} />
+              <Text className="text-label-md text-plum">{previewing ? text.stop : text.preview}</Text>
+            </View>
+          </Pressable>
+          {previewBlocked ? (
+            <Text className="text-body-sm text-mauve">{text.previewBlocked}</Text>
+          ) : null}
+        </View>
+      )}
+      <Text className="text-body-sm text-mauve">{text.helper}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   tabular: { fontVariant: ["tabular-nums"] },
+  preview: { alignSelf: "flex-start" },
+  pressed: { opacity: 0.6 },
+  disabled: { opacity: 0.5 },
 });
