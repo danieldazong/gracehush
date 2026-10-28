@@ -2,6 +2,8 @@ import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { CompositeScreenProps, NavigatorScreenParams } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
+import type { ReflectionTab } from "@/types";
+
 export type MainTabParamList = {
   Journal: undefined;
   Prayers: undefined;
@@ -15,7 +17,8 @@ export type RootStackParamList = {
   // `resend` is the client entry id of a refused written reflection: New Entry opens with its words (Journal's
   // "Edit and resend") and sends them again under the same id.
   NewEntry: { mode: "speak" | "write"; resend?: string };
-  Reflection: { entryId: string };
+  // `tab` opens the carousel on that tab: a tapped affirmation notification passes "affirmations" (step 28).
+  Reflection: { entryId: string; tab?: ReflectionTab };
   NowPlaying: { entryId: string };
   // Nothing reads `source` in V1 (no analytics: a crisis view sends no events). It stays because step 15's
   // Profile row passes "profile", and Journal's saved note passes "journal" (step 25 follow-up).

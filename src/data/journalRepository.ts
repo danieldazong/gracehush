@@ -26,6 +26,7 @@ import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 import type {
   Affirmation,
+  AffirmationSource,
   HomeEntry,
   JournalEntry,
   MarkAnsweredInput,
@@ -190,6 +191,27 @@ export async function readCachedAffirmations(entryId: string): Promise<Affirmati
 
 export async function readCachedLatestAffirmations(): Promise<Affirmation[]> {
   return getDataSource() === "mock" ? [] : live.readCachedLatestAffirmations();
+}
+
+// What the affirmation notifications are made from (step 28): the newest finished entry this phone has, a crisis entry
+// included (so that nothing is scheduled after one), with its affirmations when it is not one. Null when there is none. It
+// reads this phone only, never the network, and the real source throws when the cache cannot be read, so the scheduler then
+// changes nothing. The mock data's own rows in development.
+export async function readAffirmationSource(): Promise<AffirmationSource | null> {
+  if (getDataSource() === "mock") {
+    const latest = readEntries().find((entry) => entry.status === "ready");
+    if (latest === undefined) return null;
+    const affirmations = latest.isCrisis ? [] : readAffirmations(latest.id);
+    return { entryId: latest.id, isCrisis: latest.isCrisis, affirmations };
+  }
+  return live.readCachedAffirmationSource();
+}
+
+// The Daily Affirmations switch as this phone knows it, with no waiting: null until the profile has been read on this phone
+// (the scheduler plans nothing until then). The mock data's own row in development.
+export function getKnownAffirmationsEnabled(userId: string): boolean | null {
+  if (getDataSource() === "mock") return readMockProfile().affirmationsEnabled;
+  return readLocalProfile(userId)?.affirmationsEnabled ?? null;
 }
 
 // One page of the Journal (step 25): the entries it lists, newest first, the cursor of the next page (null when there is no

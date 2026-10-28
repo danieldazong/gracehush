@@ -26,7 +26,15 @@ import { getPlaybackTrack } from "@/data/selectors";
 import { useReflection } from "@/hooks/useReflection";
 import type { RootStackScreenProps } from "@/navigation/types";
 import { haptics } from "@/services/haptics";
-import type { Affirmation, Devotional, JournalEntry, Scripture, TimeSlot, UserProfile } from "@/types";
+import type {
+  Affirmation,
+  Devotional,
+  JournalEntry,
+  ReflectionTab,
+  Scripture,
+  TimeSlot,
+  UserProfile,
+} from "@/types";
 import { formatEntryDate, getValidationHeadline, quoteVerse } from "@/utils/format";
 
 import {
@@ -143,18 +151,21 @@ type ReadyViewProps = {
   affirmations: Affirmation[];
   profile: UserProfile;
   currentSlot: TimeSlot;
+  initialTab: ReflectionTab | undefined;
   onOpenPlayer: () => void;
   onReturn: () => void;
 };
 
-// A finished entry with a devotional. The screen gives it key={entry.id}, so another entry starts from
-// its own prayer toggle, tab and expanded state.
+// A finished entry with a devotional. The screen keys it by the entry and the tab it was opened on, so another
+// entry starts from its own prayer toggle, tab and expanded state, and a tapped notification for the reflection
+// that is already open turns it to Affirmations (step 28).
 function ReadyView({
   entry,
   devotional,
   affirmations,
   profile,
   currentSlot,
+  initialTab,
   onOpenPlayer,
   onReturn,
 }: ReadyViewProps) {
@@ -207,6 +218,7 @@ function ReadyView({
           affirmations={affirmations}
           reminders={profile.reminders}
           currentSlot={currentSlot}
+          initialTab={initialTab}
         />
       </FadeIn>
       {transcript ? (
@@ -290,12 +302,13 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
   } else {
     body = (
       <ReadyView
-        key={state.entry.id}
+        key={`${state.entry.id}:${route.params.tab ?? ""}`}
         entry={state.entry}
         devotional={state.entry.devotional}
         affirmations={state.affirmations}
         profile={state.profile}
         currentSlot={state.currentSlot}
+        initialTab={route.params.tab}
         onOpenPlayer={() => navigation.navigate("NowPlaying", { entryId: state.entry.id })}
         onReturn={returnToJournal}
       />

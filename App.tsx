@@ -22,6 +22,8 @@ import { supabaseEnv } from "@/constants/env";
 import { fonts } from "@/constants/theme";
 import { useStoreHydrated } from "@/hooks/useStoreHydrated";
 import { RootNavigator } from "@/navigation/RootNavigator";
+import { navigationRef } from "@/navigation/navigationRef";
+import { openPendingTap, startNotificationRouting } from "@/services/notificationRouting";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 
@@ -50,6 +52,10 @@ function AppShell() {
     if (__DEV__ && error) console.warn(`[fonts] ${error.message}`);
   }, [error]);
 
+  // From the very start, so the tap on a notification that opened the app is not lost: the reflection opens once the
+  // signed-in screens are up (step 28).
+  useEffect(() => startNotificationRouting(), []);
+
   // The fonts, Clerk and the two saved stores load in parallel. Waiting for all of them means the
   // navigator first renders with everything known: a signed-in user never sees Onboarding flash by, a
   // finished onboarding never shows Welcome, and the profile sync never writes to a store that is
@@ -68,7 +74,7 @@ function AppShell() {
   return (
     <SafeAreaProvider>
       <SupabaseAuthBridge />
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef} onReady={openPendingTap} onStateChange={openPendingTap}>
         <RootNavigator />
       </NavigationContainer>
       <StatusBar style="dark" />

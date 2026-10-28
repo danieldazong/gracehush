@@ -9,7 +9,7 @@ import { toAffirmation, toJournalEntry } from "@/data/mappers";
 import { getNewestReadyEntry, isListedEntry } from "@/data/selectors";
 import * as cache from "@/db/cache";
 import { isDatabaseOpen } from "@/db/database";
-import type { Affirmation, JournalEntry, RepoResult, TimeSlot } from "@/types";
+import type { Affirmation, AffirmationSource, JournalEntry, RepoResult, TimeSlot } from "@/types";
 
 // The real source of the Journal's entries and affirmations (step 25), used by journalRepository.ts when the data source is
 // Supabase: what this phone already has comes first (the read cache of step 24), then the network, and everything read from the
@@ -64,6 +64,19 @@ async function cachedNewestReady(): Promise<JournalEntry | null> {
 export async function readCachedLatestAffirmations(): Promise<Affirmation[]> {
   const latest = await cachedNewestReady();
   return latest === null ? [] : readCachedAffirmations(latest.id);
+}
+
+// The newest finished entry the phone has, a crisis entry included, and its affirmations (step 28's notifications). Unlike the
+// reads above it throws when the cache cannot be read (a closed database included): a bad read must not look like "no
+// reflection", which would cancel the notifications. An entry still being prepared is not finished, so it never counts.
+export async function readCachedAffirmationSource(): Promise<AffirmationSource | null> {
+  const entries = await cache.listEntries(LATEST_LOOKBACK);
+  const now = Date.now();
+  const latest = entries.find((entry) => entry.status === "ready" && isListedEntry(entry, now));
+  if (latest === undefined) return null;
+  if (latest.isCrisis) return { entryId: latest.id, isCrisis: true, affirmations: [] };
+  const affirmations = await cache.listAffirmationsForEntry(latest.id);
+  return { entryId: latest.id, isCrisis: false, affirmations };
 }
 
 // The week's count of devotionals, from the entries this phone has: a finished entry that is not a crisis and holds a devotional

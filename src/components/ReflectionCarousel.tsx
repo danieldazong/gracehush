@@ -7,7 +7,7 @@ import { Icon } from "@/components/Icon";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { copy } from "@/constants/copy";
 import { colors } from "@/constants/theme";
-import type { Affirmation, Devotional, TimeSlot } from "@/types";
+import type { Affirmation, Devotional, ReflectionTab, TimeSlot } from "@/types";
 import { formatTime12 } from "@/utils/format";
 
 const { tabs, affirmations: affirmationsCopy, closingPrayer: closingPrayerCopy } = copy.reflection;
@@ -17,9 +17,6 @@ const slotIcons = {
   afternoon: { android: "wb_sunny", ios: "sun.max.fill" },
   evening: { android: "bedtime", ios: "moon.fill" },
 } satisfies Record<TimeSlot, SymbolViewProps["name"]>;
-
-// Exactly these values: step 28 opens the carousel on one of them.
-type Tab = "devotional" | "affirmations" | "prayer";
 
 // The script's paragraphs are separated by a blank line.
 function DevotionalPane({ script }: { script: string }) {
@@ -95,20 +92,23 @@ type ReflectionCarouselProps = {
   affirmations: Affirmation[];
   reminders: Record<TimeSlot, string>;
   currentSlot: TimeSlot;
+  initialTab?: ReflectionTab;
 };
 
 // Devotional, Affirmations and Closing Prayer in one card. Only the selected pane is rendered, and it
-// fades in when the tab changes. An entry without a closing prayer has two tabs.
+// fades in when the tab changes. An entry without a closing prayer has two tabs. It opens on `initialTab`
+// (a tapped affirmation notification, step 28), else on the devotional.
 export function ReflectionCarousel({
   devotional,
   affirmations,
   reminders,
   currentSlot,
+  initialTab,
 }: ReflectionCarouselProps) {
-  const [tab, setTab] = useState<Tab>("devotional");
+  const [tab, setTab] = useState<ReflectionTab>(initialTab ?? "devotional");
   const closingPrayer = devotional.closingPrayer?.trim() ?? "";
 
-  const items: { value: Tab; label: string }[] = [
+  const items: { value: ReflectionTab; label: string }[] = [
     { value: "devotional", label: tabs.devotional },
     { value: "affirmations", label: tabs.affirmations },
   ];

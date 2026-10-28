@@ -3,6 +3,7 @@ import { copy } from "@/constants/copy";
 import { simulateWrite } from "@/data/journalRepository";
 import { takeMockPrayerMutationFailure } from "@/data/mock/scenario";
 import { deleteUserDatabase } from "@/db/database";
+import { clearAffirmations } from "@/services/affirmationScheduler";
 import { deleteAllDevotionalAudio } from "@/services/devotionalAudio";
 import { endOfflineSession } from "@/services/offlineSession";
 import { cancelProfileSync } from "@/services/profileSync";
@@ -66,7 +67,9 @@ export async function signOutCleanup(): Promise<void> {
   // session either.
   usePlayerStore.getState().stop();
   await deleteAllDevotionalAudio();
-  // TODO(28): cancel the scheduled affirmation notifications
+  // The affirmation notifications this account scheduled, and the ones still in the notification center (step 28): an
+  // affirmation must not reach the phone, or open, after its account has gone.
+  await clearAffirmations();
   // TODO(30): Purchases.logOut()
   // TODO(34): resetAnalytics()
 }

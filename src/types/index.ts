@@ -80,6 +80,13 @@ export interface Affirmation {
   isFavorite: boolean;
 }
 
+// What the affirmation notifications are made from (step 28): the newest finished reflection on the phone and, when it is not
+// a crisis entry, its affirmations (a crisis entry has none).
+export type AffirmationSource = { entryId: string; isCrisis: boolean; affirmations: Affirmation[] };
+
+// The tabs of Reflection's carousel. A notification opens Reflection on "affirmations" (step 28).
+export type ReflectionTab = "devotional" | "affirmations" | "prayer";
+
 export interface Prayer {
   id: string; // the journal entry id: a prayer lives on its entry
   title: string;

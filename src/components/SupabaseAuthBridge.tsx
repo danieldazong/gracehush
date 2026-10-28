@@ -2,6 +2,7 @@ import { useAuth } from "@clerk/expo";
 import { useEffect, useLayoutEffect } from "react";
 import { AppState } from "react-native";
 
+import { startAffirmationSchedule, stopAffirmationSchedule } from "@/services/affirmationScheduler";
 import { startConnectivity, stopConnectivity } from "@/services/connectivity";
 import { endOfflineSession, startOfflineSession } from "@/services/offlineSession";
 import { syncProfile, syncProfileOnForeground, watchReminderEdits } from "@/services/profileSync";
@@ -46,6 +47,8 @@ export function SupabaseAuthBridge() {
     const stopWatchingReminders = watchReminderEdits();
     // A plan that turns paid sends what the free limit held back (step 25).
     const stopWatchingPlan = watchPlan(signedInUserId);
+    // The daily affirmation notifications follow this account until the session ends (step 28).
+    startAffirmationSchedule(signedInUserId);
     const subscription = AppState.addEventListener("change", (status) => {
       if (status === "active") syncProfileOnForeground();
     });
@@ -53,6 +56,7 @@ export function SupabaseAuthBridge() {
       subscription.remove();
       stopWatchingReminders();
       stopWatchingPlan();
+      stopAffirmationSchedule();
     };
   }, [signedInUserId]);
 

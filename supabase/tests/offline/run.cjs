@@ -776,7 +776,7 @@ async function engineChecks() {
 
 // ================================================================== sign out
 async function accountChecks() {
-  await test("signing out stops the engine first, then deletes the database file, its key and every recording", async (w) => {
+  await test("signing out stops the engine first, then deletes the database file, its key and every recording, and clears the affirmations", async (w) => {
     const order = [];
     const extra = {
       "@/data/journalRepository": { __esModule: true, getKnownTier: () => "free", simulateWrite: async () => undefined },
@@ -787,6 +787,8 @@ async function accountChecks() {
       // Step 26: the devotionals downloaded to the phone go too (expo-file-system cannot load in plain Node).
       "@/services/devotionalAudio": { __esModule: true, deleteAllDevotionalAudio: async () => void order.push("devotional audio") },
       "@/store/profilePrefsStore": { __esModule: true, useProfilePrefsStore: { getState: () => ({ forgetUser: () => undefined }) } },
+      // Step 28: the affirmation notifications go too (expo-notifications cannot load in plain Node).
+      "@/services/affirmationScheduler": { __esModule: true, clearAffirmations: async () => void order.push("affirmations") },
     };
     const mod = makeWorld2(w, extra);
     const database = mod.use("@/db/database");
@@ -814,6 +816,7 @@ async function accountChecks() {
     assert.equal(w.recordings.files.size, 0);
     assert.ok(order.includes("player") && order.includes("reminders") && order.includes("cancel profile sync"));
     assert.ok(order.indexOf("player") < order.indexOf("devotional audio"), `the player stops before its files go: ${order.join(" > ")}`);
+    assert.equal(order.filter((step) => step === "affirmations").length, 1, "the affirmation notifications are cleared once");
     await mod.use("@/services/account").signOutCleanup();
   });
 }

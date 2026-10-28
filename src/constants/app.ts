@@ -13,6 +13,12 @@ export const DEFAULT_REMINDERS: Record<TimeSlot, string> = {
 
 // The Android notification channel for the three daily affirmations (step 28 reuses it).
 export const AFFIRMATION_CHANNEL_ID = "affirmations";
+// The affirmation notifications (step 28): the days the phone schedules ahead (refilled whenever the app comes to the front),
+// the least time before a notification that one can still be scheduled (iOS refuses a time that has passed), and how long
+// requests to plan again are gathered into one run.
+export const AFFIRMATION_DAYS_AHEAD = 7;
+export const AFFIRMATION_MIN_LEAD_MS = 10_000;
+export const AFFIRMATION_RESCHEDULE_DEBOUNCE_MS = 500;
 
 // Keep in sync with supabase/functions/process-entry/contracts.ts (step 19)
 export const MAX_RECORDING_MS = 300_000;

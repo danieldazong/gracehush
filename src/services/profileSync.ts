@@ -108,8 +108,8 @@ async function runOnce(): Promise<RepoResult<null>> {
   if (row.timezone !== zone) columns.timezone = zone;
 
   if (reminderAction === "apply-server") {
+    // The affirmation notifications follow the onboarding store's times, so they move with these (step 28).
     onboarding.applyServerReminders(server.reminders);
-    // TODO(28): reschedule the affirmation notifications for the new times
   } else if (reminderAction === "mark-synced" && (onboarding.remindersDirty || onboarding.remindersSyncedAt === null)) {
     onboarding.markRemindersSynced();
   }

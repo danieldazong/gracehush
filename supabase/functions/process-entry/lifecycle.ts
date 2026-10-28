@@ -230,8 +230,8 @@ async function replaceAffirmations(
   const removed = await admin.from("daily_affirmations").delete().eq("entry_id", entryId).eq("user_id", userId);
   if (removed.error) throw dbFailure("affirmations_delete", removed.error);
   if (affirmations.length === 0) return;
-  // TODO(28): scheduled_for and is_delivered stay unset, because the phone schedules the notifications; step 28
-  // confirms that with the user and closes this note.
+  // scheduled_for and is_delivered stay unset: the phone schedules the affirmation notifications itself (step 28), so the
+  // two columns are unused.
   const inserted = await admin.from("daily_affirmations").insert(affirmations.map((item) => ({
     user_id: userId,
     entry_id: entryId,
@@ -295,7 +295,8 @@ export async function saveReadyEntry(
 //
 // A crisis entry never counts toward the free tier's limit (checkDevotionalLimit skips is_crisis rows, and a crisis is
 // answered before the limit is ever checked) and it never gets speech.
-// TODO(28): never schedule affirmations for a crisis entry (it has none, and the phone must not make any up).
+// It gets no affirmations, so the phone schedules no notification for it, and none for an older reflection after it either
+// (step 28): nothing is sent until a newer reflection is ready.
 export async function saveCrisisEntry(
   admin: SupabaseClient,
   userId: string,

@@ -120,6 +120,9 @@ export const copy = {
   notifications: {
     // The Android channel name, shown in the system notification settings.
     channelName: "Daily affirmations",
+    // An affirmation notification's title, the same words as the Journal card's eyebrow: "Morning affirmation". Its body is
+    // the affirmation's headline (step 28): the lock screen shows nothing else.
+    affirmationTitle: (slotName: string) => `${slotName} affirmation`,
   },
   journal: {
     greeting: (period: TimeSlot, name: string | null) =>

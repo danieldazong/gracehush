@@ -13,6 +13,7 @@ import {
 } from "@/data/journalRepository";
 import { mergePending, toPendingEntry } from "@/data/pendingEntries";
 import { getCurrentSlot, getReflectionDays, mergeEntries } from "@/data/selectors";
+import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
 import { startOfflineSession } from "@/services/offlineSession";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { subscribe } from "@/services/syncEngine";
@@ -158,6 +159,9 @@ export function useJournalHome(): HomeState {
         const page = await loadEntriesPage(null);
         if (request !== latestRequest.current) return;
         if (!page.ok) throw new Error(page.code);
+        // The newest reflection may be new to this phone (made on another phone, or a crisis entry): the affirmation
+        // notifications are planned again from what the phone now holds (step 28).
+        requestAffirmationReschedule();
         const affirmations = await getLatestAffirmations();
         if (request !== latestRequest.current) return;
         const paged = pagesLoaded.current > 0;

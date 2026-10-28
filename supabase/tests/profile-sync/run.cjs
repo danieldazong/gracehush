@@ -337,7 +337,7 @@ const row = ({
   });
   // The "database" is one row the fake keeps: a push changes it, as the real update would.
   function makeSyncEnv({ stored = {}, source = "supabase", server = row() } = {}) {
-    const calls = { fetch: 0, push: [], recordingsDeleted: 0, devotionalsDeleted: 0 };
+    const calls = { fetch: 0, push: [], recordingsDeleted: 0, devotionalsDeleted: 0, affirmationsCleared: 0 };
     const remote = { server, fetchFails: null, pushFails: [], onPush: null, onFetch: null };
     const session = { userId: "user_a" };
     // The two pure column builders are the real ones, so what the sync sends is what the app would send.
@@ -377,6 +377,8 @@ const row = ({
     fakes["@/services/recordingFiles"] = { deleteAllRecordings: async () => void calls.recordingsDeleted++ };
     // Step 26: the same for the devotionals downloaded to the phone.
     fakes["@/services/devotionalAudio"] = { deleteAllDevotionalAudio: async () => void calls.devotionalsDeleted++ };
+    // Step 28: the same for the affirmation notifications (expo-notifications cannot load in Node).
+    fakes["@/services/affirmationScheduler"] = { clearAffirmations: async () => void calls.affirmationsCleared++ };
     // Step 24: account.ts and journalRepository.ts import the user's database and the sync session, and plain Node cannot
     // load the native modules behind them. These checks are not about them.
     fakes["@/db/database"] = { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined };
@@ -842,6 +844,7 @@ const row = ({
     await account.signOutCleanup();
     assert.equal(ctx.calls.recordingsDeleted, 1, "sign out deletes the finished recordings on the phone");
     assert.equal(ctx.calls.devotionalsDeleted, 1, "sign out deletes the downloaded devotionals too");
+    assert.equal(ctx.calls.affirmationsCleared, 1, "and clears the affirmation notifications");
     assert.equal(ob.getState().remindersDirty, false);
     assert.deepEqual(unsentOf(ctx), { ambientSound: "soft-rain" }, "sign out keeps the user's unsent setting");
     await sleep(1000);
@@ -850,6 +853,7 @@ const row = ({
     assert.equal(deleted.ok, true);
     assert.equal(ctx.calls.recordingsDeleted, 2, "account deletion deletes the recordings too");
     assert.equal(ctx.calls.devotionalsDeleted, 2, "and the downloaded devotionals");
+    assert.equal(ctx.calls.affirmationsCleared, 2, "and the affirmation notifications");
     assert.equal(prefsOf(ctx).getState().byUser.user_a, undefined, "delete forgets them");
   });
 
@@ -962,6 +966,7 @@ const row = ({
         "@/store/playerStore": { usePlayerStore: { getState: () => ({ stop: () => undefined }) } },
         "@/services/recordingFiles": { deleteAllRecordings: async () => undefined },
         "@/services/devotionalAudio": { deleteAllDevotionalAudio: async () => undefined },
+        "@/services/affirmationScheduler": { clearAffirmations: async () => undefined },
         "@/db/database": { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined },
         "@/db/outbox": {},
         "@/db/cache": {},

@@ -458,6 +458,14 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free" } = {}
     "@react-navigation/native": { useFocusEffect: (effect) => react.useEffect(() => effect(), [effect]) },
     react,
   };
+  // Step 28: Journal asks the affirmation notifications to be planned again after its first page. The scheduler needs
+  // expo-notifications, which plain Node cannot load, so it is counted here (supabase/tests/notifications checks it).
+  let affirmationRequests = 0;
+  fakes["@/services/affirmationScheduler"] = {
+    requestAffirmationReschedule: () => {
+      affirmationRequests += 1;
+    },
+  };
   const env = makeEnv({ fakes });
   const logs = [];
   const real = { log: console.log, info: console.info, warn: console.warn };
@@ -473,6 +481,7 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free" } = {}
     server,
     upload,
     counts,
+    affirmationRequests: () => affirmationRequests,
     renderHook,
     logs,
     userId,

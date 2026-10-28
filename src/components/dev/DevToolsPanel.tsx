@@ -37,6 +37,11 @@ import { isDatabaseOpen } from "@/db/database";
 import * as outbox from "@/db/outbox";
 import type { MainTabScreenProps, RootStackParamList } from "@/navigation/types";
 import { signOutCleanup } from "@/services/account";
+import {
+  getAffirmationScheduleSummary,
+  rescheduleAffirmationsNow,
+  scheduleTestAffirmation,
+} from "@/services/affirmationScheduler";
 import { countRawUploads, uploadRawRecording } from "@/services/mediaUpload";
 import { listRecordings } from "@/services/recordingFiles";
 import { resumeAfterUpgrade, subscribe, syncNow } from "@/services/syncEngine";
@@ -303,6 +308,8 @@ function DevToolsContent() {
   const [processChecking, setProcessChecking] = useState(false);
   const [recordingLines, setRecordingLines] = useState<string[]>(() => [recordingsLine()]);
   const [recordingBusy, setRecordingBusy] = useState(false);
+  const [affirmationLines, setAffirmationLines] = useState<string[]>(["affirmations: …"]);
+  const [affirmationBusy, setAffirmationBusy] = useState(false);
   const [outboxText, setOutboxText] = useState("outbox: …");
   // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
   const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
@@ -394,6 +401,31 @@ function DevToolsContent() {
     else if (counted) result = `uploads: ${counted.code}`;
     setRecordingLines([recordingsLine(), result]);
     setRecordingBusy(false);
+  }
+
+  // Step 28: how many affirmation notifications are scheduled and the next one's local day and time. Never a title or a
+  // headline. "Reschedule" plans now; "Test in 10 s" sends one with the next planned title, headline and tap.
+  async function showAffirmations(result: string | null) {
+    const summary = await getAffirmationScheduleSummary().catch(() => null);
+    const line =
+      summary === null
+        ? "affirmations: could not read"
+        : `affirmations scheduled: ${summary.count}, next: ${summary.next ?? "none"}`;
+    setAffirmationLines(result === null ? [line] : [line, result]);
+  }
+
+  async function rescheduleAffirmations() {
+    setAffirmationBusy(true);
+    await rescheduleAffirmationsNow();
+    await showAffirmations("rescheduled");
+    setAffirmationBusy(false);
+  }
+
+  async function testAffirmation() {
+    setAffirmationBusy(true);
+    const sent = await scheduleTestAffirmation(10_000);
+    await showAffirmations(sent ? "test: in 10 s" : "test: nothing to send (switch, permission or reflection)");
+    setAffirmationBusy(false);
   }
 
   // The session goes first, and the cleanup before it, as in Profile's own Sign out.
@@ -627,6 +659,19 @@ function DevToolsContent() {
                 onPress={() => setNotificationStatusOverride(name === "real" ? null : name)}
               />
             ))}
+          </View>
+        </View>
+        <View className="items-center gap-2">
+          <Text className="text-center text-body-sm text-mauve">Affirmation notifications (dev)</Text>
+          {affirmationLines.map((line) => (
+            <Text key={line} className="text-center text-body-sm text-ink">
+              {line}
+            </Text>
+          ))}
+          <View className="flex-row flex-wrap justify-center gap-2">
+            <DevButton label="Show (dev)" disabled={affirmationBusy} onPress={() => void showAffirmations(null)} />
+            <DevButton label="Reschedule now (dev)" disabled={affirmationBusy} onPress={rescheduleAffirmations} />
+            <DevButton label="Test in 10 s (dev)" disabled={affirmationBusy} onPress={testAffirmation} />
           </View>
         </View>
         <View className="gap-2">

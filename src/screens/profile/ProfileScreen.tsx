@@ -39,6 +39,7 @@ import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
 import { countUnsentItems } from "@/data/journalRepository";
 import { deleteAccount, requestDataExport, signOutCleanup } from "@/services/account";
+import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
 import { isPreviewing, previewAmbient, stopPreview, subscribePreview } from "@/services/ambientPlayer";
 import {
   openLegalPage,
@@ -391,7 +392,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
     setEditingSlot(slot);
   }
 
-  // TODO(28): reschedule the affirmation notifications
+  // The affirmation notifications follow the new time by themselves: the scheduler watches the reminder times (step 28).
   function changeReminder(hhmm: string) {
     if (editingSlot) setReminder(editingSlot, hhmm);
   }
@@ -401,7 +402,8 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
     const result = await state.save({ affirmationsEnabled: enabled });
     if (result.ok) {
       hideNotice("saveAffirmations", "saveAmbient");
-      // TODO(28): reschedule or cancel the affirmation notifications
+      // Off cancels the affirmation notifications and on schedules them again (step 28).
+      requestAffirmationReschedule();
     } else {
       showNotice("saveAffirmations");
     }
@@ -422,6 +424,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
 
   async function allowNotifications() {
     await requestNotificationPermission();
+    requestAffirmationReschedule();
     if (state.status === "ready") await state.refresh();
   }
 
