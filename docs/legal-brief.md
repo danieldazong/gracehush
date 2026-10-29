@@ -41,7 +41,8 @@ Not collected, as far as the plans go (**TODO:** re-check before saying so): loc
 - **Export** (planned, step 31): a ZIP with a README, JSON, Markdown and the audio. The link works for 24 hours, one export every 10 minutes, and recordings that do not fit are listed in the README.
 - **Delete the account** (planned, step 31): removes the storage files, the database rows, the RevenueCat customer and the Clerk user, in that order, and can be retried. It does **not** cancel an App Store or Google Play subscription, and the app says so.
 - **Sign out** wipes the local copy (step 24). The analytics switch (step 34), the Daily Affirmations switch, and the microphone and notification permissions are all under the user's control.
-- **TODO: retention.** Entries are kept until the user deletes them or the account. How long do backups and server logs live, and what happens to a deleted user's rows in them?
+- **Delete one reflection** (step 29b): from the Prayers tab (the ⋯ menu on a prayer) or the end of a reflection, "Delete reflection…" asks first and then removes that reflection for good: its text, its recording, its devotional audio and its affirmations, at once, and only while the phone is online. "Remove from Prayers" is a different action: it keeps the reflection and only takes it off the Prayers list. One small record is kept for a deleted devotional: an opaque identifier, the account it belongs to and the time it was made, with nothing the person wrote or heard. It exists only because the free plan counts devotionals per week and deleting must not hand one back. It is removed the next time that person deletes a reflection after it is more than 14 days old, and with the account (so it can outlive 14 days if the person never deletes again; a scheduled sweep would make "within 14 days" literally true). **TODO:** the lawyer confirms the record needs no separate listing, that the policy's sentence about it is enough, and whether a sweep is required.
+- **TODO: retention.** Entries are kept until the user deletes them or the account. A single reflection the user deletes is removed from our systems at once, apart from the record above. How long do backups and server logs live, and what happens to a deleted user's rows in them?
 
 ## 5. Service providers
 
@@ -88,6 +89,7 @@ The drafts describe the app as designed. These statements depend on a step that 
 | Reminders are local notifications that show an affirmation, with no push server | 28 |
 | Plan and trial status come through RevenueCat, and the tier and its end date are mirrored | 30 |
 | Export is a ZIP (data, readable text, audio) with a 24-hour link and one per 10 minutes; deleting removes storage, rows, the RevenueCat customer and the Clerk user, and does not cancel a store subscription | 31 |
+| Deleting a reflection removes its text, recording, devotional audio and affirmations at once; one record (an opaque identifier, the owner and the time it was made) is kept to count the devotional in the free week, removed at the owner's next delete after 14 days and with the account | 29b |
 | Analytics are opt-in, anonymous, from a fixed event list, with no crisis events, IP location off and a new anonymous ID per account | 34 |
 | A crisis entry gets no devotional, affirmations, audio or analytics, and its transcript is kept | 13, 21, 34 |
 | The free limit (three a week, resetting Monday), the 7-day trial on the yearly plan and the prices are set in the stores | 30 (the store setup) |
