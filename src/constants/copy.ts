@@ -816,12 +816,24 @@ export const copy = {
         confirm: "Sign out",
         cancel: "Stay",
       },
-      // The same dialog when reflections on this phone have not been sent yet: signing out deletes them from the phone.
+      // The same dialog when this phone holds what the server has not been given yet: reflections, which signing out deletes
+      // from the phone, or prayer changes, counted by prayer because the changes to one prayer go as one (step 29 follow-up).
       signOutUnsent: {
-        body: (count: number) =>
-          count === 1
-            ? "1 reflection on this phone hasn’t been sent yet. If you sign out, it will be deleted from this phone."
-            : `${count} reflections on this phone haven’t been sent yet. If you sign out, they’ll be deleted from this phone.`,
+        body: (reflections: number, prayers: number) => {
+          if (prayers === 0) {
+            return reflections === 1
+              ? "1 reflection on this phone hasn’t been sent yet. If you sign out, it will be deleted from this phone."
+              : `${reflections} reflections on this phone haven’t been sent yet. If you sign out, they’ll be deleted from this phone.`;
+          }
+          if (reflections === 0) {
+            return prayers === 1
+              ? "Changes to 1 prayer on this phone haven’t been sent yet. If you sign out, they won’t be saved."
+              : `Changes to ${prayers} prayers on this phone haven’t been sent yet. If you sign out, they won’t be saved.`;
+          }
+          const reflectionCount = reflections === 1 ? "1 reflection" : `${reflections} reflections`;
+          const prayerChanges = prayers === 1 ? "changes to 1 prayer" : `changes to ${prayers} prayers`;
+          return `${reflectionCount} and ${prayerChanges} on this phone haven’t been sent yet. If you sign out, they won’t be saved.`;
+        },
         confirm: "Sign out anyway",
         cancel: "Stay signed in",
       },

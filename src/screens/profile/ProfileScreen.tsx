@@ -37,7 +37,7 @@ import { useAnnounce } from "@/hooks/useAnnounce";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
 import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
-import { countUnsentItems } from "@/data/journalRepository";
+import { countPendingPrayerChanges, countUnsentItems } from "@/data/journalRepository";
 import { deleteAccount, requestDataExport, signOutCleanup } from "@/services/account";
 import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
 import { isPreviewing, previewAmbient, stopPreview, subscribePreview } from "@/services/ambientPlayer";
@@ -351,8 +351,9 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
-  // How many reflections on this phone the server has never been given: signing out deletes them (step 24).
-  const [unsentCount, setUnsentCount] = useState(0);
+  // What this phone holds that the server has never been given, which signing out deletes: reflections (step 24) and prayers
+  // with changes waiting (step 29 follow-up).
+  const [unsent, setUnsent] = useState({ reflections: 0, prayers: 0 });
   // "Restore purchases" is running. The ref blocks a second tap in the same tick, before the state has rendered.
   const [restoring, setRestoring] = useState(false);
   const restoreRunning = useRef(false);
@@ -475,9 +476,10 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
     setDialogOpen(true);
   }
 
-  // The count is read before the dialog opens, so its first frame already says the truth.
+  // The counts are read before the dialog opens, so its first frame already says the truth.
   async function openSignOut() {
-    setUnsentCount(await countUnsentItems());
+    const [reflections, prayers] = await Promise.all([countUnsentItems(), countPendingPrayerChanges()]);
+    setUnsent({ reflections, prayers });
     openDialog("signOut");
   }
 
@@ -540,10 +542,10 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const dialogContent = DIALOGS[dialog];
   const { signOutUnsent } = text.dialogs;
   const dialogStrings =
-    dialog === "signOut" && unsentCount > 0
+    dialog === "signOut" && (unsent.reflections > 0 || unsent.prayers > 0)
       ? {
           ...dialogContent.strings,
-          body: signOutUnsent.body(unsentCount),
+          body: signOutUnsent.body(unsent.reflections, unsent.prayers),
           confirm: signOutUnsent.confirm,
           cancel: signOutUnsent.cancel,
         }

@@ -760,6 +760,27 @@ async function otherChecks() {
     assert.equal(w.use("@/store/devStore").useDevStore.getState().nextPrayerMutationFails, true, "left for the mock data");
   });
 
+  await test("sign out: the warning counts the prayers with changes waiting, one per prayer, beside the reflections", async (w) => {
+    const body = w.use("@/constants/copy").copy.profile.dialogs.signOutUnsent.body;
+    assert.equal(body(1, 0), "1 reflection on this phone hasn’t been sent yet. If you sign out, it will be deleted from this phone.");
+    assert.equal(body(2, 0), "2 reflections on this phone haven’t been sent yet. If you sign out, they’ll be deleted from this phone.");
+    assert.equal(body(0, 1), "Changes to 1 prayer on this phone haven’t been sent yet. If you sign out, they won’t be saved.");
+    assert.equal(body(0, 3), "Changes to 3 prayers on this phone haven’t been sent yet. If you sign out, they won’t be saved.");
+    assert.equal(body(1, 2), "1 reflection and changes to 2 prayers on this phone haven’t been sent yet. If you sign out, they won’t be saved.");
+    assert.equal(body(2, 1), "2 reflections and changes to 1 prayer on this phone haven’t been sent yet. If you sign out, they won’t be saved.");
+    for (const text of [body(1, 0), body(2, 0), body(0, 1), body(0, 3), body(1, 2), body(2, 1)]) {
+      assert.ok(!/['"]/.test(text), `straight punctuation in: ${text}`);
+    }
+    // What the dialog is given: one per prayer, however many changes were made to it.
+    await seedBoth(w, 2, () => PRAYER);
+    const r = repo(w);
+    await r.setPrayerTracked(idOf(1), false);
+    await r.setPrayerTracked(idOf(1), true);
+    await r.setPrayerTracked(idOf(2), false);
+    assert.equal(await r.countPendingPrayerChanges(), 2);
+    assert.equal(updates(w).length, 0, "nothing was sent: the engine was not started");
+  });
+
   await test("session: the waiting changes go with the user's database file, and a notice does not outlive the session", async (w) => {
     await seedBoth(w, 1, () => PRAYER);
     await w.startEngine();
