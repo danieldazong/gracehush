@@ -19,6 +19,7 @@ import {
   post,
   readyOutput,
   screenOutput,
+  seedDeletedDevotional,
   seedDevotional,
   SPEECH_EMAIL,
   SPEECH_VOICE,
@@ -1518,6 +1519,29 @@ Deno.test(
     assertEquals([row.processing_status, row.error_code], ["ready", null]);
     const madeLine = lastLog(world);
     assertEquals([madeLine.limit, madeLine.limitUsed], ["exempt", null]);
+  }),
+);
+
+Deno.test(
+  "limit x) a devotional deleted this week still counts: two made and one deleted is a 402, and a record from last week does not count",
+  flow([geminiOk(readyOutput())], async (world) => {
+    seedWeek(world, FREE_DEVOTIONALS_PER_WEEK - 1);
+    seedDeletedDevotional(world, USER, new Date().toISOString());
+    const body = await limitBody(await post(world, handle, textBody()));
+    assertEquals([body.usage.used, body.usage.limit], [FREE_DEVOTIONALS_PER_WEEK, FREE_DEVOTIONALS_PER_WEEK]);
+    const blocked = lastLog(world);
+    assertEquals([blocked.limit, blocked.limitUsed], ["free_blocked", FREE_DEVOTIONALS_PER_WEEK]);
+    assertEquals(world.callOrder, ["screening"]);
+
+    // The record is from before this week: it no longer counts, and the same request is made.
+    world.deletedDevotionals.length = 0;
+    seedDeletedDevotional(world, USER, new Date(weekWindow(new Date(), "UTC").start.getTime() - 1).toISOString());
+    const made = await post(world, handle, textBody());
+    assertEquals(made.status, 200);
+    assertEquals((await ok(made)).entry.status, "ready");
+    const allowed = lastLog(world);
+    assertEquals([allowed.limit, allowed.limitUsed], ["free_ok", FREE_DEVOTIONALS_PER_WEEK - 1]);
+    assertEquals(unscopedRequests(world, USER), []);
   }),
 );
 

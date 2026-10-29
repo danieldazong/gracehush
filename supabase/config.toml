@@ -10,3 +10,7 @@ verify_jwt = false
 [functions.confirm-scripture]
 # The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
 verify_jwt = false
+
+[functions.delete-entry]
+# The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false

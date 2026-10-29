@@ -130,6 +130,11 @@ export type LimitDecision =
 //   made       this user's entries from this week's start that are not a crisis and hold a devotional, not counting `current`
 //   in flight  this user's entries from this week's start that are still being made (processing, no devotional yet, a claim
 //              newer than the lease: an older one belongs to a request that died), that were started BEFORE `current`
+//   deleted    this user's records (deleted_devotionals, step 29b) of devotionals made from this week's start and deleted
+//              afterwards: a devotional counts for the week it was made in, whether or not its reflection still exists.
+//              delete-entry writes the record before it deletes the reflection, so a devotional is counted once: as the
+//              reflection while it exists, as the record after. (Between the two writes, or after a delete whose rollback also
+//              failed, one devotional is counted twice until the delete is sent again. That can only make the limit stricter.)
 //
 // A failed entry (an AI error, or one the limit itself held back) holds no devotional and is not being made, so it never
 // counts; a crisis entry never counts and never reaches this code; another user's entries are never read.
@@ -151,8 +156,8 @@ export async function checkDevotionalLimit(
   const since = window.start.toISOString();
   const leaseCutoff = new Date(now.getTime() - CLAIM_LEASE_MS).toISOString();
 
-  // Asked together: one round trip to a database that is far from the function, not two.
-  const [made, inFlight] = await Promise.all([
+  // Asked together: one round trip to a database that is far from the function, not three.
+  const [made, inFlight, deleted] = await Promise.all([
     admin.from("journal_entries").select("id", { count: "exact", head: true })
       .eq("user_id", userId).eq("is_crisis", false).neq("id", current.id)
       .gte("created_at", since).not("devotional_script", "is", null),
@@ -160,9 +165,13 @@ export async function checkDevotionalLimit(
       .eq("user_id", userId).eq("is_crisis", false).neq("id", current.id)
       .gte("created_at", since).is("devotional_script", null)
       .eq("processing_status", "processing").gt("updated_at", leaseCutoff),
+    // A server-only table: no app role can read it, and the service role reads only this user's rows.
+    admin.from("deleted_devotionals").select("entry_id", { count: "exact", head: true })
+      .eq("user_id", userId).gte("made_at", since),
   ]);
   if (made.error) throw dbFailure("limit_made", made.error);
   if (inFlight.error) throw dbFailure("limit_in_flight", inFlight.error);
+  if (deleted.error) throw dbFailure("limit_deleted", deleted.error);
 
   const startedAt = Date.parse(current.created_at);
   const startedFirst = (inFlight.data as { id: string; created_at: string }[]).filter((other) => {
@@ -170,7 +179,7 @@ export async function checkDevotionalLimit(
     return at < startedAt || (at === startedAt && other.id < current.id);
   }).length;
 
-  const used = (made.count ?? 0) + startedFirst;
+  const used = (made.count ?? 0) + (deleted.count ?? 0) + startedFirst;
   return {
     kind: "free",
     allowed: used < FREE_DEVOTIONALS_PER_WEEK,

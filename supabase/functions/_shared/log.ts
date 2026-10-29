@@ -94,3 +94,42 @@ export async function shortHash(value: string): Promise<string> {
 export function writeLog(line: LogLine): void {
   console.log(JSON.stringify(line));
 }
+
+// A log line with every field empty, for a function that has only a few to say (delete-entry, step 29b). The LogLine type above
+// is the allow-list: a field that is not in it cannot be logged. process-entry and confirm-scripture build their own lines.
+export function blankLogLine(fields: Pick<LogLine, "requestId" | "status"> & Partial<LogLine>): LogLine {
+  const { requestId, status, ...rest } = fields;
+  return {
+    requestId,
+    status,
+    code: null,
+    reason: null,
+    inputType: null,
+    user: null,
+    authMs: 0,
+    dbMs: 0,
+    geminiMs: 0,
+    totalMs: 0,
+    attempts: 0,
+    fallbackAttempts: 0,
+    model: null,
+    promptVersion: null,
+    tokensIn: null,
+    tokensOut: null,
+    tokensThought: null,
+    scripture: null,
+    bibleMs: 0,
+    screen: null,
+    screenMs: 0,
+    screenAttempts: 0,
+    crisisSource: null,
+    tts: null,
+    ttsMs: 0,
+    ttsAttempts: 0,
+    ttsChars: 0,
+    audioMs: null,
+    limit: null,
+    limitUsed: null,
+    ...rest,
+  };
+}

@@ -116,6 +116,7 @@ const COLUMNS: Record<string, string[]> = {
     "scheduled_for",
     "created_at",
   ],
+  deleted_devotionals: ["entry_id", "user_id", "made_at", "deleted_at"],
 };
 
 const CATEGORIES = [
@@ -159,6 +160,11 @@ export type World = {
   ttsQueue: GoogleReply[];
   // Every file the function uploaded to journal_media, as storage-js sent it (the bytes are in `storage`).
   uploads: { path: string; contentType: string; upsert: boolean; cacheControl: string }[];
+  // delete-entry (step 29b): the server-only record of devotionals that were deleted, every Storage removal as the paths storage-js
+  // sent it, and calls to fail on purpose (each counter is how many more calls of that kind will fail, one after another).
+  deletedDevotionals: Row[];
+  removals: string[][];
+  fail: { storageRemove: number; recordDeleted: number; deleteEntry: number };
   logs: string[];
   // The database's clock: every call gives a later time than the one before, to the millisecond, so that two rows never
   // share a created_at (the real database hands out a distinct time to each insert).
@@ -238,6 +244,15 @@ function check(table: string, row: Row, world: World, isInsert: boolean): void {
     );
     if (clash) fail("23505", "daily_affirmations_entry_slot_key");
   }
+  if (table === "deleted_devotionals") {
+    for (const column of ["entry_id", "user_id", "made_at"]) {
+      if (typeof row[column] !== "string") fail("23502", `${column} is null`);
+    }
+    if (!world.users.some((user) => user.id === row.user_id)) fail("23503", "deleted_devotionals_user_id_fkey");
+    if (world.deletedDevotionals.some((other) => other.entry_id === row.entry_id)) {
+      fail("23505", "deleted_devotionals_pkey");
+    }
+  }
 }
 
 type Filter = { column: string; op: string; value: string; negate: boolean };
@@ -285,6 +300,8 @@ function rest(world: World, table: string, request: Recorded): Response {
     ? world.users
     : table === "journal_entries"
     ? world.entries
+    : table === "deleted_devotionals"
+    ? world.deletedDevotionals
     : world.affirmations;
   const filters = filtersOf(request.url);
   const wants = prefer(request);
@@ -313,6 +330,10 @@ function rest(world: World, table: string, request: Recorded): Response {
   }
 
   if (request.method === "POST") {
+    if (table === "deleted_devotionals" && world.fail.recordDeleted > 0) {
+      world.fail.recordDeleted -= 1;
+      throw new PgError(500, "XX000", "the record could not be written");
+    }
     const incoming = (Array.isArray(request.json) ? request.json : [request.json]) as Row[];
     const created: Row[] = [];
     const ignore = wants.has("resolution=ignore-duplicates");
@@ -328,6 +349,8 @@ function rest(world: World, table: string, request: Recorded): Response {
       if (table === "users_profile") row = { created_at: now, subscription_tier: "free", timezone: "UTC", ...record };
       else if (table === "journal_entries") {
         row = { id: crypto.randomUUID(), created_at: now, updated_at: now, ...ENTRY_DEFAULTS(), ...record };
+      } else if (table === "deleted_devotionals") {
+        row = { deleted_at: now, ...record };
       } else {
         row = {
           id: crypto.randomUUID(),
@@ -358,8 +381,20 @@ function rest(world: World, table: string, request: Recorded): Response {
   }
 
   if (request.method === "DELETE") {
-    for (const row of rows.filter((candidate) => matches(candidate, filters))) rows.splice(rows.indexOf(row), 1);
-    return new Response(null, { status: 204 });
+    if (table === "journal_entries" && world.fail.deleteEntry > 0) {
+      world.fail.deleteEntry -= 1;
+      throw new PgError(500, "XX000", "the row could not be deleted");
+    }
+    const removed = rows.filter((candidate) => matches(candidate, filters));
+    for (const row of removed) rows.splice(rows.indexOf(row), 1);
+    // The affirmations of a deleted entry go with it (the foreign key's on delete cascade, step 18).
+    if (table === "journal_entries") {
+      const gone = new Set(removed.map((row) => row.id));
+      const kept = world.affirmations.filter((affirmation) => !gone.has(affirmation.entry_id));
+      world.affirmations.splice(0, world.affirmations.length, ...kept);
+    }
+    // Like PostgREST: the deleted rows come back when the request asks for them.
+    return representation ? jsonResponse(200, removed.map((row) => ({ ...row }))) : new Response(null, { status: 204 });
   }
 
   throw new Error(`fake PostgREST: ${request.method} is not supported`);
@@ -464,6 +499,22 @@ function bibleFixture(key: string): BibleReply {
   }
 }
 
+// storage-js remove(): DELETE /object/{bucket} with { prefixes }. Storage answers with the objects it removed; a path that is not
+// there is simply not in the answer, and that is not an error.
+function removeObjects(world: World, request: Recorded): Response {
+  if (world.fail.storageRemove > 0) {
+    world.fail.storageRemove -= 1;
+    return jsonResponse(500, { statusCode: "500", error: "Internal", message: "the files could not be removed" });
+  }
+  const prefixes = (request.json as { prefixes?: unknown } | null)?.prefixes;
+  if (!Array.isArray(prefixes) || !prefixes.every((path) => typeof path === "string")) {
+    return jsonResponse(400, { statusCode: "400", error: "Bad Request", message: "prefixes must be a list of paths" });
+  }
+  world.removals.push([...prefixes]);
+  const removed = prefixes.filter((path) => world.storage.delete(path));
+  return jsonResponse(200, removed.map((name) => ({ name, bucket_id: "journal_media" })));
+}
+
 export function installWorld(): World {
   const original = globalThis.fetch;
   const saved: Record<string, string | undefined> = {};
@@ -507,6 +558,9 @@ export function installWorld(): World {
     ttsCalls: [],
     ttsQueue: [],
     uploads: [],
+    deletedDevotionals: [],
+    removals: [],
+    fail: { storageRemove: 0, recordDeleted: 0, deleteEntry: 0 },
     logs: [],
     now: isoNow,
     async token(claims = {}, options = {}) {
@@ -609,6 +663,9 @@ export function installWorld(): World {
       world.requests.push(recorded);
       try {
         if (url.pathname.startsWith("/rest/v1/")) return rest(world, url.pathname.slice("/rest/v1/".length), recorded);
+        if (url.pathname === "/storage/v1/object/journal_media" && request.method === "DELETE") {
+          return removeObjects(world, recorded);
+        }
         if (url.pathname.startsWith("/storage/v1/object/journal_media/")) {
           const path = decodeURIComponent(url.pathname.slice("/storage/v1/object/journal_media/".length));
           if (bytes !== null) return upload(world, path, request.headers, bytes);
@@ -712,6 +769,20 @@ export function seedDevotional(world: World, userId: string, over: Row = {}): En
   });
 }
 
+// A record that a devotional of this user's, made at this time, was deleted (step 29b). The free tier counts it with the
+// reflections that exist.
+export function seedDeletedDevotional(world: World, userId: string, madeAt: string): Record<string, unknown> {
+  world.seedUser(userId);
+  const row: Record<string, unknown> = {
+    entry_id: crypto.randomUUID(),
+    user_id: userId,
+    made_at: madeAt,
+    deleted_at: world.now(),
+  };
+  world.deletedDevotionals.push(row);
+  return row;
+}
+
 // Every request the function sent about a user's own tables carried that user's id: a filter on reads, updates and
 // deletes, a column on inserts. Returns the requests that did not. (A user's profile is filtered by its `id`; the
 // profile's own insert is not checked, because ensureProfile also creates another user's row in some tests.)
@@ -724,7 +795,7 @@ export function unscopedRequests(world: World, userId: string): string[] {
     ) {
       offenders.push(`${request.method} ${table}${request.url.search}`);
     }
-    if (table !== "journal_entries" && table !== "daily_affirmations") continue;
+    if (table !== "journal_entries" && table !== "daily_affirmations" && table !== "deleted_devotionals") continue;
     if (request.method === "POST") {
       const rows = (Array.isArray(request.json) ? request.json : [request.json]) as Row[];
       if (!rows.every((row) => row.user_id === userId)) offenders.push(`${request.method} ${table}`);

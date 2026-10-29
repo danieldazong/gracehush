@@ -2,7 +2,8 @@
 // the saved entry's id and the week's usage beside `error` (step 22, AppError.details).
 // Each function's contract (process-entry/contracts.ts) lists the codes that function can answer with, and the app's
 // copy of that list must match (src/types/contractParity.ts checks it). process-entry never answers NOT_FOUND;
-// confirm-scripture does.
+// confirm-scripture does, and so does delete-entry (which also answers ALREADY_PROCESSING, for a reflection that is still
+// being made).
 
 export type ErrorCode =
   | "INVALID_REQUEST"

@@ -1,6 +1,12 @@
 import { CLAIM_LEASE_MS } from "../../process-entry/constants.ts";
 import { assert, assertEquals, expectAppError } from "../../process-entry/testing/assert.ts";
-import { installWorld, seedDevotional, unscopedRequests, type World } from "../../process-entry/testing/fakes.ts";
+import {
+  installWorld,
+  seedDeletedDevotional,
+  seedDevotional,
+  unscopedRequests,
+  type World,
+} from "../../process-entry/testing/fakes.ts";
 import { createAdmin } from "../admin.ts";
 import { FREE_DEVOTIONALS_PER_WEEK } from "./constants.ts";
 import { checkDevotionalLimit, type LimitProfile, type LimitSubject } from "./weekly.ts";
@@ -105,6 +111,35 @@ const SCENARIOS: { name: string; seed: (world: World) => void; used: number }[] 
     used: 0,
   },
   {
+    name: "a devotional made this week and deleted afterwards still counts (step 29b)",
+    seed: (world) => void seedDeletedDevotional(world, USER, at(-2 * DAY)),
+    used: 1,
+  },
+  {
+    name: "the first instant of the week counts for a deleted devotional too",
+    seed: (world) => void seedDeletedDevotional(world, USER, "2026-10-19T00:00:00.000Z"),
+    used: 1,
+  },
+  {
+    name: "a devotional that was made last week and deleted does not",
+    seed: (world) => void seedDeletedDevotional(world, USER, "2026-10-18T23:59:59.999Z"),
+    used: 0,
+  },
+  {
+    name: "another user's deleted devotional does not",
+    seed: (world) => void seedDeletedDevotional(world, "user_b", at(-DAY)),
+    used: 0,
+  },
+  {
+    name: "one made, one deleted and one being made all count, once each",
+    seed: (world) => {
+      seedDevotional(world, USER, { created_at: at(-DAY) });
+      seedDeletedDevotional(world, USER, at(-2 * DAY));
+      world.seedEntry(making({ created_at: at(-120 * SECOND) }));
+    },
+    used: 3,
+  },
+  {
     name: "the entry being checked does not count itself, even if it holds a devotional",
     seed: (world) => {
       world.entries.find((entry) => entry.id === CURRENT_ID)!.devotional_script = "Words.";
@@ -188,7 +223,7 @@ Deno.test(
 );
 
 Deno.test(
-  "checkDevotionalLimit: two queries in one round trip, and resetsAt is the start of next week",
+  "checkDevotionalLimit: three questions in one round trip, and resetsAt is the start of next week",
   limitWorld(async (world, admin, current) => {
     const decision = await checkDevotionalLimit(admin, USER, FREE, current, NOW);
     assert(decision.kind === "free");
@@ -196,7 +231,7 @@ Deno.test(
     assertEquals(decision.zoneFallback, false);
     assertEquals(
       world.requests.map((request) => `${request.method} ${request.url.pathname}`),
-      ["HEAD /rest/v1/journal_entries", "GET /rest/v1/journal_entries"],
+      ["HEAD /rest/v1/journal_entries", "GET /rest/v1/journal_entries", "HEAD /rest/v1/deleted_devotionals"],
     );
   }),
 );
@@ -229,6 +264,28 @@ Deno.test(
     const decision = await checkDevotionalLimit(admin, USER, { tier: "free", timezone: "Mars/Phobos" }, current, NOW);
     assert(decision.kind === "free");
     assertEquals([decision.zoneFallback, decision.resetsAt], [true, "2026-10-26T00:00:00.000Z"]);
+  }),
+);
+
+Deno.test(
+  "checkDevotionalLimit: the record of deleted devotionals failing is a plain INTERNAL error too",
+  limitWorld(async (_world, admin, current) => {
+    const real = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+      const request = new Request(input, init);
+      if (request.url.includes("/rest/v1/deleted_devotionals")) {
+        const body = JSON.stringify({ code: "XX000", message: "a secret detail about the table" });
+        return Promise.resolve(new Response(body, { status: 500, headers: { "Content-Type": "application/json" } }));
+      }
+      return real(input, init);
+    };
+    try {
+      const error = await expectAppError(() => checkDevotionalLimit(admin, USER, FREE, current, NOW), "INTERNAL");
+      assert(error.reason.startsWith("db:limit_deleted"), error.reason);
+      assert(!error.reason.includes("secret"));
+    } finally {
+      globalThis.fetch = real;
+    }
   }),
 );
 
