@@ -967,7 +967,8 @@ export const copy = {
     },
     // Lines under the button. Each stays until the next action, never on a timer. A cancelled purchase has none.
     notices: {
-      // TODO(30): the customer-info listener makes "We’ll unlock Pro as soon as it’s confirmed" true
+      // True in a native build: the customer-info listener and the plan watch pick the approval up (step 30). Expo Go's Test
+      // Store has no pending purchases.
       pending: "Your purchase is pending approval. We’ll unlock Pro as soon as it’s confirmed.",
       error:
         "We couldn’t complete your purchase. Please try again. If you think you were charged, choose Restore purchases.",

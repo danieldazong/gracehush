@@ -27,6 +27,7 @@ import * as mutations from "@/db/mutations";
 import * as outbox from "@/db/outbox";
 import { scheduleProfileSync, syncProfile } from "@/services/profileSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
+import { useEntitlementStore } from "@/store/entitlementStore";
 import { selectCanSend, useOfflineStore } from "@/store/offlineStore";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
@@ -141,8 +142,17 @@ export async function getProfile(): Promise<UserProfile> {
   return afterSync;
 }
 
+// What the screens show as the plan (step 30): what RevenueCat last reported for the signed-in account, otherwise the server's
+// plan (getKnownTier). RevenueCat's answer arrives first after a purchase, so the screens follow it at once.
+function shownTier(): SubscriptionTier | null {
+  const userId = getSupabaseUserId();
+  const entitlement = useEntitlementStore.getState();
+  if (userId !== null && entitlement.userId === userId && entitlement.tier !== null) return entitlement.tier;
+  return getKnownTier();
+}
+
 // What Profile and the Paywall show of the plan. The mock data says what the Profile design says ("2 of 3 audio devotionals
-// used this week"). Otherwise the plan is the one this device knows (getKnownTier), and on the free plan the count is of the
+// used this week"). Otherwise the plan is the one the screens show (shownTier), and on the free plan the count is of the
 // devotionals this phone has this week, in the time zone of the profile and with the week the server uses (utils/week.ts):
 // it needs no network, so Profile opens offline. It is a number to show and nothing more. Only the server's 402 opens the
 // Paywall, because only the server counts every device.
@@ -157,7 +167,7 @@ export async function getUsage(): Promise<PlanUsage> {
       ? { tier, used: 2, limit: FREE_DEVOTIONALS_PER_WEEK, resetsAt }
       : { tier, used: 0, limit: null, resetsAt };
   }
-  const tier = getKnownTier() ?? "free";
+  const tier = shownTier() ?? "free";
   const zone = await getProfile().then(
     (profile) => profile.timezone,
     () => getDeviceTimezone(),
@@ -277,12 +287,12 @@ export async function countUnsentItems(): Promise<number> {
   }
 }
 
-// The plan as this device knows it, with no waiting. The sync engine uses it to send what the free limit held back as soon
-// as the plan is paid, wherever the purchase was made. A mock purchase counts first, because the screens show the mock
-// plan until step 30 (TEMP(30)); otherwise it is the plan the last profile sync read, or null before the first sync.
+// The plan as the server last said it, with no waiting: the plan the last profile sync read, or null before the first sync.
+// The sync engine uses it to send what the free limit held back as soon as the plan is paid, wherever the purchase was made.
+// It follows the server only, never RevenueCat's answer on this phone (step 30): only the server decides a 402. The mock data
+// source has its own plan (step 16).
 export function getKnownTier(): SubscriptionTier | null {
-  const mock = getMockSubscriptionTier();
-  if (mock !== "free" || getDataSource() === "mock") return mock;
+  if (getDataSource() === "mock") return getMockSubscriptionTier();
   const userId = getSupabaseUserId();
   return userId === null ? null : (readLocalProfile(userId)?.subscriptionTier ?? null);
 }
@@ -510,9 +520,8 @@ export async function updateProfile(patch: ProfilePatch): Promise<RepoResult<Use
   return saved === null ? failure("NOT_FOUND", copy.profile.errors.save) : { ok: true, data: saved };
 }
 
-// The dev panel and step 16's purchase mock (services/purchases.ts) change the tier to reach the trial and Pro
-// states; the mock submit reads it, because a paid plan never hits the free limit.
-// TEMP(30): the RevenueCat webhook sets the tier on the server; delete both
+// The mock data source's plan (step 16). The dev panel and the purchase mock (services/purchases.ts) change it to reach the
+// trial and Pro states; the mock submit reads it, because a paid plan never hits the free limit.
 export function setMockSubscriptionTier(tier: SubscriptionTier): void {
   getMockDb().profile.subscription_tier = tier;
 }

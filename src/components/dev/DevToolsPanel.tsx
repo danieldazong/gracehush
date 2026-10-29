@@ -16,6 +16,9 @@ import {
   setMockSubscriptionTier,
 } from "@/data/journalRepository";
 import { runProcessEntryCheck } from "@/components/dev/processEntryCheck";
+import { currentRevenueCatKey } from "@/services/revenuecat";
+import { syncPlanNow } from "@/services/subscriptionSync";
+import { useEntitlementStore } from "@/store/entitlementStore";
 import { supabaseEnv } from "@/constants/env";
 import { changePrayer } from "@/data/entriesLive";
 import { getLastEntriesError } from "@/data/entriesRemote";
@@ -208,6 +211,25 @@ function describeFunctionCall(call: FunctionCall | null): string {
   return `${call.name} ${answer}${call.code === null ? "" : ` ${call.code}`}, ${Math.round(call.ms / 100) / 10} s`;
 }
 
+const KEY_LABELS = { test_store: "test store", app_store: "app store", play_store: "play store" } as const;
+
+// Billing (step 30): which RevenueCat key this build uses (its kind, never the key), what RevenueCat and the server say the plan
+// is for the signed-in account, and how the app's last sync-subscription call went.
+function billingLines(userId: string | null): string[] {
+  const choice = currentRevenueCatKey();
+  const entitlement = useEntitlementStore.getState();
+  const fromRevenueCat = userId !== null && entitlement.userId === userId ? entitlement.tier : null;
+  const fromServer =
+    userId === null ? null : (useProfilePrefsStore.getState().byUser[userId]?.snapshot?.subscriptionTier ?? null);
+  const last = entitlement.lastSync;
+  return [
+    `revenuecat key: ${choice.kind === "none" ? `none (${choice.reason})` : KEY_LABELS[choice.kind]}`,
+    `entitlement: ${fromRevenueCat ?? "not known"}`,
+    `server plan: ${fromServer ?? "not known"}`,
+    `last plan sync: ${last === null ? "none" : last.ok ? "ok" : last.code}`,
+  ];
+}
+
 // What the Supabase check shows on screen: yes or no and a code, never an id, a token or a row.
 async function runSupabaseCheck(source: DataSource): Promise<string[]> {
   const signedIn = getSupabaseUserId() !== null;
@@ -244,6 +266,7 @@ async function runSupabaseCheck(source: DataSource): Promise<string[]> {
   lines.push(`last error: ${getLastProfileError() ?? "none"}`);
   lines.push(`last entries error: ${getLastEntriesError() ?? "none"}`);
   lines.push(`last function call: ${describeFunctionCall(getLastFunctionCall())}`);
+  lines.push(...billingLines(userId));
   return lines;
 }
 
@@ -386,6 +409,14 @@ function DevToolsContent() {
 
   async function checkSupabase() {
     setChecking(true);
+    setSupabaseLines(await runSupabaseCheck(dataSource));
+    setChecking(false);
+  }
+
+  // Asks the server to re-read RevenueCat now (sync-subscription), then shows the check again.
+  async function syncPlan() {
+    setChecking(true);
+    await syncPlanNow();
     setSupabaseLines(await runSupabaseCheck(dataSource));
     setChecking(false);
   }
@@ -622,7 +653,10 @@ function DevToolsContent() {
             ))}
           </View>
           <View className="items-center gap-2">
-            <DevButton label="Supabase check (dev)" disabled={checking} onPress={checkSupabase} />
+            <View className="flex-row flex-wrap justify-center gap-2">
+              <DevButton label="Supabase check (dev)" disabled={checking} onPress={checkSupabase} />
+              <DevButton label="Sync plan now (dev)" disabled={checking} onPress={syncPlan} />
+            </View>
             {supabaseLines.map((line) => (
               <Text key={line} className="text-center text-body-sm text-ink">
                 {line}
@@ -658,20 +692,23 @@ function DevToolsContent() {
             </View>
           </View>
         </View>
-        <View className="gap-2">
-          <Text className="text-center text-body-sm text-mauve">Mock plan (dev)</Text>
-          <View className="flex-row flex-wrap justify-center gap-2">
-            {PLANS.map((name) => (
-              <DevButton
-                key={name}
-                label={name}
-                accessibilityLabel={`Mock plan ${name} (dev)`}
-                selected={name === tier}
-                onPress={() => changePlan(name)}
-              />
-            ))}
+        {/* The mock data source's plan (step 16). On the real one the plan is RevenueCat's (step 30). */}
+        {dataSource === "mock" ? (
+          <View className="gap-2">
+            <Text className="text-center text-body-sm text-mauve">Mock plan (dev)</Text>
+            <View className="flex-row flex-wrap justify-center gap-2">
+              {PLANS.map((name) => (
+                <DevButton
+                  key={name}
+                  label={name}
+                  accessibilityLabel={`Mock plan ${name} (dev)`}
+                  selected={name === tier}
+                  onPress={() => changePlan(name)}
+                />
+              ))}
+            </View>
           </View>
-        </View>
+        ) : null}
         <View className="gap-2">
           <Text className="text-center text-body-sm text-mauve">Notifications (dev)</Text>
           <View className="flex-row flex-wrap justify-center gap-2">

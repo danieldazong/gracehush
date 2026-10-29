@@ -244,6 +244,20 @@ export interface DeleteEntryError {
   error: { code: DeleteEntryErrorCode; message: string; requestId: string };
 }
 
+// sync-subscription (step 30): the server re-reads the caller's RevenueCat customer and writes the plan on their profile, then
+// answers it. The app calls it after a purchase or a restore, and when its plan and the server's differ; the body is ignored.
+// NOT_FOUND is a caller with no profile yet; BILLING_UNAVAILABLE is RevenueCat that could not be read (the plan stays as it was).
+export type SyncSubscriptionResponse = { tier: SubscriptionTier; expiresAt: string | null };
+export type SyncSubscriptionErrorCode =
+  | "UNAUTHORIZED"
+  | "METHOD_NOT_ALLOWED"
+  | "NOT_FOUND"
+  | "BILLING_UNAVAILABLE"
+  | "INTERNAL";
+export interface SyncSubscriptionError {
+  error: { code: SyncSubscriptionErrorCode; message: string; requestId: string };
+}
+
 // New Entry (step 10). Step 23 swapped the mock recorder for the real one without changing these; step 24 moved the submit to the
 // sync engine, and step 25 gave the engine the real server.
 export type RecorderStatus = { isRecording: boolean; durationMs: number; metering: number }; // metering 0..1

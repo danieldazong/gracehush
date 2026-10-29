@@ -789,6 +789,9 @@ async function accountChecks() {
       "@/store/profilePrefsStore": { __esModule: true, useProfilePrefsStore: { getState: () => ({ forgetUser: () => undefined }) } },
       // Step 28: the affirmation notifications go too (expo-notifications cannot load in plain Node).
       "@/services/affirmationScheduler": { __esModule: true, clearAffirmations: async () => void order.push("affirmations") },
+      // Step 30: the plan watch stops and RevenueCat logs out (react-native-purchases and expo cannot load in plain Node).
+      "@/services/subscriptionSync": { __esModule: true, stopPlanWatch: () => void order.push("plan watch") },
+      "@/services/revenuecat": { __esModule: true, endRevenueCatSession: async () => void order.push("revenuecat") },
     };
     const mod = makeWorld2(w, extra);
     const database = mod.use("@/db/database");
@@ -817,6 +820,7 @@ async function accountChecks() {
     assert.ok(order.includes("player") && order.includes("reminders") && order.includes("cancel profile sync"));
     assert.ok(order.indexOf("player") < order.indexOf("devotional audio"), `the player stops before its files go: ${order.join(" > ")}`);
     assert.equal(order.filter((step) => step === "affirmations").length, 1, "the affirmation notifications are cleared once");
+    assert.ok(order.indexOf("plan watch") >= 0 && order.indexOf("plan watch") < order.indexOf("revenuecat"), `the plan watch stops before RevenueCat logs out: ${order.join(" > ")}`);
     await mod.use("@/services/account").signOutCleanup();
   });
 }

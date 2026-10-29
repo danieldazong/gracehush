@@ -297,10 +297,14 @@ function makeServer() {
     gate: null,
     // Queues of answers for the functions: (call) => Response | Promise<Response>. An empty queue answers "finished" (and, for
     // delete-entry, deletes the caller's entry for real, as step 29b's function does).
-    functions: { "process-entry": [], "confirm-scripture": [], "delete-entry": [] },
+    functions: { "process-entry": [], "confirm-scripture": [], "delete-entry": [], "sync-subscription": [] },
     functionCalls: [],
     // The ids delete-entry deleted (step 29b), in order.
     deletedEntries: [],
+    // Step 30: what RevenueCat says each user's plan is, and the plan the server wrote (users_profile.subscription_tier). An
+    // empty sync-subscription queue answers as the real function does: it reads the first and writes it as the second.
+    revenueCatPlans: {},
+    serverPlans: {},
     // Answers for the REST tables: the next request of that table is answered with this instead (a Response, or a function).
     rest: { journal_entries: [], daily_affirmations: [] },
     // What a process-entry call with no scripted answer makes of the entry.
@@ -435,6 +439,11 @@ function makeServer() {
         state.entries.push(made.row);
         state.affirmations.push(...made.affirmations);
         return json(200, made.response);
+      }
+      if (name === "sync-subscription") {
+        const tier = state.revenueCatPlans[sub] ?? "free";
+        state.serverPlans[sub] = tier;
+        return json(200, { tier, expiresAt: null });
       }
       if (name === "delete-entry") {
         // Step 29b: the caller's own entry and its affirmations go; another person's entry and a missing one are the same 404.

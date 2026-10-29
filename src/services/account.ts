@@ -8,6 +8,8 @@ import { deleteAllDevotionalAudio } from "@/services/devotionalAudio";
 import { endOfflineSession } from "@/services/offlineSession";
 import { cancelProfileSync } from "@/services/profileSync";
 import { deleteAllRecordings } from "@/services/recordingFiles";
+import { endRevenueCatSession } from "@/services/revenuecat";
+import { stopPlanWatch } from "@/services/subscriptionSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
@@ -71,6 +73,9 @@ export async function signOutCleanup(): Promise<void> {
   // The affirmation notifications this account scheduled, and the ones still in the notification center (step 28): an
   // affirmation must not reach the phone, or open, after its account has gone.
   await clearAffirmations();
-  // TODO(30): Purchases.logOut()
+  // RevenueCat (step 30): the plan watch stops, so nothing asks the server about this account any more, then RevenueCat logs
+  // out of it and the entitlement it reported is forgotten.
+  stopPlanWatch();
+  await endRevenueCatSession();
   // TODO(34): resetAnalytics()
 }

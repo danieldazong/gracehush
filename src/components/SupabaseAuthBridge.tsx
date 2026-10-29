@@ -6,6 +6,8 @@ import { startAffirmationSchedule, stopAffirmationSchedule } from "@/services/af
 import { startConnectivity, stopConnectivity } from "@/services/connectivity";
 import { endOfflineSession, startOfflineSession } from "@/services/offlineSession";
 import { syncProfile, syncProfileOnForeground, watchReminderEdits } from "@/services/profileSync";
+import { startRevenueCat } from "@/services/revenuecat";
+import { startPlanWatch } from "@/services/subscriptionSync";
 import { setSupabaseSession } from "@/services/supabaseClient";
 import { watchPlan } from "@/services/upgradeWatcher";
 
@@ -40,13 +42,16 @@ export function SupabaseAuthBridge() {
   }, [signedInUserId]);
 
   // The work that follows a sign-in, and again when the app returns to the foreground. A failure blocks nothing:
-  // the next foreground tries again. Later steps add their lines here (30 sets up purchases, 33 starts realtime).
+  // the next foreground tries again. Later steps add their lines here (33 starts realtime).
   useEffect(() => {
     if (signedInUserId === null) return;
     syncProfile();
     const stopWatchingReminders = watchReminderEdits();
     // A plan that turns paid sends what the free limit held back (step 25).
     const stopWatchingPlan = watchPlan(signedInUserId);
+    // Purchases are RevenueCat's, for this account (step 30), and the plan watch keeps the server's plan in step with it.
+    void startRevenueCat(signedInUserId);
+    const stopPlanWatch = startPlanWatch(signedInUserId);
     // The daily affirmation notifications follow this account until the session ends (step 28).
     startAffirmationSchedule(signedInUserId);
     const subscription = AppState.addEventListener("change", (status) => {
@@ -56,6 +61,7 @@ export function SupabaseAuthBridge() {
       subscription.remove();
       stopWatchingReminders();
       stopWatchingPlan();
+      stopPlanWatch();
       stopAffirmationSchedule();
     };
   }, [signedInUserId]);

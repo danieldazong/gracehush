@@ -58,6 +58,13 @@ export const CONFIRM_SCRIPTURE_TIMEOUT_MS = 15_000;
 // delete-entry (step 29b) makes a few Storage and database calls from a region far from the database: up to about 10 seconds. A
 // request that times out may still have succeeded, and sending it again answers NOT_FOUND, which counts as deleted.
 export const DELETE_ENTRY_TIMEOUT_MS = 30_000;
+// sync-subscription (step 30) reads RevenueCat (two attempts of 8 seconds at most) and writes one row. The app waits for it after
+// a purchase or a restore, so this caps how long "Welcome to Gracehush Pro" can take; a sync that times out changes nothing,
+// and the webhook and the next foreground catch up.
+export const SYNC_SUBSCRIPTION_TIMEOUT_MS = 10_000;
+
+// The one entitlement (AGENTS.md, Subscription Rules). The server's billing module has the same constant.
+export const PRO_ENTITLEMENT_ID = "pro";
 
 // A sheet whose choice opens another Modal (a dialog, another sheet) goes on from the sheet's onDismiss on iOS, which cannot present
 // one Modal while another is still on its way out. If iOS never reports the dismissal, the choice goes on after this long.
@@ -79,7 +86,7 @@ export const AMBIENT_SOUNDS: readonly AmbientSound[] = [
 export const MANAGE_SUBSCRIPTION_URL = {
   ios: "https://apps.apple.com/account/subscriptions",
   android: "https://play.google.com/store/account/subscriptions",
-} as const; // TODO(30): use RevenueCat's managementURL when available
+} as const; // the store's own page; RevenueCat's managementURL, when it has one, wins (externalLinks.ts)
 // Apple and Google both require the two policy pages to be reachable inside the app.
 export const PRIVACY_POLICY_URL = "https://example.com/TODO-privacy"; // TODO: real URL before release
 export const TERMS_URL = "https://example.com/TODO-terms"; // TODO: real URL before release

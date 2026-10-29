@@ -45,3 +45,39 @@ export function checkSupabaseEnv(url: string, key: string): SupabaseEnvCheck {
 }
 
 export const supabaseEnv = checkSupabaseEnv(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+// RevenueCat's public SDK keys (step 30). They are made to ship in an app, and still live only in .env.local. The Test Store key
+// (test_) runs in Expo Go and in development builds; a store build carries the platform keys (appl_ for the App Store, goog_
+// for Google Play).
+export const REVENUECAT_TEST_STORE_KEY = process.env.EXPO_PUBLIC_REVENUECAT_TEST_STORE_KEY ?? "";
+export const REVENUECAT_IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? "";
+export const REVENUECAT_ANDROID_KEY = process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? "";
+
+export type RevenueCatKeyKind = "test_store" | "app_store" | "play_store";
+export type RevenueCatKeyChoice =
+  | { kind: RevenueCatKeyKind; apiKey: string }
+  | { kind: "none"; reason: "missing" | "secret_key" | "test_key_in_release" };
+
+// Pure: which key this build may use. A secret key (sk_) in the app is never used, whatever else is set. Expo Go runs RevenueCat
+// in its Browser Mode, which takes only the Test Store key. A native build takes its platform's key, and in development only
+// falls back to the Test Store key: RevenueCat crashes a release build that uses one (on purpose), so a release build with
+// nothing else has no purchases instead.
+export function chooseRevenueCatKey(input: {
+  inExpoGo: boolean;
+  isDev: boolean;
+  platform: "ios" | "android" | "other";
+  testKey: string;
+  iosKey: string;
+  androidKey: string;
+}): RevenueCatKeyChoice {
+  const testKey = input.testKey.trim();
+  const iosKey = input.iosKey.trim();
+  const androidKey = input.androidKey.trim();
+  if ([testKey, iosKey, androidKey].some((key) => key.startsWith("sk_"))) return { kind: "none", reason: "secret_key" };
+  const hasTestKey = testKey.startsWith("test_");
+  if (input.inExpoGo) return hasTestKey ? { kind: "test_store", apiKey: testKey } : { kind: "none", reason: "missing" };
+  if (input.platform === "ios" && iosKey.startsWith("appl_")) return { kind: "app_store", apiKey: iosKey };
+  if (input.platform === "android" && androidKey.startsWith("goog_")) return { kind: "play_store", apiKey: androidKey };
+  if (input.isDev && hasTestKey) return { kind: "test_store", apiKey: testKey };
+  return { kind: "none", reason: hasTestKey ? "test_key_in_release" : "missing" };
+}

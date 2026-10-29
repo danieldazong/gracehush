@@ -15,8 +15,7 @@ export function annualSavingsPercent(annual: PlanPackage, monthly: PlanPackage):
 
 // What one month of a yearly plan costs, for the "per month, billed yearly" line. Annual packages only.
 // Intl formats in the device locale while the store's price strings follow the store's, so the two can differ in
-// style on a few devices; that is why the SDK's own string wins when it has one.
-// TODO(30): the SDK fills pricePerMonthString
+// style on a few devices; that is why the SDK's own string wins when it has one (services/purchases.ts passes it on).
 export function pricePerMonthLabel(pkg: PlanPackage): string | null {
   if (pkg.kind !== "annual") return null;
   if (pkg.pricePerMonthString !== null) return pkg.pricePerMonthString;

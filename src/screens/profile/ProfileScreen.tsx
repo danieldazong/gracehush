@@ -34,6 +34,7 @@ import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, TERMS_URL } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
+import { useEntitlement } from "@/hooks/useEntitlement";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
 import { useTabBarClearance, useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
@@ -331,6 +332,8 @@ function Footer() {
 
 export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const state = useProfileSettings();
+  // RevenueCat's own link to this customer's subscription page, when it has one (step 30).
+  const { managementUrl } = useEntitlement();
   const { signOut } = useAuth();
   const scrollRef = useRef<ScrollViewInstance>(null);
   useScrollToTop(scrollRef);
@@ -439,7 +442,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   }
 
   // Asks the store for the user's earlier purchases. The plan card follows a restored plan by itself: the mock
-  // tells Profile to reload, and step 30's customer-info listener will.
+  // tells Profile to reload, and RevenueCat's answer reaches it through the entitlement store (step 30).
   async function restore() {
     if (restoreRunning.current) return;
     restoreRunning.current = true;
@@ -467,7 +470,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
 
   // The plan card is behind the delete dialog, so a link that fails there is reported inside the dialog.
   async function manageFromDialog() {
-    const result = await openManageSubscription();
+    const result = await openManageSubscription(managementUrl);
     setDialogError(result.ok ? null : text.errors.subscription);
   }
 
@@ -601,7 +604,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
                   onManage={() => {
                     // The restore line belongs to the last plan-card action, so the next one replaces it.
                     hideNotice("restored", "restoreNone", "restoreError");
-                    openLink(openManageSubscription, "subscription");
+                    openLink(() => openManageSubscription(managementUrl), "subscription");
                   }}
                 />
                 {has("subscription") ? <Notice message={text.errors.subscription} /> : null}

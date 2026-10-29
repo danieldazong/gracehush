@@ -17,9 +17,11 @@ async function openUrl(url: string): Promise<LinkResult> {
   }
 }
 
-// The store's own subscriptions page. It opens through Linking so the App Store or the Play Store handles it,
-// never the in-app browser. TODO(30): RevenueCat's managementURL when available.
-export function openManageSubscription(): Promise<LinkResult> {
+// The store's subscriptions page. It opens through Linking so the App Store or the Play Store handles it, never the in-app
+// browser. RevenueCat's managementURL for this customer wins when it is an https: address (step 30); otherwise the store's own
+// page.
+export function openManageSubscription(url?: string | null): Promise<LinkResult> {
+  if (typeof url === "string" && url.startsWith("https://")) return openUrl(url);
   return openUrl(
     Platform.OS === "ios" ? MANAGE_SUBSCRIPTION_URL.ios : MANAGE_SUBSCRIPTION_URL.android,
   );

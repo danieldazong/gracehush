@@ -1,5 +1,5 @@
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 
 import {
@@ -13,6 +13,7 @@ import { getSyncSummary } from "@/data/selectors";
 import { getNotificationPermission } from "@/services/notifications";
 import { getCurrentOffering, isTrialEligible } from "@/services/purchases";
 import { useDevStore } from "@/store/devStore";
+import { useEntitlementStore } from "@/store/entitlementStore";
 import type { PermissionResult, PlanUsage, ProfilePatch, RepoResult, UserProfile } from "@/types";
 
 type SyncSummary = { synced: number; pending: number };
@@ -138,6 +139,16 @@ export function useProfileSettings(): ProfileSettingsState {
       };
     }, [load]),
   );
+
+  // What RevenueCat reports for the account (step 30). When it changes while Profile is mounted (a purchase, a restore, the
+  // foreground check), the plan card follows, with no skeleton: the data on screen stays until the new load answers.
+  const entitlementTier = useEntitlementStore((state) => state.tier);
+  const shownTier = useRef(entitlementTier);
+  useEffect(() => {
+    if (shownTier.current === entitlementTier) return;
+    shownTier.current = entitlementTier;
+    load();
+  }, [entitlementTier, load]);
 
   const retry = useCallback(() => {
     setResult(null);

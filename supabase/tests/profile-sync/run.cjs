@@ -337,7 +337,15 @@ const row = ({
   });
   // The "database" is one row the fake keeps: a push changes it, as the real update would.
   function makeSyncEnv({ stored = {}, source = "supabase", server = row() } = {}) {
-    const calls = { fetch: 0, push: [], recordingsDeleted: 0, devotionalsDeleted: 0, affirmationsCleared: 0 };
+    const calls = {
+      fetch: 0,
+      push: [],
+      recordingsDeleted: 0,
+      devotionalsDeleted: 0,
+      affirmationsCleared: 0,
+      planWatchStopped: 0,
+      revenueCatEnded: 0,
+    };
     const remote = { server, fetchFails: null, pushFails: [], onPush: null, onFetch: null };
     const session = { userId: "user_a" };
     // The two pure column builders are the real ones, so what the sync sends is what the app would send.
@@ -379,6 +387,9 @@ const row = ({
     fakes["@/services/devotionalAudio"] = { deleteAllDevotionalAudio: async () => void calls.devotionalsDeleted++ };
     // Step 28: the same for the affirmation notifications (expo-notifications cannot load in Node).
     fakes["@/services/affirmationScheduler"] = { clearAffirmations: async () => void calls.affirmationsCleared++ };
+    // Step 30: the plan watch stops and RevenueCat logs out (react-native-purchases and expo cannot load in Node).
+    fakes["@/services/subscriptionSync"] = { stopPlanWatch: () => void calls.planWatchStopped++ };
+    fakes["@/services/revenuecat"] = { endRevenueCatSession: async () => void calls.revenueCatEnded++ };
     // Step 24: account.ts and journalRepository.ts import the user's database and the sync session, and plain Node cannot
     // load the native modules behind them. These checks are not about them.
     fakes["@/db/database"] = { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined };
@@ -830,10 +841,20 @@ const row = ({
     assert.equal(repo.getMockSubscriptionTier(), "pro");
     assert.equal((await repo.getUsage()).limit, null);
   });
-  await test("repo: in supabase mode the mock plan still drives getUsage and the server tier is untouched", async () => {
+  await test("repo: in supabase mode the screens show RevenueCat's plan, then the server's; the engine follows the server only; the mock plan no longer counts", async () => {
     const ctx = await repoEnv({ server: row({ tier: "free" }) });
     ctx.repo.setMockSubscriptionTier("trial");
-    assert.equal((await ctx.repo.getUsage()).tier, "trial");
+    assert.equal((await ctx.repo.getUsage()).tier, "free", "the mock plan does not count on the real data source (step 30)");
+    assert.equal(ctx.repo.getKnownTier(), "free");
+    const entitlement = ctx.env.use("@/store/entitlementStore").useEntitlementStore;
+    entitlement.getState().start(ctx.session.userId, "test_store");
+    entitlement.getState().setEntitlement(ctx.session.userId, "pro", null);
+    assert.equal((await ctx.repo.getUsage()).tier, "pro", "RevenueCat's answer shows first");
+    assert.equal((await ctx.repo.getUsage()).limit, null);
+    assert.equal(ctx.repo.getKnownTier(), "free", "the sync engine follows the server's plan only");
+    entitlement.getState().start("someone_else", "test_store");
+    entitlement.getState().setEntitlement("someone_else", "pro", null);
+    assert.equal((await ctx.repo.getUsage()).tier, "free", "another account's entitlement never counts");
     assert.equal((await ctx.repo.getProfile()).subscriptionTier, "free");
   });
   await test("account: sign-out cleanup drops the unsent reminder edit and keeps the user's unsent settings; delete forgets them", async () => {
@@ -847,6 +868,8 @@ const row = ({
     assert.equal(ctx.calls.recordingsDeleted, 1, "sign out deletes the finished recordings on the phone");
     assert.equal(ctx.calls.devotionalsDeleted, 1, "sign out deletes the downloaded devotionals too");
     assert.equal(ctx.calls.affirmationsCleared, 1, "and clears the affirmation notifications");
+    assert.equal(ctx.calls.planWatchStopped, 1, "and stops the plan watch");
+    assert.equal(ctx.calls.revenueCatEnded, 1, "and logs out of RevenueCat");
     assert.equal(ob.getState().remindersDirty, false);
     assert.deepEqual(unsentOf(ctx), { ambientSound: "soft-rain" }, "sign out keeps the user's unsent setting");
     await sleep(1000);
@@ -856,6 +879,7 @@ const row = ({
     assert.equal(ctx.calls.recordingsDeleted, 2, "account deletion deletes the recordings too");
     assert.equal(ctx.calls.devotionalsDeleted, 2, "and the downloaded devotionals");
     assert.equal(ctx.calls.affirmationsCleared, 2, "and the affirmation notifications");
+    assert.equal(ctx.calls.revenueCatEnded, 2, "and logs out of RevenueCat");
     assert.equal(prefsOf(ctx).getState().byUser.user_a, undefined, "delete forgets them");
   });
 
@@ -969,6 +993,8 @@ const row = ({
         "@/services/recordingFiles": { deleteAllRecordings: async () => undefined },
         "@/services/devotionalAudio": { deleteAllDevotionalAudio: async () => undefined },
         "@/services/affirmationScheduler": { clearAffirmations: async () => undefined },
+        "@/services/subscriptionSync": { stopPlanWatch: () => undefined },
+        "@/services/revenuecat": { endRevenueCatSession: async () => undefined },
         "@/db/database": { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined },
         "@/db/outbox": {},
         "@/db/cache": {},

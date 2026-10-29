@@ -1,6 +1,6 @@
 import type { Offering } from "@/types";
 
-// TEMP(30): the offering comes from RevenueCat (services/purchases.ts); delete this file
+// The mock data source's offering (step 16); the real one comes from RevenueCat (services/purchases.ts).
 // PLACEHOLDER prices and ids. Real prices are set in App Store Connect and Play Console and arrive through
 // RevenueCat. Never copy these values into screens or copy.ts.
 // Freshly built on every call, so a screen can never change the offering by accident.
