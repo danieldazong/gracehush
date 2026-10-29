@@ -3,7 +3,8 @@
 // Each function's contract (process-entry/contracts.ts) lists the codes that function can answer with, and the app's
 // copy of that list must match (src/types/contractParity.ts checks it). process-entry never answers NOT_FOUND;
 // confirm-scripture does, and so does delete-entry (which also answers ALREADY_PROCESSING, for a reflection that is still
-// being made).
+// being made). sync-subscription (step 30) answers NOT_FOUND for a caller with no profile and BILLING_UNAVAILABLE when
+// RevenueCat cannot be read.
 
 export type ErrorCode =
   | "INVALID_REQUEST"
@@ -18,7 +19,8 @@ export type ErrorCode =
   | "NO_SPEECH"
   | "RATE_LIMITED"
   | "INTERNAL"
-  | "AI_UNAVAILABLE";
+  | "AI_UNAVAILABLE"
+  | "BILLING_UNAVAILABLE";
 
 export const STATUS_BY_CODE: Record<ErrorCode, number> = {
   INVALID_REQUEST: 400,
@@ -34,6 +36,7 @@ export const STATUS_BY_CODE: Record<ErrorCode, number> = {
   RATE_LIMITED: 429,
   INTERNAL: 500,
   AI_UNAVAILABLE: 503,
+  BILLING_UNAVAILABLE: 503,
 };
 
 // The only text a response ever carries about a failure: calm, user-safe, and never built from a provider's words.
@@ -51,6 +54,8 @@ export const MESSAGE_BY_CODE: Record<ErrorCode, string> = {
   RATE_LIMITED: "You’re going a little fast. Please wait a moment and try again.",
   INTERNAL: "Something went wrong on our side. Please try again.",
   AI_UNAVAILABLE: "We couldn’t prepare your reflection right now. Please try again.",
+  // Never shown in the app, which treats sync-subscription as best effort (step 30).
+  BILLING_UNAVAILABLE: "We couldn’t check your subscription right now. Please try again in a moment.",
 };
 
 export class AppError extends Error {

@@ -3,10 +3,12 @@
 // Allowed: the request id, a short hash of the user id, the status, an error code or category, the input kind,
 // durations, attempt and token counts, the model name, what became of the passage as one word (step 20), what the
 // crisis screening answered as one word, with the stage that decided (step 21), and what the speech step and the free
-// tier's check did, as one word each with their numbers (step 22). Never: a token or its claims, an email, a
+// tier's check did, as one word each with their numbers (step 22), and what billing did, as one word with its time and, for
+// RevenueCat's webhook, the event's type as one word (step 30). Never: a token or its claims, an email, a
 // transcript, entry text, audio, model output, the script that was read aloud, scripture (not even which book or chapter),
 // the categories of concern the screening named, a phrase that matched, a link, a storage path, a key, the service
-// account's address, SQL, or a provider's error message (those can quote what the user wrote).
+// account's address, SQL, a provider's error message (those can quote what the user wrote), a webhook's body, a RevenueCat
+// answer, a price, a product or a store transaction.
 
 // What became of the passage: verified on the first try, replaced by a second choice that was verified, kept without its
 // text because the Bible text could not be read, or dropped because no valid passage was found. null: no passage was
@@ -43,6 +45,22 @@ export type LimitStatus =
   | "free_blocked"
   | "free_ok:bad_timezone"
   | "free_blocked:bad_timezone";
+
+// What billing did (step 30). null in the log: no billing step ran. "synced": RevenueCat was read and the plan written;
+// "throttled": sync-subscription answered the plan it had just written; "skipped": the webhook had nothing to sync (its TEST
+// event, or only anonymous ids); "unknown_user": the ids it named have no profile; "off": process-entry's expiry guard found no
+// billing key; "bad_auth" and "bad_signature": a webhook request that is not RevenueCat's; "bad_config" names the secret to
+// look at; "failed" holds the short reason (http_5xx, timeout, network, bad_body, db:update), never a message.
+export type BillingStatus =
+  | "synced"
+  | "throttled"
+  | "skipped"
+  | "unknown_user"
+  | "off"
+  | "bad_auth"
+  | "bad_signature"
+  | `bad_config:${string}`
+  | `failed:${string}`;
 
 export type LogLine = {
   requestId: string;
@@ -83,6 +101,11 @@ export type LogLine = {
   // The free tier (step 22): what the check found, and the count it found (null when no count was made).
   limit: LimitStatus | null;
   limitUsed: number | null;
+  // Billing (step 30): what it did, the time spent on RevenueCat, and, for the webhook only, the event's type as one word from
+  // RevenueCat's list ("other" for a type this code does not know).
+  billing: BillingStatus | null;
+  billingMs: number;
+  billingEvent: string | null;
 };
 
 // The first 8 hex characters of SHA-256(value): enough to follow one user through the logs, not to find them.
@@ -130,6 +153,9 @@ export function blankLogLine(fields: Pick<LogLine, "requestId" | "status"> & Par
     audioMs: null,
     limit: null,
     limitUsed: null,
+    billing: null,
+    billingMs: 0,
+    billingEvent: null,
     ...rest,
   };
 }

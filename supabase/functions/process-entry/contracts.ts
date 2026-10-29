@@ -146,3 +146,18 @@ export type DeleteEntryErrorCode =
 export interface DeleteEntryError {
   error: { code: DeleteEntryErrorCode; message: string; requestId: string };
 }
+
+// sync-subscription (step 30): the server re-reads the caller's RevenueCat customer and writes the plan on their profile, then
+// answers it. The app calls it after a purchase or a restore, and when its plan and the server's differ; the body is ignored.
+// NOT_FOUND is a caller with no profile yet; BILLING_UNAVAILABLE is RevenueCat that could not be read (the plan stays as it was).
+export type SubscriptionTier = "free" | "trial" | "pro";
+export type SyncSubscriptionResponse = { tier: SubscriptionTier; expiresAt: string | null };
+export type SyncSubscriptionErrorCode =
+  | "UNAUTHORIZED"
+  | "METHOD_NOT_ALLOWED"
+  | "NOT_FOUND"
+  | "BILLING_UNAVAILABLE"
+  | "INTERNAL";
+export interface SyncSubscriptionError {
+  error: { code: SyncSubscriptionErrorCode; message: string; requestId: string };
+}

@@ -1,10 +1,12 @@
 import { createAdmin } from "../_shared/admin.ts";
 import { readAuthConfig, verifyClerkRequest } from "../_shared/auth.ts";
+import { readBillingConfig, syncSubscription } from "../_shared/billing/revenuecat.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import { optionalEnv, requireEnv } from "../_shared/env.ts";
 import { AppError, errorResponse, jsonResponse } from "../_shared/errors.ts";
-import { checkDevotionalLimit, type LimitDecision } from "../_shared/limits/weekly.ts";
+import { checkDevotionalLimit, type LimitDecision, type LimitProfile } from "../_shared/limits/weekly.ts";
 import {
+  type BillingStatus,
   type CrisisSource,
   type LimitStatus,
   type LogLine,
@@ -17,7 +19,7 @@ import {
 import { screenEntry, type ScreenInput, type ScreenResult, screenTiming } from "../_shared/safety/screen.ts";
 import { readTtsConfig } from "../_shared/tts/config.ts";
 import { downloadRecording } from "./audio.ts";
-import { GEMINI_DEADLINE_MS, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./constants.ts";
+import { EXPIRY_CHECK, GEMINI_DEADLINE_MS, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./constants.ts";
 import type { ProcessEntryRequest } from "./contracts.ts";
 import { GeminiBlocked, type GeminiStats, generate, newStats } from "./gemini.ts";
 import {
@@ -33,6 +35,7 @@ import {
   saveCrisisEntry,
   saveReadyEntry,
   saveTranscript,
+  type StoredProfile,
 } from "./lifecycle.ts";
 import { parseReflection, type Reflection } from "./output.ts";
 import { buildSystemInstruction, PROMPT_VERSION, wrapEntry } from "./prompt.ts";
@@ -76,6 +79,8 @@ type Context = {
   audioMs: number | null;
   limit: LimitStatus | null;
   limitUsed: number | null;
+  billing: BillingStatus | null;
+  billingMs: number;
   counters: Counters;
 };
 
@@ -139,6 +144,34 @@ function limitStatus(decision: LimitDecision): LimitStatus {
 //
 // A recording that the free limit held back has the words the screening heard saved on its entry (`savedWords`). Sent
 // again, it is screened from those words as written text: the recording is not downloaded and not transcribed a second time.
+// The expiry guard (step 30). A trial or Pro row whose end date has passed is read again from RevenueCat, once and briefly,
+// so a plan that lapsed while no webhook arrived is not a free pass. RevenueCat that cannot be read, or billing that is not set
+// up, leaves the stored plan: a paying person is never blocked by an outage. A row with no end date (from before step 30, or a
+// lifetime grant) is left as it is, and so is a free one.
+async function confirmPaidPlan(
+  context: Context,
+  admin: ReturnType<typeof createAdmin>,
+  userId: string,
+  profile: StoredProfile,
+): Promise<LimitProfile> {
+  const ends = profile.expiresAt === null ? NaN : Date.parse(profile.expiresAt);
+  if (profile.tier === "free" || !Number.isFinite(ends) || ends > Date.now()) return profile;
+  const config = readBillingConfig(optionalEnv);
+  if (!config.ok) {
+    context.billing = "off";
+    return profile;
+  }
+  const started = Date.now();
+  const synced = await syncSubscription(admin, config.apiKey, userId, new Date(), EXPIRY_CHECK);
+  context.billingMs = Date.now() - started;
+  if (!synced.ok) {
+    context.billing = `failed:${synced.reason}`;
+    return profile;
+  }
+  context.billing = "synced";
+  return { ...profile, tier: synced.plan.tier };
+}
+
 async function screenStage(
   context: Context,
   admin: ReturnType<typeof createAdmin>,
@@ -250,7 +283,8 @@ async function run(req: Request, context: Context): Promise<Response> {
     // The free tier's limit. Only a clear screening gets this far, so a crisis is never counted and never blocked. An entry
     // over the limit is saved as failed with LIMIT_REACHED (the catch below does that) and answered with a 402 that carries
     // the entry and the week's numbers; sent again after an upgrade or when the week turns, it is claimed and checked again.
-    const profile = await db(() => readProfile(admin, user.userId));
+    const stored = await db(() => readProfile(admin, user.userId));
+    const profile = await confirmPaidPlan(context, admin, user.userId, stored);
     const decision = await db(() => checkDevotionalLimit(admin, user.userId, profile, claim.row));
     context.limit = limitStatus(decision);
     context.limitUsed = decision.kind === "free" ? decision.used : null;
@@ -356,6 +390,8 @@ export async function handle(req: Request): Promise<Response> {
     audioMs: null,
     limit: null,
     limitUsed: null,
+    billing: null,
+    billingMs: 0,
     counters: { authMs: 0, dbMs: 0 },
   };
   let status = 200;
@@ -408,6 +444,9 @@ export async function handle(req: Request): Promise<Response> {
       audioMs: context.audioMs,
       limit: context.limit,
       limitUsed: context.limitUsed,
+      billing: context.billing,
+      billingMs: context.billingMs,
+      billingEvent: null,
     };
     writeLog(line);
   }

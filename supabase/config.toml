@@ -14,3 +14,11 @@ verify_jwt = false
 [functions.delete-entry]
 # The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
 verify_jwt = false
+
+[functions.sync-subscription]
+# The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false
+
+[functions.revenuecat-webhook]
+# RevenueCat sends no Clerk token. The function checks RevenueCat's Authorization header and HMAC signature instead.
+verify_jwt = false

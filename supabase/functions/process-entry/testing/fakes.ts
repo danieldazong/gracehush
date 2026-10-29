@@ -20,6 +20,7 @@ export const GEMINI_HOST = "generativelanguage.googleapis.com";
 export const BIBLE_HOST = "bible.helloao.org";
 export const GOOGLE_TOKEN_HOST = "oauth2.googleapis.com";
 export const GOOGLE_TTS_HOST = "texttospeech.googleapis.com";
+export const REVENUECAT_HOST = "api.revenuecat.com";
 
 type Row = Record<string, unknown>;
 
@@ -73,6 +74,10 @@ const ENV = {
   GEMINI_MODEL: "gemini-test-model",
   SUPABASE_URL,
   SUPABASE_SECRET_KEYS: JSON.stringify({ default: "sb_secret_test_key" }),
+  // Billing (step 30): the V1 secret key, and the webhook's Authorization value and signing secret.
+  REVENUECAT_SECRET_API_KEY: "sk_test_billing_key",
+  REVENUECAT_WEBHOOK_AUTH: "test-webhook-auth",
+  REVENUECAT_WEBHOOK_SIGNING_SECRET: "test-signing-secret",
 };
 
 const ENTRY_DEFAULTS = (): Row => ({
@@ -102,7 +107,14 @@ const ENTRY_DEFAULTS = (): Row => ({
 });
 
 const COLUMNS: Record<string, string[]> = {
-  users_profile: ["id", "created_at", "subscription_tier", "timezone"],
+  users_profile: [
+    "id",
+    "created_at",
+    "subscription_tier",
+    "timezone",
+    "subscription_expires_at",
+    "subscription_synced_at",
+  ],
   journal_entries: ["id", "user_id", "created_at", "updated_at", ...Object.keys(ENTRY_DEFAULTS())],
   daily_affirmations: [
     "id",
@@ -164,7 +176,12 @@ export type World = {
   // sent it, and calls to fail on purpose (each counter is how many more calls of that kind will fail, one after another).
   deletedDevotionals: Row[];
   removals: string[][];
-  fail: { storageRemove: number; recordDeleted: number; deleteEntry: number };
+  fail: { storageRemove: number; recordDeleted: number; deleteEntry: number; profileUpdate: number };
+  // RevenueCat (step 30): GET /v1/subscribers/{id} with a secret key. A queued reply answers first; otherwise the customer
+  // stored here for that app user id (200), or, as the real API does for an id it has never seen, a new empty customer (201).
+  revenuecat: Map<string, Row>;
+  revenuecatQueue: GeminiReply[];
+  revenuecatCalls: Recorded[];
   logs: string[];
   // The database's clock: every call gives a later time than the one before, to the millisecond, so that two rows never
   // share a created_at (the real database hands out a distinct time to each insert).
@@ -346,8 +363,16 @@ function rest(world: World, table: string, request: Recorded): Response {
       }
       const now = world.now();
       let row: Row;
-      if (table === "users_profile") row = { created_at: now, subscription_tier: "free", timezone: "UTC", ...record };
-      else if (table === "journal_entries") {
+      if (table === "users_profile") {
+        row = {
+          created_at: now,
+          subscription_tier: "free",
+          timezone: "UTC",
+          subscription_expires_at: null,
+          subscription_synced_at: null,
+          ...record,
+        };
+      } else if (table === "journal_entries") {
         row = { id: crypto.randomUUID(), created_at: now, updated_at: now, ...ENTRY_DEFAULTS(), ...record };
       } else if (table === "deleted_devotionals") {
         row = { deleted_at: now, ...record };
@@ -372,6 +397,10 @@ function rest(world: World, table: string, request: Recorded): Response {
   }
 
   if (request.method === "PATCH") {
+    if (table === "users_profile" && world.fail.profileUpdate > 0) {
+      world.fail.profileUpdate -= 1;
+      throw new PgError(500, "XX000", "the profile could not be updated");
+    }
     unknownColumns(request.json as Row);
     const targets = rows.filter((row) => matches(row, filters));
     const updated = targets.map((row) => ({ ...row, ...(request.json as Row), updated_at: world.now() }));
@@ -560,7 +589,10 @@ export function installWorld(): World {
     uploads: [],
     deletedDevotionals: [],
     removals: [],
-    fail: { storageRemove: 0, recordDeleted: 0, deleteEntry: 0 },
+    fail: { storageRemove: 0, recordDeleted: 0, deleteEntry: 0, profileUpdate: 0 },
+    revenuecat: new Map(),
+    revenuecatQueue: [],
+    revenuecatCalls: [],
     logs: [],
     now: isoNow,
     async token(claims = {}, options = {}) {
@@ -576,7 +608,14 @@ export function installWorld(): World {
     },
     seedUser(id) {
       if (!world.users.some((user) => user.id === id)) {
-        world.users.push({ id, created_at: world.now(), subscription_tier: "free", timezone: "UTC" });
+        world.users.push({
+          id,
+          created_at: world.now(),
+          subscription_tier: "free",
+          timezone: "UTC",
+          subscription_expires_at: null,
+          subscription_synced_at: null,
+        });
       }
     },
     seedEntry(fields) {
@@ -642,6 +681,23 @@ export function installWorld(): World {
     if (url.host === GOOGLE_TTS_HOST) {
       world.ttsCalls.push(recorded);
       return await play(world.ttsQueue.shift() ?? synthOk(FIXTURE_WAV), request);
+    }
+
+    if (url.host === REVENUECAT_HOST) {
+      world.revenuecatCalls.push(recorded);
+      // The real API refuses a request without a secret key (a public SDK key cannot read a customer).
+      if (!(request.headers.get("authorization") ?? "").startsWith("Bearer sk_")) {
+        return jsonResponse(401, { code: 7225, message: "Invalid API Key." });
+      }
+      const queued = world.revenuecatQueue.shift();
+      if (queued) return await play(queued, request);
+      const id = decodeURIComponent(url.pathname.slice("/v1/subscribers/".length));
+      const known = world.revenuecat.get(id);
+      return jsonResponse(known ? 200 : 201, {
+        request_date: new Date().toISOString(),
+        request_date_ms: Date.now(),
+        subscriber: known ?? rcCustomer(null),
+      });
     }
 
     if (url.host === BIBLE_HOST) {
@@ -804,6 +860,49 @@ export function unscopedRequests(world: World, userId: string): string[] {
     }
   }
   return offenders;
+}
+
+// A RevenueCat customer as GET /v1/subscribers/{id} answers it (the `subscriber` object), with a pro entitlement or none.
+// `expires` null is a lifetime grant; `periodType` "trial" makes it a trial. The shape was confirmed against the real API on
+// 2026-10-29 for an empty customer; the entitlement and subscription fields follow RevenueCat's v1 reference.
+export function rcCustomer(
+  pro: { expires: string | null; grace?: string | null; periodType?: string; product?: string } | null,
+): Row {
+  const product = pro?.product ?? "gracehush_pro_yearly";
+  const purchased = "2026-10-29T11:00:00Z";
+  return {
+    entitlements: pro === null ? {} : {
+      pro: {
+        expires_date: pro.expires,
+        grace_period_expires_date: pro.grace ?? null,
+        product_identifier: product,
+        purchase_date: purchased,
+      },
+    },
+    first_seen: purchased,
+    last_seen: purchased,
+    management_url: null,
+    non_subscriptions: {},
+    original_app_user_id: "customer",
+    original_application_version: null,
+    original_purchase_date: null,
+    other_purchases: {},
+    subscriptions: pro === null ? {} : {
+      [product]: {
+        auto_resume_date: null,
+        billing_issues_detected_at: null,
+        expires_date: pro.expires,
+        grace_period_expires_date: pro.grace ?? null,
+        is_sandbox: true,
+        original_purchase_date: purchased,
+        period_type: pro.periodType ?? "normal",
+        purchase_date: purchased,
+        refunded_at: null,
+        store: "test_store",
+        unsubscribe_detected_at: null,
+      },
+    },
+  };
 }
 
 export const TEXT = "I have been so anxious about work this week and I can not seem to rest.";

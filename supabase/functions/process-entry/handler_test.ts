@@ -17,6 +17,7 @@ import {
   type GoogleReply,
   installWorld,
   post,
+  rcCustomer,
   readyOutput,
   screenOutput,
   seedDeletedDevotional,
@@ -996,6 +997,9 @@ Deno.test(
       "audioMs",
       "authMs",
       "bibleMs",
+      "billing",
+      "billingEvent",
+      "billingMs",
       "code",
       "crisisSource",
       "dbMs",
@@ -1023,7 +1027,7 @@ Deno.test(
       "ttsMs",
       "user",
     ]);
-    assertEquals(Object.keys(line).length, 30);
+    assertEquals(Object.keys(line).length, 33);
     assertEquals(line.status, 200);
     assertEquals(line.inputType, "text");
     // Speech is off in a fresh world, and a free account with nothing made this week is under its limit.
@@ -1687,7 +1691,7 @@ Deno.test(
     const { entry } = await ok(response);
     assertEquals(world.logs.length, 1);
     const line = JSON.parse(world.logs[0]);
-    assertEquals(Object.keys(line).length, 30);
+    assertEquals(Object.keys(line).length, 33);
     assertEquals([line.tts, line.limit, line.limitUsed], ["ok", "free_ok", 0]);
     assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
 
@@ -1818,4 +1822,98 @@ Deno.test(
     assertEquals(again.status, 200);
     assertCrisis(world, await ok(again), PHRASE_TEXT);
   }),
+);
+
+// ---- the expiry guard (step 30) ----------------------------------------------------------------------------------------
+// A trial or Pro row whose end date has passed is checked with RevenueCat once before the free limit, so a lapsed plan is not a
+// free pass; an outage, or billing that is not set up, never blocks a paying person.
+
+const HOUR_MS = 3600_000;
+function paidUntil(world: World, tier: "trial" | "pro", expiresAt: string | null) {
+  profile(world, tier);
+  world.users.find((user) => user.id === USER)!.subscription_expires_at = expiresAt;
+}
+const tierNow = (world: World) => world.users.find((user) => user.id === USER)?.subscription_tier;
+
+Deno.test(
+  "billing a) an ended Pro that RevenueCat calls free is counted as free: the fourth devotional of the week is a 402",
+  flow([geminiOk(readyOutput())], async (world) => {
+    paidUntil(world, "pro", new Date(Date.now() - HOUR_MS).toISOString());
+    seedWeek(world);
+    world.revenuecat.set(USER, rcCustomer(null));
+    await limitBody(await post(world, handle, textBody()));
+    assertEquals(tierNow(world), "free");
+    assertEquals(world.revenuecatCalls.length, 1);
+    const line = lastLog(world);
+    assertEquals([line.billing, line.limit, line.limitUsed], ["synced", "free_blocked", FREE_DEVOTIONALS_PER_WEEK]);
+    assertEquals(unscopedRequests(world, USER), []);
+  }),
+);
+
+Deno.test(
+  "billing b) RevenueCat down: the stored plan stands and the reflection is made, after one attempt",
+  flow([geminiOk(readyOutput())], async (world) => {
+    paidUntil(world, "trial", new Date(Date.now() - HOUR_MS).toISOString());
+    seedWeek(world);
+    world.revenuecatQueue.push({ kind: "json", status: 503, body: {} }, { kind: "json", status: 503, body: {} });
+    const made = await post(world, handle, textBody());
+    assertEquals(made.status, 200);
+    assertEquals(world.revenuecatCalls.length, 1, "the guard makes one attempt only");
+    assertEquals(tierNow(world), "trial");
+    const line = lastLog(world);
+    assertEquals([line.billing, line.limit], ["failed:http_5xx", "exempt"]);
+  }),
+);
+
+Deno.test(
+  "billing c) billing not set up on the server: the stored plan stands, logged as off",
+  flow([geminiOk(readyOutput())], async (world) => {
+    paidUntil(world, "pro", new Date(Date.now() - HOUR_MS).toISOString());
+    seedWeek(world);
+    Deno.env.delete("REVENUECAT_SECRET_API_KEY");
+    assertEquals((await post(world, handle, textBody())).status, 200);
+    assertEquals(world.revenuecatCalls.length, 0);
+    assertEquals([lastLog(world).billing, lastLog(world).limit], ["off", "exempt"]);
+  }),
+);
+
+Deno.test(
+  "billing d) no end date, or one still ahead: RevenueCat is not asked",
+  flow([geminiOk(readyOutput()), geminiOk(readyOutput())], async (world) => {
+    paidUntil(world, "pro", null);
+    seedWeek(world);
+    assertEquals((await post(world, handle, textBody())).status, 200);
+    assertEquals(lastLog(world).billing, null);
+    paidUntil(world, "pro", new Date(Date.now() + HOUR_MS).toISOString());
+    assertEquals((await post(world, handle, textBody({ clientEntryId: crypto.randomUUID() }))).status, 200);
+    assertEquals(world.revenuecatCalls.length, 0);
+    assertEquals([lastLog(world).billing, lastLog(world).billingMs], [null, 0]);
+  }),
+);
+
+Deno.test(
+  "billing e) a plan that renewed is still exempt, and its new end date is stored",
+  flow([geminiOk(readyOutput())], async (world) => {
+    paidUntil(world, "pro", new Date(Date.now() - HOUR_MS).toISOString());
+    seedWeek(world);
+    const renewed = new Date(Date.now() + 24 * HOUR_MS).toISOString();
+    world.revenuecat.set(USER, rcCustomer({ expires: renewed }));
+    assertEquals((await post(world, handle, textBody())).status, 200);
+    const row = world.users.find((user) => user.id === USER)!;
+    assertEquals([row.subscription_tier, row.subscription_expires_at], ["pro", renewed]);
+    assertEquals([lastLog(world).billing, lastLog(world).limit], ["synced", "exempt"]);
+  }),
+);
+
+Deno.test(
+  "billing f) a crisis never reaches the guard: no RevenueCat call",
+  flow([], async (world) => {
+    paidUntil(world, "pro", new Date(Date.now() - HOUR_MS).toISOString());
+    world.revenuecat.set(USER, rcCustomer(null));
+    const response = await post(world, handle, textBody());
+    assertEquals(response.status, 200);
+    assertCrisis(world, await ok(response), TEXT);
+    assertEquals(world.revenuecatCalls.length, 0);
+    assertEquals(lastLog(world).billing, null);
+  }, [flagged("crisis")]),
 );

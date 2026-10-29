@@ -216,6 +216,9 @@ export async function handle(req: Request): Promise<Response> {
       audioMs: null,
       limit: null,
       limitUsed: null,
+      billing: null,
+      billingMs: 0,
+      billingEvent: null,
     };
     writeLog(line);
   }

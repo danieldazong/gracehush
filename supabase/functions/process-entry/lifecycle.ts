@@ -66,13 +66,22 @@ export async function ensureProfile(admin: SupabaseClient, userId: string): Prom
 // The person's plan and time zone, for the free tier's check (step 22). A plan the table does not know reads as free (its
 // check constraint keeps it to three values, so this only guards against a future one), and the time zone is passed on as
 // it is: weekWindow reads one that Intl does not know as UTC, and says so.
-export async function readProfile(admin: SupabaseClient, userId: string): Promise<LimitProfile> {
-  const { data, error } = await admin.from("users_profile").select("subscription_tier, timezone")
+// The plan and the time zone for the free tier's check, and (step 30) when a paid plan ends, which the expiry guard reads.
+export type StoredProfile = LimitProfile & { expiresAt: string | null };
+
+export async function readProfile(admin: SupabaseClient, userId: string): Promise<StoredProfile> {
+  const { data, error } = await admin.from("users_profile").select(
+    "subscription_tier, timezone, subscription_expires_at",
+  )
     .eq("id", userId).maybeSingle();
   if (error || data === null) throw dbFailure("profile_read", error);
-  const row = data as { subscription_tier: string | null; timezone: string | null };
+  const row = data as {
+    subscription_tier: string | null;
+    timezone: string | null;
+    subscription_expires_at?: string | null;
+  };
   const tier = row.subscription_tier === "trial" || row.subscription_tier === "pro" ? row.subscription_tier : "free";
-  return { tier, timezone: row.timezone ?? "UTC" };
+  return { tier, timezone: row.timezone ?? "UTC", expiresAt: row.subscription_expires_at ?? null };
 }
 
 export async function findEntry(

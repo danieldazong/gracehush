@@ -376,20 +376,26 @@ Deno.test(
 // -- Step 22: the plan, the held-back recording's words, and the audio -----------------------------------------------------
 
 Deno.test(
-  "readProfile gives the plan and the time zone, reads an unknown plan as free, and fails plainly",
+  "readProfile gives the plan, the time zone and when a paid plan ends, reads an unknown plan as free, and fails plainly",
   withWorld(async (world, admin) => {
     const row = world.users.find((user) => user.id === USER)!;
-    assertEquals(await readProfile(admin, USER), { tier: "free", timezone: "UTC" });
+    assertEquals(await readProfile(admin, USER), { tier: "free", timezone: "UTC", expiresAt: null });
     for (const tier of ["trial", "pro"] as const) {
       row.subscription_tier = tier;
       row.timezone = "Africa/Lagos";
-      assertEquals(await readProfile(admin, USER), { tier, timezone: "Africa/Lagos" });
+      row.subscription_expires_at = "2026-11-29T12:00:00.000Z";
+      assertEquals(await readProfile(admin, USER), {
+        tier,
+        timezone: "Africa/Lagos",
+        expiresAt: "2026-11-29T12:00:00.000Z",
+      });
     }
+    row.subscription_expires_at = null;
     row.subscription_tier = "platinum";
     assertEquals((await readProfile(admin, USER)).tier, "free", "a plan this code does not know is not a free pass");
     row.subscription_tier = null;
     row.timezone = null;
-    assertEquals(await readProfile(admin, USER), { tier: "free", timezone: "UTC" });
+    assertEquals(await readProfile(admin, USER), { tier: "free", timezone: "UTC", expiresAt: null });
 
     // No row at all is a failure, with Postgres' code or "error" and nothing of its message.
     world.users.length = 0;
