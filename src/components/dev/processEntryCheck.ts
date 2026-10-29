@@ -6,13 +6,14 @@ import { getSupabase, getSupabaseUserId } from "@/services/supabaseClient";
 import type {
   ConfirmScriptureError,
   ConfirmScriptureResponse,
+  DeleteEntryError,
   ProcessEntryError,
   ProcessEntryLimitError,
   ProcessEntryResponse,
 } from "@/types";
 
 // Developer check (shown by DevToolsPanel, never to users, so its strings stay inline). It calls the deployed
-// process-entry and confirm-scripture functions from this phone, through supabase.functions.invoke (the path the app itself
+// process-entry, confirm-scripture and delete-entry functions from this phone, through supabase.functions.invoke (the path the app itself
 // uses since step 25), with made-up text, and prints one line per case: a verdict, a status, a code, counts and a time. It never
 // shows or logs a token, an id, a link or the text of a reflection. Each case that reaches the model takes 5 to 40 seconds,
 // and up to about 90 while the model is busy (the function tries again for that long before it answers AI_UNAVAILABLE).
@@ -42,7 +43,10 @@ const QUIET_CRISIS = "Nothing feels worth it anymore. I keep wishing I could go 
 
 type Reply = { status: number; json: unknown; ms: number };
 
-async function call(body: unknown, functionName: "process-entry" | "confirm-scripture" = "process-entry"): Promise<Reply> {
+async function call(
+  body: unknown,
+  functionName: "process-entry" | "confirm-scripture" | "delete-entry" = "process-entry",
+): Promise<Reply> {
   const started = Date.now();
   const supabase = getSupabase();
   if (!supabase) return { status: 0, json: null, ms: 0 };
@@ -71,7 +75,7 @@ const asSuccess = (reply: Reply): ProcessEntryResponse | null =>
     : null;
 
 const codeOf = (reply: Reply): string =>
-  (reply.json as ProcessEntryError | ConfirmScriptureError | null)?.error?.code ?? "no code";
+  (reply.json as ProcessEntryError | ConfirmScriptureError | DeleteEntryError | null)?.error?.code ?? "no code";
 const words = (text: string | undefined) => (text ? text.trim().split(/\s+/).length : 0);
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 const letters = (text: string) => text.replace(/\s+/g, "");
@@ -422,7 +426,7 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
   }
 
   // 8. Instructions inside the entry are only content.
-  await step("instructions inside the entry", { clientEntryId: randomUUID(), inputType: "text", text: HOSTILE }, (reply) => {
+  const hostile = await step("instructions inside the entry", { clientEntryId: randomUUID(), inputType: "text", text: HOSTILE }, (reply) => {
     const blocked = overLimit(reply);
     if (blocked !== null) return { skip: blocked };
     const body = asSuccess(reply);
@@ -505,6 +509,49 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
     }
   } else {
     skip("blocked entry, after an upgrade", `this account is ${plan ?? "of unknown plan"}, and an upgrade is what makes the held-back entry (set it to pro first)`);
+  }
+
+  // 11. delete-entry (step 29b): a malformed id is refused, an unknown one is a plain 404, and the last reflection this run made
+  // (the one with the instructions inside it) is deleted for good: 200, the row is gone for this phone's own select, the signed
+  // link for its devotional audio no longer works, and the same request again is a 404 (which the app counts as deleted). These
+  // need delete-entry deployed; before that they fail with the status the platform gave.
+  const deleting = async (label: string, body: unknown, judge: (reply: Reply) => Verdict | Promise<Verdict>) => {
+    const reply = await call(body, "delete-entry");
+    const verdict = await judge(reply);
+    if ("skip" in verdict) {
+      skip(label, verdict.skip);
+      return reply;
+    }
+    const status = reply.status === 0 ? "no answer" : `HTTP ${reply.status}`;
+    const note = `${verdict.note} (${status}, ${seconds(reply.ms)})`;
+    if (verdict.ok) pass(label, note);
+    else fail(label, note);
+    return reply;
+  };
+  await deleting("delete-entry, a malformed id", { entryId: "not-an-id" }, refused(400, "INVALID_REQUEST"));
+  await deleting("delete-entry, an entry that does not exist", { entryId: randomUUID() }, refused(404, "NOT_FOUND"));
+  const lastMade = asSuccess(hostile)?.entry ?? null;
+  if (lastMade === null) {
+    skip("delete-entry, the reflection this run made", "the last reflection of this run was not made (see above)");
+  } else {
+    const audioPath = lastMade.devotional?.audioPath ?? null;
+    await deleting("delete-entry, the reflection this run made", { entryId: lastMade.id }, async (reply) => {
+      if (reply.status !== 200) return { ok: false, note: `expected 200, got ${reply.status} ${codeOf(reply)}` };
+      const { count } = await supabase.from("journal_entries").select("id", { count: "exact", head: true }).eq("id", lastMade.id);
+      let fileNote = "it had no audio";
+      let fileGone = true;
+      if (audioPath !== null) {
+        const { data, error } = await supabase.storage.from("journal_media").createSignedUrl(audioPath, 60);
+        fileGone = error !== null || data === null;
+        fileNote = fileGone ? "its audio is gone" : "its audio can still be linked";
+      }
+      const ok = count === 0 && fileGone;
+      return { ok, note: ok ? `deleted: the row is gone and ${fileNote}` : `${count === 0 ? "the row is gone" : "the row is still there"}, ${fileNote}` };
+    });
+    await deleting("delete-entry, the same request again", { entryId: lastMade.id }, (reply) => ({
+      ok: reply.status === 404 && codeOf(reply) === "NOT_FOUND",
+      note: reply.status === 404 ? "NOT_FOUND: already gone, which the app counts as deleted" : `expected 404 NOT_FOUND, got ${reply.status} ${codeOf(reply)}`,
+    }));
   }
 
   if (modelBusy) {

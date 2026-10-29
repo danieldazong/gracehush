@@ -79,14 +79,15 @@ async function readEntries(rows: EntryRow[]): Promise<JournalEntry[]> {
 
 export async function upsertEntry(entry: JournalEntry): Promise<void> {
   await getDb().runAsync(
-    `INSERT INTO entries_cache (id, client_entry_id, row_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO entries_cache (id, client_entry_id, row_json, created_at, updated_at, is_prayer) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET client_entry_id = excluded.client_entry_id, row_json = excluded.row_json,
-       created_at = excluded.created_at, updated_at = excluded.updated_at`,
+       created_at = excluded.created_at, updated_at = excluded.updated_at, is_prayer = excluded.is_prayer`,
     entry.id,
     entry.clientEntryId,
     await encryptText(JSON.stringify(entry)),
     entry.createdAt,
     entry.updatedAt,
+    entry.prayer !== null ? 1 : 0,
   );
 }
 
@@ -122,6 +123,23 @@ export async function listEntriesSince(sinceIso: string): Promise<JournalEntry[]
   return readEntries(rows);
 }
 
+// The cached entries that are prayers, newest first (step 29). A row cached before schema version 3 has not said yet whether it
+// is one: it is opened this once and marked.
+export async function listPrayerEntries(): Promise<JournalEntry[]> {
+  const db = getDb();
+  const rows = await db.getAllAsync<EntryRow & { is_prayer: number | null }>(
+    "SELECT id, row_json, is_prayer FROM entries_cache WHERE is_prayer IS NOT 0 ORDER BY created_at DESC, id DESC",
+  );
+  const entries = await readEntries(rows);
+  const unmarked = new Set(rows.filter((row) => row.is_prayer === null).map((row) => row.id));
+  for (const entry of entries) {
+    if (unmarked.has(entry.id)) {
+      await db.runAsync("UPDATE entries_cache SET is_prayer = ? WHERE id = ?", entry.prayer !== null ? 1 : 0, entry.id);
+    }
+  }
+  return entries.filter((entry) => entry.prayer !== null);
+}
+
 // An entry and its affirmations leave the cache together.
 export async function removeEntry(id: string): Promise<void> {
   const db = getDb();
@@ -129,11 +147,13 @@ export async function removeEntry(id: string): Promise<void> {
   await db.runAsync("DELETE FROM entries_cache WHERE id = ?", id);
 }
 
-// Keeps the newest `keepNewest` entries (and the affirmations of those) and removes the rest. Returns how many went.
+// Keeps every prayer, and the newest `keepNewest` other entries (and the affirmations of those), and removes the rest: Prayers
+// reads its prayers from here (step 29). Returns how many went.
 export async function pruneEntries(keepNewest: number = 200): Promise<number> {
   const db = getDb();
-  const keep = `SELECT id FROM entries_cache ORDER BY created_at DESC, id DESC LIMIT ?`;
-  const gone = await db.runAsync(`DELETE FROM entries_cache WHERE id NOT IN (${keep})`, keepNewest);
+  const other = "COALESCE(is_prayer, 0) = 0";
+  const keep = `SELECT id FROM entries_cache WHERE ${other} ORDER BY created_at DESC, id DESC LIMIT ?`;
+  const gone = await db.runAsync(`DELETE FROM entries_cache WHERE ${other} AND id NOT IN (${keep})`, keepNewest);
   await db.runAsync(`DELETE FROM affirmations_cache WHERE entry_id NOT IN (SELECT id FROM entries_cache)`);
   return gone.changes;
 }

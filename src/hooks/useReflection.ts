@@ -8,11 +8,13 @@ import {
   listAffirmationsForEntry,
   readCachedAffirmations,
   readCachedEntry,
+  setPrayerTracked,
 } from "@/data/journalRepository";
 import { getCurrentSlot } from "@/data/selectors";
 import { confirmScriptureIfNeeded } from "@/services/scriptureConfirm";
+import { subscribe, syncNow } from "@/services/syncEngine";
 import { useDevStore } from "@/store/devStore";
-import type { Affirmation, JournalEntry, TimeSlot, UserProfile } from "@/types";
+import type { Affirmation, JournalEntry, Prayer, RepoResult, TimeSlot, UserProfile } from "@/types";
 
 export type ReflectionState =
   | { status: "loading" }
@@ -24,6 +26,8 @@ export type ReflectionState =
       affirmations: Affirmation[];
       profile: UserProfile;
       currentSlot: TimeSlot;
+      // Mark as Prayer Request (step 29): the entry shows the change at once, and the sync engine sends it.
+      setTracked: (tracked: boolean) => Promise<RepoResult<Prayer | null>>;
     };
 
 // What a load produced, with the entry it was for: another entry's data is never shown.
@@ -99,6 +103,16 @@ export function useReflection(entryId: string): ReflectionState {
     }
   }, [entryId]);
 
+  // A prayer change of this entry was settled by the sync engine (sent, or refused for good and read again): the phone holds the
+  // entry as it now stands.
+  const refreshFromPhone = useCallback(async () => {
+    const entry = await readCachedEntry(entryId);
+    if (entry === null) return;
+    setResult((previous) =>
+      previous?.entryId === entryId && previous.status === "ready" ? { ...previous, entry } : previous,
+    );
+  }, [entryId]);
+
   // The callback changes with the entry, so useFocusEffect reloads then if the screen is focused. Leaving the screen drops a
   // response that is still on its way and stops the reading.
   useFocusEffect(
@@ -112,11 +126,33 @@ export function useReflection(entryId: string): ReflectionState {
           load();
         }
       }, REFLECTION_POLL_MS);
+      const stopFollowing = subscribe((event) => {
+        if (event.type === "prayer" && event.entryId === entryId) void refreshFromPhone();
+      });
       return () => {
         clearInterval(timer);
+        stopFollowing();
         latestRequest.current += 1;
       };
-    }, [load]),
+    }, [load, refreshFromPhone, entryId]),
+  );
+
+  const setTracked = useCallback(
+    async (tracked: boolean) => {
+      const changed = await setPrayerTracked(entryId, tracked);
+      if (changed.ok) {
+        const prayer = changed.data;
+        setResult((previous) =>
+          previous?.entryId === entryId && previous.status === "ready"
+            ? { ...previous, entry: { ...previous.entry, prayer } }
+            : previous,
+        );
+        // The change waits on this phone: the engine sends it now, or once the phone is back online.
+        void syncNow("mutation");
+      }
+      return changed;
+    },
+    [entryId],
   );
 
   const retry = useCallback(() => {
@@ -140,5 +176,6 @@ export function useReflection(entryId: string): ReflectionState {
     affirmations: current.affirmations,
     profile: current.profile,
     currentSlot: getCurrentSlot(current.now, current.profile.reminders),
+    setTracked,
   };
 }

@@ -1,5 +1,5 @@
 import type { SymbolViewProps } from "expo-symbols";
-import { useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import {
   Pressable,
   ScrollView,
@@ -12,7 +12,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CrisisSupportPanel } from "@/components/crisis/CrisisSupportPanel";
+import { DeleteReflectionDialog } from "@/components/DeleteReflectionDialog";
 import { FadeIn } from "@/components/FadeIn";
 import { Icon } from "@/components/Icon";
 import { MiniPlayerCard } from "@/components/MiniPlayerCard";
@@ -23,14 +25,19 @@ import { TranscriptRow } from "@/components/TranscriptRow";
 import { copy } from "@/constants/copy";
 import { colors, layout } from "@/constants/theme";
 import { getPlaybackTrack } from "@/data/selectors";
+import { useAnnounce } from "@/hooks/useAnnounce";
+import { useDeleteReflection } from "@/hooks/useDeleteReflection";
 import { useReflection } from "@/hooks/useReflection";
 import type { RootStackScreenProps } from "@/navigation/types";
 import { haptics } from "@/services/haptics";
+import { useNoticeStore } from "@/store/noticeStore";
 import type {
   Affirmation,
   Devotional,
   JournalEntry,
+  Prayer,
   ReflectionTab,
+  RepoResult,
   Scripture,
   TimeSlot,
   UserProfile,
@@ -46,6 +53,7 @@ import {
 } from "./ReflectionStateViews";
 
 const { subline, words, request, footer } = copy.reflection;
+const deleteText = copy.deleteReflection;
 
 // The sections arrive one after another: each rises 10dp while it fades in, 60 ms after the one above it.
 const ARRIVAL = { rise: 10, duration: 240 };
@@ -57,6 +65,7 @@ const icons = {
   date: { android: "calendar_today", ios: "calendar" },
   prayer: { android: "volunteer_activism", ios: "hands.sparkles" },
   share: { android: "share", ios: "square.and.arrow.up" },
+  delete: { android: "delete", ios: "trash" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 type ReflectionHeaderProps = {
@@ -90,46 +99,98 @@ function ReflectionHeader({ date, onBack }: ReflectionHeaderProps) {
   );
 }
 
+type PrayerRequestRowProps = {
+  entryId: string;
+  prayer: Prayer | null;
+  onSetTracked: (tracked: boolean) => Promise<RepoResult<Prayer | null>>;
+};
+
 // The whole row is the touch target (the native Switch alone is 31 tall on iOS), so the Switch is only
-// a picture of the state and is hidden from the touch system and from screen readers.
-function PrayerRequestRow({ initialChecked }: { initialChecked: boolean }) {
-  // TODO(29): persist is_active_prayer + prayer fields
-  const [checked, setChecked] = useState(initialChecked);
+// a picture of the state and is hidden from the touch system and from screen readers. The state is the entry's
+// (step 29): a change shows at once and the sync engine sends it. Turning it off on an answered prayer asks
+// first, because its answered date and gratitude note go with it.
+function PrayerRequestRow({ entryId, prayer, onSetTracked }: PrayerRequestRowProps) {
+  const checked = prayer !== null;
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+  // A change the server refused for good is said here too, for this entry only.
+  const refused = useNoticeStore((store) => store.prayerChangeFailed === entryId);
+  // One change at a time: a second tap waits for the first to be saved on the phone.
+  const changing = useRef(false);
+
+  // Leaving the reflection ends the notice.
+  useEffect(() => () => useNoticeStore.getState().clearPrayerChangeFailed(), []);
+
+  async function change(tracked: boolean) {
+    if (changing.current) return;
+    changing.current = true;
+    setFailed(false);
+    useNoticeStore.getState().clearPrayerChangeFailed();
+    haptics.selection();
+    // TODO(34): prayer_tracked_changed { tracked }
+    const result = await onSetTracked(tracked);
+    changing.current = false;
+    if (!result.ok) setFailed(true);
+  }
+
+  function press() {
+    if (prayer !== null && prayer.isAnswered) {
+      setConfirmOpen(true);
+      return;
+    }
+    void change(!checked);
+  }
 
   return (
-    <Pressable
-      accessibilityRole="switch"
-      accessibilityState={{ checked }}
-      accessibilityLabel={request.title}
-      accessibilityHint={request.helper}
-      onPress={() => {
-        haptics.selection();
-        setChecked((current) => !current);
-      }}
-      style={({ pressed }) => pressed && styles.pressed}
-    >
-      <View className="card flex-row items-center gap-3 p-3.5">
-        <View className="size-9 items-center justify-center rounded-full bg-blush">
-          <Icon name={icons.prayer} size={20} color={colors.plum} />
+    <View className="gap-2">
+      <Pressable
+        accessibilityRole="switch"
+        accessibilityState={{ checked }}
+        accessibilityLabel={request.title}
+        accessibilityHint={request.helper}
+        onPress={press}
+        style={({ pressed }) => pressed && styles.pressed}
+      >
+        <View className="card flex-row items-center gap-3 p-3.5">
+          <View className="size-9 items-center justify-center rounded-full bg-blush">
+            <Icon name={icons.prayer} size={20} color={colors.plum} />
+          </View>
+          <View className="flex-1">
+            <Text className="text-label-lg text-ink">{request.title}</Text>
+            <Text className="mt-0.5 text-body-sm text-mauve">{request.helper}</Text>
+          </View>
+          <View
+            pointerEvents="none"
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Switch
+              value={checked}
+              trackColor={{ false: colors.petal, true: colors.plum }}
+              thumbColor={colors.card}
+              ios_backgroundColor={colors.petal}
+            />
+          </View>
         </View>
-        <View className="flex-1">
-          <Text className="text-label-lg text-ink">{request.title}</Text>
-          <Text className="mt-0.5 text-body-sm text-mauve">{request.helper}</Text>
-        </View>
-        <View
-          pointerEvents="none"
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        >
-          <Switch
-            value={checked}
-            trackColor={{ false: colors.petal, true: colors.plum }}
-            thumbColor={colors.card}
-            ios_backgroundColor={colors.petal}
-          />
-        </View>
-      </View>
-    </Pressable>
+      </Pressable>
+      {failed || refused ? (
+        <Text accessibilityLiveRegion="polite" className="text-center text-body-sm text-ink">
+          {copy.prayers.notice.failed}
+        </Text>
+      ) : null}
+      <ConfirmDialog
+        visible={confirmOpen}
+        title={request.remove.title}
+        body={request.remove.body}
+        confirmLabel={request.remove.confirm}
+        cancelLabel={request.remove.cancel}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          void change(false);
+        }}
+        onCancel={() => setConfirmOpen(false)}
+      />
+    </View>
   );
 }
 
@@ -154,6 +215,10 @@ type ReadyViewProps = {
   initialTab: ReflectionTab | undefined;
   onOpenPlayer: () => void;
   onReturn: () => void;
+  onSetTracked: (tracked: boolean) => Promise<RepoResult<Prayer | null>>;
+  // Delete reflection (step 29b): asks before deleting. `deleteOffline` is true after a tap with no connection.
+  onDelete: () => void;
+  deleteOffline: boolean;
 };
 
 // A finished entry with a devotional. The screen keys it by the entry and the tab it was opened on, so another
@@ -168,6 +233,9 @@ function ReadyView({
   initialTab,
   onOpenPlayer,
   onReturn,
+  onSetTracked,
+  onDelete,
+  deleteOffline,
 }: ReadyViewProps) {
   const { width } = useWindowDimensions();
   const { scripture } = entry;
@@ -231,7 +299,7 @@ function ReadyView({
       ) : null}
       <FadeIn {...arrive(5)}>
         <View className="gap-3 pt-1">
-          <PrayerRequestRow initialChecked={entry.prayer !== null} />
+          <PrayerRequestRow entryId={entry.id} prayer={entry.prayer} onSetTracked={onSetTracked} />
           <View className="flex-row items-center gap-2">
             <View className="flex-1">
               <PrimaryButton label={footer.returnToJournal} onPress={onReturn} />
@@ -249,6 +317,26 @@ function ReadyView({
               </Pressable>
             ) : null}
           </View>
+          {/* Deleting is permanent, so it is a quiet link at the very end, not a button beside the main action (step 29b). */}
+          <View className="items-center">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={deleteText.linkLabel}
+              accessibilityHint={deleteText.linkHint}
+              onPress={onDelete}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <View className="min-h-11 flex-row items-center gap-1.5 px-4">
+                <Icon name={icons.delete} size={16} color={colors.mauve} />
+                <Text className="btn-text__label text-mauve">{deleteText.link}</Text>
+              </View>
+            </Pressable>
+            {deleteOffline ? (
+              <Text accessibilityLiveRegion="polite" className="text-center text-body-sm text-mauve">
+                {deleteText.offline}
+              </Text>
+            ) : null}
+          </View>
         </View>
       </FadeIn>
     </ScrollView>
@@ -257,6 +345,10 @@ function ReadyView({
 
 export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Reflection">) {
   const state = useReflection(route.params.entryId);
+  // Delete reflection (step 29b): the dialog is shared with Prayers. A delete takes the person back to where they came from.
+  const deletion = useDeleteReflection(() => goBack());
+  const [deleteOffline, setDeleteOffline] = useState(false);
+  useAnnounce(deleteOffline ? deleteText.offline : null);
 
   // The chevron goes back to where the user came from. With nothing to go back to (a notification can
   // open Reflection first, step 28) it lands on Journal, like "Return to Journal".
@@ -311,6 +403,16 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
         initialTab={route.params.tab}
         onOpenPlayer={() => navigation.navigate("NowPlaying", { entryId: state.entry.id })}
         onReturn={returnToJournal}
+        onSetTracked={state.setTracked}
+        onDelete={() => {
+          // TODO(34): reflection_deleted { source: "reflection", had_audio: boolean }
+          const opened = deletion.ask({
+            entryId: state.entry.id,
+            answered: state.entry.prayer?.isAnswered === true,
+          });
+          setDeleteOffline(!opened);
+        }}
+        deleteOffline={deleteOffline}
       />
     );
   }
@@ -325,6 +427,7 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
         onBack={goBack}
       />
       {body}
+      <DeleteReflectionDialog {...deletion.dialog} />
     </SafeAreaView>
   );
 }

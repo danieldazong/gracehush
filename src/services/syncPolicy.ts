@@ -1,3 +1,5 @@
+import { NO_SESSION_CODE } from "@/utils/supabaseErrors";
+
 // What the sync engine does with a failure (step 24). Pure, so it is tested without a device. The codes are the ones
 // process-entry answers with (ProcessEntryErrorCode) plus the app's own: NETWORK (no answer), UNKNOWN (an answer the app
 // does not know) and UNREADABLE (the words saved on this phone cannot be read).
@@ -29,6 +31,29 @@ const ACTIONS: Record<string, FailureAction> = {
 // A code this table does not list is an answer the app has not met: it is tried again, never dropped.
 export function classify(code: string): FailureAction {
   return ACTIONS[code] ?? "retry";
+}
+
+// What the engine does with a prayer change the server did not take (step 29), from the HTTP status (0: no answer) and the
+// database's error code:
+//
+//   retry       no answer, a timeout, too many requests, or a server error: the same change again, later, with the backoff below
+//   pause_auth  the session was refused, or nobody is signed in: every change waits for the next start or return to the app
+//   drop        the database refused this change (a rule, a grant, a value it cannot take): it can never go, so it is
+//               removed, the entry is read again and the person is told. It is never retried.
+export type PrayerFailureAction = "retry" | "pause_auth" | "drop";
+
+// 42501: row level security or a missing grant; 23514: a check (the prayer rules of step 18); 22P02: a value of the wrong
+// type; 22001: a value too long.
+const PERMANENT_CODES = new Set(["42501", "23514", "22P02", "22001"]);
+
+export function classifyPrayerFailure(status: number, code: string): PrayerFailureAction {
+  if (code === NO_SESSION_CODE || status === 401 || /^PGRST30[123]$/.test(code)) return "pause_auth";
+  if (PERMANENT_CODES.has(code)) return "drop";
+  if (status === 0 || status === 408 || status === 429 || status >= 500) return "retry";
+  // A refusal with no database code comes from the gateway before the database: the session, not the change.
+  if (status === 403) return "pause_auth";
+  if (status >= 400) return "drop";
+  return "retry";
 }
 
 // 5 s, 15 s, 60 s, 5 min, 15 min, 1 h, and then 1 h again.

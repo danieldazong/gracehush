@@ -1,6 +1,8 @@
 // Turns what Supabase answered into the failure codes a RepoResult carries. Pure: no copy, no logging.
 
 export const NO_SESSION_ERROR_NAME = "NoSessionError";
+// The code a prayer change carries when nothing was sent because nobody is signed in (step 29).
+export const NO_SESSION_CODE = "NO_SESSION";
 
 // Thrown by the Supabase client's token callback when a request would go out without a signed-in user, so an
 // anonymous request can never leave the app (supabase-js would otherwise send its API key as the bearer token).

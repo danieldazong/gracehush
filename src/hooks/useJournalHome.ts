@@ -204,6 +204,19 @@ export function useJournalHome(): HomeState {
           load();
         } else if (event.type === "changed") {
           refreshPending();
+        } else if (event.type === "deleted") {
+          // A reflection was deleted (step 29b): it leaves the list on screen at once, also from an older page (pages merge by
+          // id, so a reload alone would keep it), together with its affirmations; the server's count is one lower.
+          setResult((previous) =>
+            previous?.status === "ready" && previous.key === key
+              ? {
+                  ...previous,
+                  entries: previous.entries.filter((entry) => entry.id !== event.entryId),
+                  affirmations: previous.affirmations.filter((affirmation) => affirmation.entryId !== event.entryId),
+                  total: previous.total === null ? null : Math.max(0, previous.total - 1),
+                }
+              : previous,
+          );
         }
       });
       return () => {
@@ -211,7 +224,7 @@ export function useJournalHome(): HomeState {
         stopFollowing();
         latestRequest.current += 1;
       };
-    }, [load, refreshPending]),
+    }, [load, refreshPending, key]),
   );
 
   const retry = useCallback(() => {

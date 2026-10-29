@@ -3,6 +3,7 @@ import { bsb, type BsbReference } from "@/data/mock/scripture";
 import { MOCK_USER_ID } from "@/data/mock/users";
 import type { EmotionKey, InputType, PrayerCategory } from "@/types";
 import type { JournalEntryRow } from "@/types/database";
+import { answeredDateToTimestamp, toCalendarDate } from "@/utils/prayerDates";
 
 export const ANXIOUS_ENTRY_ID = "entry-anxious-yesterday";
 export const CRISIS_ENTRY_ID = "entry-crisis-six-days-ago";
@@ -96,7 +97,8 @@ function readyEntry(spec: ReadyEntrySpec): JournalEntryRow {
     prayer_category: spec.prayer?.category ?? null,
     prayer_summary: spec.prayer?.summary ?? null,
     is_answered: spec.prayer?.answered !== undefined,
-    answered_at: spec.prayer?.answered?.at.toISOString() ?? null,
+    // Stored as the app stores an answered day: 12:00 UTC on it (utils/prayerDates.ts).
+    answered_at: spec.prayer?.answered ? answeredDateToTimestamp(toCalendarDate(spec.prayer.answered.at)) : null,
     answered_notes: spec.prayer?.answered?.note ?? null,
   });
 }

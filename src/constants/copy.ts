@@ -457,6 +457,13 @@ export const copy = {
     request: {
       title: "Mark as Prayer Request",
       helper: "Keep it in your Prayers to return to.",
+      // Turning it off on an answered prayer asks first (step 29).
+      remove: {
+        title: "Remove this from Prayers?",
+        body: "Its answered date and gratitude note will be removed.",
+        confirm: "Remove",
+        cancel: "Keep",
+      },
     },
     footer: {
       returnToJournal: "Return to Journal",
@@ -588,7 +595,6 @@ export const copy = {
     empty: {
       active: {
         title: "No open prayers right now.",
-        // TODO(29): true once Reflection’s prayer request toggle saves the prayer here
         body: "When you pray about something, you can keep it here and watch for God’s answer.",
       },
       answered: {
@@ -601,12 +607,18 @@ export const copy = {
       count: (count: number) => (count === 1 ? "1 answered prayer." : `${count} answered prayers.`),
       caption: "Recorded in your sanctuary journey",
     },
-    // The banner under the tabs. It stays until the next tab change or refresh: it never dismisses on a timer.
+    // The banner under the tabs. It stays until the next tab change or refresh: it never dismisses on a timer. `failed` is also
+    // what Prayers and Reflection say when the server refused a change for good (step 29).
     notice: {
       marked: "Marked as answered.",
       view: "View in Answered",
+      // Remove from Prayers and Delete reflection… (step 29b).
+      removed: "Removed from Prayers. It’s still in your Journal.",
+      deleted: "Reflection deleted.",
       failed: "We couldn’t save that change.",
     },
+    // Under the title while the phone is offline and changes wait to be sent (step 29).
+    offlinePending: "Changes will sync when you’re back online.",
     card: {
       untitled: (date: string) => `Prayer from ${date}`,
       days: (days: number) => (days <= 0 ? "Today" : days === 1 ? "1 day" : `${days} days`),
@@ -633,7 +645,16 @@ export const copy = {
     menu: {
       editNote: "Edit gratitude note",
       moveBack: "Move back to Active",
-      cancel: "Cancel",
+      removeFromPrayers: "Remove from Prayers",
+      deleteReflection: "Delete reflection…",
+    },
+    // Asked for an answered prayer only (step 29b): its answered date and gratitude note go with it. An Active prayer loses only its
+    // flag, so it is removed at once.
+    removeFromPrayers: {
+      title: "Remove this from Prayers?",
+      body: "Its answered date and gratitude note will be removed. The reflection stays in your Journal.",
+      confirm: "Remove",
+      cancel: "Keep",
     },
     moveBack: {
       title: "Move this prayer back to Active?",
@@ -672,6 +693,21 @@ export const copy = {
       save: "We couldn’t save this. Please try again.",
       date: "Choose a day between when you prayed and today.",
     },
+  },
+  // Delete a reflection for good (step 29b), from Prayers and from Reflection. The dialog is shared; `offline` is the calm line
+  // when there is no connection (a delete is online only), `link` the quiet button at the end of a reflection.
+  deleteReflection: {
+    title: "Delete this reflection forever?",
+    body: "This permanently deletes the reflection, its devotional audio, its affirmations and any recording. This can’t be undone.",
+    bodyAnswered:
+      "This permanently deletes the reflection, its devotional audio, its affirmations, any recording and your gratitude note. This can’t be undone.",
+    confirm: "Delete forever",
+    cancel: "Keep",
+    failed: "We couldn’t delete this reflection. Please try again.",
+    offline: "Connect to the internet to delete a reflection.",
+    link: "Delete reflection",
+    linkLabel: "Delete this reflection",
+    linkHint: "Asks before deleting",
   },
   // Profile & Settings (step 15). Row titles are Title Case as in the design, subtitles and dialog buttons are
   // sentence case, and the group labels are stored in sentence case (the eyebrow style uppercases them).

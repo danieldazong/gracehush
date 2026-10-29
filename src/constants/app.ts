@@ -40,6 +40,9 @@ export const GRATITUDE_COUNTER_FROM = 900;
 // ENTRY_CACHE_LIMIT on the phone (the read cache of step 24).
 export const ENTRIES_PAGE_SIZE = 30;
 export const ENTRY_CACHE_LIMIT = 200;
+// Prayers (step 29): the most prayers the screen asks the server for at once, newest first. The cache keeps every prayer
+// besides its ENTRY_CACHE_LIMIT other entries.
+export const PRAYERS_LIMIT = 300;
 // An entry that the server still calls "processing" this long after it was last touched belongs to a request that died
 // (the server's claim lapses after 3 minutes, step 19): the Journal does not list it, or it would be a card that never finishes.
 export const STALE_PROCESSING_MS = 10 * 60_000;
@@ -52,6 +55,13 @@ export const REFLECTION_POLL_MAX_MS = 120_000;
 // 150, step 22), and the sync engine's own ceiling (200 seconds, step 24) is above this one.
 export const PROCESS_ENTRY_TIMEOUT_MS = 155_000;
 export const CONFIRM_SCRIPTURE_TIMEOUT_MS = 15_000;
+// delete-entry (step 29b) makes a few Storage and database calls from a region far from the database: up to about 10 seconds. A
+// request that times out may still have succeeded, and sending it again answers NOT_FOUND, which counts as deleted.
+export const DELETE_ENTRY_TIMEOUT_MS = 30_000;
+
+// A sheet whose choice opens another Modal (a dialog, another sheet) goes on from the sheet's onDismiss on iOS, which cannot present
+// one Modal while another is still on its way out. If iOS never reports the dismissal, the choice goes on after this long.
+export const MODAL_HANDOFF_FALLBACK_MS = 1_000;
 
 // The player (step 12). Back and forward skip this far; the speed chips and the ambient chips show these,
 // in this order.

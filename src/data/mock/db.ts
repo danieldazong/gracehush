@@ -89,3 +89,10 @@ export function addMockEntry(kind: "ready" | "crisis", req: ProcessEntryRequest)
   }
   return id;
 }
+
+// The mock data's delete (data source "mock", step 29b): the entry and its affirmations go.
+export function removeMockEntry(id: string): void {
+  const db = getMockDb();
+  db.entries.splice(0, db.entries.length, ...db.entries.filter((row) => row.id !== id));
+  db.affirmations.splice(0, db.affirmations.length, ...db.affirmations.filter((row) => row.entry_id !== id));
+}

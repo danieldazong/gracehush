@@ -383,8 +383,10 @@ const row = ({
     // load the native modules behind them. These checks are not about them.
     fakes["@/db/database"] = { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined };
     fakes["@/db/outbox"] = {};
-    // Step 25: journalRepository.ts also imports the read cache, which needs the same native modules.
+    // Step 25: journalRepository.ts also imports the read cache, which needs the same native modules, and step 29 the
+    // queue of prayer changes.
     fakes["@/db/cache"] = {};
+    fakes["@/db/mutations"] = {};
     fakes["@/services/offlineSession"] = { endOfflineSession: async () => undefined };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
@@ -970,6 +972,7 @@ const row = ({
         "@/db/database": { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined },
         "@/db/outbox": {},
         "@/db/cache": {},
+        "@/db/mutations": {},
         "@/services/offlineSession": { endOfflineSession: async () => undefined },
       },
     });
@@ -1313,6 +1316,7 @@ const row = ({
         "@/db/database": { isDatabaseOpen: () => false },
         "@/db/outbox": {},
         "@/db/cache": {},
+        "@/db/mutations": {},
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();

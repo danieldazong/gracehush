@@ -24,10 +24,40 @@ export function parseCalendarDate(calendarDate: string): Date | null {
   return real ? date : null;
 }
 
-// What is stored for an answered day: 12:00 local on it, as an ISO string. Noon keeps the day the same when it
-// is read back in any zone from UTC-11 to UTC+12 and across a daylight-saving change.
+// What is stored for an answered day (step 29): 12:00 UTC on it, as an ISO string, read back with answeredDayOf. A calendar
+// day has no time zone, so neither has its stamp: the day stays the same on a phone that moves to any zone, Pacific/Kiritimati
+// (UTC+14) and Pacific/Honolulu (UTC-10) included. 12:00 in the phone's own zone (step 14) moved the day after a jump of more
+// than 12 hours, and the profile's zone is the phone's (it follows the phone, step 18), so it would not have held either.
 export function answeredDateToTimestamp(calendarDate: string): string | null {
-  return parseCalendarDate(calendarDate)?.toISOString() ?? null;
+  const date = parseCalendarDate(calendarDate);
+  if (date === null) return null;
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12)).toISOString();
+}
+
+// The day an answered_at stamp stands for, "2026-10-24": the stamp's UTC date. Null for text that is not a time.
+export function answeredDayOf(answeredAtIso: string): string | null {
+  const ms = Date.parse(answeredAtIso);
+  if (!Number.isFinite(ms)) return null;
+  const date = new Date(ms);
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+// The answered day as a local Date at 12:00 on it, for counting days on this phone's calendar.
+export function answeredLocalDate(answeredAtIso: string): Date | null {
+  const day = answeredDayOf(answeredAtIso);
+  return day === null ? null : parseCalendarDate(day);
+}
+
+// "Oct 24", or "Oct 24, 2025" with the year: the stamp's day, printed in UTC, where it is the day itself. Neither the phone's
+// zone nor a zone change the app has not caught up with yet can move it (on the iPhone, Hermes' local Date keeps the old zone
+// until the app restarts while Intl follows the new one: step 28).
+export function formatAnsweredDay(answeredAtIso: string, withYear: boolean): string {
+  return new Date(answeredAtIso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(withYear ? { year: "numeric" } : {}),
+    timeZone: "UTC",
+  });
 }
 
 // Between the day the prayer was created and today, both included.

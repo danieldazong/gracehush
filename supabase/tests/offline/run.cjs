@@ -62,15 +62,15 @@ const count = async (db, table = "outbox") => (await db.getFirstAsync(`SELECT CO
 
 // ================================================================== database
 async function databaseChecks() {
-  await test("the file is named after a hash of the user id, in WAL mode, migrated to version 2, with a key in the keychain", async (w) => {
+  await test("the file is named after a hash of the user id, in WAL mode, migrated to version 3, with a key in the keychain", async (w) => {
     const { db } = await openAs(w, "user_secret_id");
     const hash = sha16("user_secret_id");
     assert.deepEqual(w.sqlite.stats.opens, [`gracehush-${hash}.db`]);
     assert.ok(!w.sqlite.files().join(" ").includes("secret"));
-    assert.equal((await db.getFirstAsync("PRAGMA user_version")).user_version, 2);
+    assert.equal((await db.getFirstAsync("PRAGMA user_version")).user_version, 3);
     assert.equal((await db.getFirstAsync("PRAGMA journal_mode")).journal_mode, "wal");
     const tables = (await db.getAllAsync("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).map((r) => r.name);
-    for (const name of ["outbox", "entries_cache", "affirmations_cache"]) assert.ok(tables.includes(name), name);
+    for (const name of ["outbox", "entries_cache", "affirmations_cache", "mutations"]) assert.ok(tables.includes(name), name);
     assert.ok(w.secure.items.has(`gracehush.dbkey.${hash}`));
     assert.equal(w.secure.options.get(`gracehush.dbkey.${hash}`).keychainAccessible, "when-unlocked-this-device-only");
     assert.ok(!w.logs.some((line) => line.includes("secret")));

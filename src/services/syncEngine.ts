@@ -1,14 +1,17 @@
 import { AppState } from "react-native";
 
+import { dropPrayerChange, sendPrayerChange } from "@/data/entriesLive";
 import { getKnownTier } from "@/data/journalRepository";
 import * as cache from "@/db/cache";
 import { isDatabaseOpen } from "@/db/database";
+import * as mutations from "@/db/mutations";
 import * as outbox from "@/db/outbox";
 import { isProcessorMock, processItem } from "@/services/entryProcessor";
 import { cleanOldRecordings } from "@/services/recordingCleanup";
 import { deleteRecording } from "@/services/recordingFiles";
 import { markReachable, markUnreachable } from "@/services/connectivity";
-import { classify, retryDelayMs } from "@/services/syncPolicy";
+import { classify, classifyPrayerFailure, retryDelayMs } from "@/services/syncPolicy";
+import { useNoticeStore } from "@/store/noticeStore";
 import { selectCanSend, useOfflineStore } from "@/store/offlineStore";
 import type { OutboxItem, OutboxStatus, ProcessingStage, ProcessOutcome } from "@/types";
 
@@ -23,10 +26,17 @@ import type { OutboxItem, OutboxStatus, ProcessingStage, ProcessOutcome } from "
 //   leaves an item that is sent again, and the server answers a finished entry with the same entry (nothing is made twice).
 // - Nothing logs a word the person wrote, a file path, an id or a key. A log line is a state, an error code, an attempt
 //   count or a delay. A crisis answer is logged like any other ("finished"): the app logs nothing about a crisis entry.
-export type SyncReason = "start" | "foreground" | "online" | "timer" | "submit" | "upgrade" | "manual";
+// - Prayer changes (step 29, db/mutations.ts) go before the outbox, one at a time, in the same run: they are small, and the
+//   person is looking at them.
+export type SyncReason = "start" | "foreground" | "online" | "timer" | "submit" | "upgrade" | "manual" | "mutation";
 
 export type SyncEvent =
   | { type: "changed" }
+  // A prayer change was settled: the server took it (`saved`), or refused it for good and it was dropped. The cache holds the
+  // entry as it now stands either way.
+  | { type: "prayer"; entryId: string; saved: boolean }
+  // A reflection was deleted for good (step 29b): the lists that are on screen drop it at once.
+  | { type: "deleted"; entryId: string }
   | { type: "stage"; clientEntryId: string; stage: ProcessingStage }
   | { type: "finished"; clientEntryId: string; entryId: string; isCrisis: boolean }
   | {
@@ -85,6 +95,11 @@ export function subscribe(listener: (event: SyncEvent) => void): () => void {
   };
 }
 
+// A reflection was deleted (step 29b): the lists that are on screen drop it at once. Called by services/entryDeletion.ts.
+export function announceEntryDeleted(entryId: string): void {
+  emit({ type: "deleted", entryId });
+}
+
 export function isSyncEngineStarted(): boolean {
   return started;
 }
@@ -104,9 +119,13 @@ async function arm(gen: number): Promise<void> {
   clearTimer();
   if (!canRun()) return;
   try {
-    const [retryAt, resetAt] = await Promise.all([outbox.nextAttemptAt(), outbox.earliestLimitReset()]);
+    const [retryAt, resetAt, changeAt] = await Promise.all([
+      outbox.nextAttemptAt(),
+      outbox.earliestLimitReset(),
+      mutations.nextMutationAt(),
+    ]);
     if (gen !== generation) return;
-    const times = [retryAt, resetAt].filter((time): time is number => time !== null);
+    const times = [retryAt, resetAt, changeAt].filter((time): time is number => time !== null);
     if (times.length === 0) return;
     const wait = Math.min(Math.max(Math.min(...times) - Date.now(), MIN_TIMER_MS), MAX_TIMER_MS);
     timer = setTimeout(() => {
@@ -134,7 +153,7 @@ async function resumeHeld(withAuth: boolean): Promise<void> {
     const now = Date.now();
     const tier = getKnownTier();
     const paid = tier === "trial" || tier === "pro";
-    let resumed = withAuth ? await outbox.resumePausedAuth(now) : 0;
+    let resumed = withAuth ? (await outbox.resumePausedAuth(now)) + (await mutations.resumePausedMutations(now)) : 0;
     resumed += paid ? await outbox.resumeLimitReached(now) : await outbox.resumeLimitReachedDue(now);
     if (resumed > 0) emit({ type: "changed" });
   } catch {
@@ -241,16 +260,67 @@ async function sendOne(item: OutboxItem, gen: number): Promise<void> {
   }
 }
 
+// One prayer change (step 29). Nothing about it is logged but a state and a code.
+async function sendChange(change: mutations.PendingChange, gen: number): Promise<void> {
+  try {
+    const outcome = await sendPrayerChange(change);
+    if (gen !== generation) return;
+    if (outcome.kind !== "failed") {
+      markReachable();
+      log("prayer change saved");
+      emit({ type: "prayer", entryId: change.entryId, saved: true });
+      return;
+    }
+    const { status, code } = outcome;
+    if (status === 0) markUnreachable();
+    else markReachable();
+    switch (classifyPrayerFailure(status, code)) {
+      case "retry": {
+        const reason = status === 0 ? "NETWORK" : code || `HTTP_${status}`;
+        const delay = retryDelayMs(reason, change.attempts + 1);
+        await mutations.markRetry(change.entryId, change.revision, Date.now() + delay, reason);
+        log(`prayer change retry ${reason}, attempt ${change.attempts + 1}, in ${Math.round(delay / 1000)} s`);
+        break;
+      }
+      case "pause_auth":
+        await mutations.markPausedAuth();
+        log("prayer changes paused until the next sign-in");
+        break;
+      case "drop":
+        if (await dropPrayerChange(change)) {
+          log(`prayer change refused: ${code || status}`);
+          useNoticeStore.getState().pushPrayerChangeFailed(change.entryId);
+          emit({ type: "prayer", entryId: change.entryId, saved: false });
+        }
+        break;
+    }
+    emit({ type: "changed" });
+  } catch {
+    // The database closed (sign-out), or a write failed with it still open: the change stays in the queue and goes again.
+    if (gen === generation && isDatabaseOpen()) {
+      try {
+        const delay = retryDelayMs("UNKNOWN", change.attempts + 1);
+        await mutations.markRetry(change.entryId, change.revision, Date.now() + delay, "UNKNOWN");
+      } catch {
+        // Nothing more can be done: the next start sends it.
+      }
+    }
+  }
+}
+
 async function drain(gen: number): Promise<void> {
   while (gen === generation && canRun()) {
-    let item: OutboxItem | null;
+    let change: mutations.PendingChange | null;
+    let item: OutboxItem | null = null;
     try {
-      item = await outbox.nextDue(Date.now());
+      change = await mutations.nextDueMutation(Date.now());
+      if (change === null) item = await outbox.nextDue(Date.now());
     } catch {
       return;
     }
-    if (item === null) return;
-    await sendOne(item, gen);
+    if (change !== null) await sendChange(change, gen);
+    else if (item !== null) await sendOne(item, gen);
+    else return;
   }
 }
 
@@ -318,13 +388,15 @@ export function startSyncEngine(): void {
   void begin(gen);
 }
 
-// Sign-out, or the user changed. Whatever is in the air is ignored when it lands.
+// Sign-out, or the user changed. Whatever is in the air is ignored when it lands, and a notice about a refused prayer change
+// goes with the session.
 export function stopSyncEngine(): void {
   started = false;
   generation += 1;
   clearTimer();
   stopListening?.();
   stopListening = null;
+  useNoticeStore.getState().clearPrayerChangeFailed();
 }
 
 // The person deleted a refused reflection (Journal's Review), or chose to record it again: the item and its recording

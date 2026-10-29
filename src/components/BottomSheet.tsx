@@ -8,10 +8,14 @@ import { colors, radii, shadows } from "@/constants/theme";
 type BottomSheetProps = {
   visible: boolean;
   onClose: () => void;
+  // Called once the sheet has finished closing. iOS only (React Native reports it when the modal is gone; Android has no such
+  // event). A choice made in a sheet that opens another Modal waits for it, because iOS cannot present one Modal while another is
+  // still on its way out.
+  onDismiss?: () => void;
   children: ReactNode;
 };
 
-export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
+export function BottomSheet({ visible, onClose, onDismiss, children }: BottomSheetProps) {
   const { top } = useSafeAreaInsets();
 
   return (
@@ -22,6 +26,7 @@ export function BottomSheet({ visible, onClose, children }: BottomSheetProps) {
       statusBarTranslucent
       navigationBarTranslucent
       onRequestClose={onClose}
+      onDismiss={onDismiss}
     >
       {/* A Modal is presented outside the app's root view on iOS, so a SafeAreaView in it needs a provider of its own. */}
       <SafeAreaProvider>

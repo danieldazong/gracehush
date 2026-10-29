@@ -18,7 +18,8 @@ import type { RepoResult } from "@/types";
 const ACCOUNT_REQUEST_MS = 600;
 
 // Asks for a copy of the user's data. The mock only answers; step 31 builds the ZIP and the download link.
-// It shares the dev failure flag with the prayer changes and the profile save ("Fail next save (dev)").
+// It shares the dev failure flag with the mock data's prayer changes and the profile save ("Fail next save (dev)").
+// TODO(31): include the prayers, their answered dates and their gratitude notes in the data export.
 export async function requestDataExport(): Promise<RepoResult<{ requestedAt: string }>> {
   await simulateWrite(ACCOUNT_REQUEST_MS);
   if (takeMockPrayerMutationFailure()) {

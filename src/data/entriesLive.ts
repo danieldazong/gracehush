@@ -1,14 +1,20 @@
-import { ENTRY_CACHE_LIMIT } from "@/constants/app";
+import { ENTRY_CACHE_LIMIT, PRAYERS_LIMIT } from "@/constants/app";
+import { copy } from "@/constants/copy";
+import type { PrayerPatch } from "@/data/columns";
 import {
   selectAffirmations,
   selectEntriesPage,
   selectEntry,
+  selectPrayerRows,
   updateAffirmationFavorite,
+  updatePrayerColumns,
 } from "@/data/entriesRemote";
 import { toAffirmation, toJournalEntry } from "@/data/mappers";
+import { applyPrayerPatch, trackPatch } from "@/data/prayerPatches";
 import { getNewestReadyEntry, isListedEntry } from "@/data/selectors";
 import * as cache from "@/db/cache";
 import { isDatabaseOpen } from "@/db/database";
+import * as mutations from "@/db/mutations";
 import type { Affirmation, AffirmationSource, JournalEntry, RepoResult, TimeSlot } from "@/types";
 
 // The real source of the Journal's entries and affirmations (step 25), used by journalRepository.ts when the data source is
@@ -34,6 +40,18 @@ async function safely<T>(task: () => Promise<T>, fallback: T): Promise<T> {
 
 function bySlot(a: Affirmation, b: Affirmation): number {
   return SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot);
+}
+
+// Entries read from the server, with the prayer changes this phone has not sent yet on top (step 29), so a change that waits
+// never flickers back when the server's copy is read. Without the database there is nothing waiting to know of.
+async function withPendingChanges(entries: JournalEntry[]): Promise<JournalEntry[]> {
+  const waiting = await safely(() => mutations.listMutations(), []);
+  if (waiting.length === 0) return entries;
+  const patches = new Map(waiting.map((change) => [change.entryId, change.patch]));
+  return entries.map((entry) => {
+    const patch = patches.get(entry.id);
+    return patch === undefined ? entry : applyPrayerPatch(entry, patch);
+  });
 }
 
 // ---- what the phone already has ------------------------------------------------------------------------------------------
@@ -109,7 +127,7 @@ export async function loadEntriesPage(cursor: string | null, limit: number): Pro
   const result = await selectEntriesPage(cursor, limit);
   if (!result.ok) return result;
   const { rows, nextCursor, total } = result.data;
-  const entries = rows.map(toJournalEntry);
+  const entries = await withPendingChanges(rows.map(toJournalEntry));
   await safely(async () => {
     for (const entry of entries) await cache.upsertEntry(entry);
     if (cursor === null) await cache.pruneEntries(ENTRY_CACHE_LIMIT);
@@ -134,13 +152,112 @@ export async function fetchEntry(id: string): Promise<JournalEntry | null> {
       await safely(() => cache.removeEntry(id), undefined);
       return null;
     }
-    const entry = toJournalEntry(result.data);
+    const [entry] = await withPendingChanges([toJournalEntry(result.data)]);
     await safely(() => cache.upsertEntry(entry), undefined);
     return entry;
   }
   const cached = await readCachedEntry(id);
   if (cached !== null) return cached;
   throw new Error(result.code);
+}
+
+// ---- prayers (step 29) -----------------------------------------------------------------------------------------------------
+// The entries the phone has that are prayers, newest first, with the changes not sent yet already in them (a change is written
+// to the cached entry when it is made).
+export async function readCachedPrayerEntries(): Promise<JournalEntry[]> {
+  return safely(() => cache.listPrayerEntries(), []);
+}
+
+// Every prayer the server has (up to PRAYERS_LIMIT), with this phone's waiting changes on top, written to the cache. A cached
+// prayer the server no longer counts as one (changed on another phone) is no prayer in the cache either, unless a change made
+// here says otherwise; that is known only when the server's list is whole.
+export async function loadPrayerEntries(): Promise<RepoResult<JournalEntry[]>> {
+  const result = await selectPrayerRows();
+  if (!result.ok) return result;
+  const entries = await withPendingChanges(result.data.map(toJournalEntry));
+  await safely(async () => {
+    for (const entry of entries) await cache.upsertEntry(entry);
+    if (result.data.length >= PRAYERS_LIMIT) return;
+    const listed = new Set(entries.map((entry) => entry.id));
+    const waiting = new Set((await mutations.listMutations()).map((change) => change.entryId));
+    for (const cached of await cache.listPrayerEntries()) {
+      if (!listed.has(cached.id) && !waiting.has(cached.id)) {
+        await cache.upsertEntry(applyPrayerPatch(cached, trackPatch(false)));
+      }
+    }
+  }, undefined);
+  return { ok: true, data: entries.filter((entry) => entry.prayer !== null) };
+}
+
+// A prayer change made on this phone: the cached entry shows it at once and the queue keeps it until the sync engine has sent
+// it. `build` checks the entry and gives the change, or a failure; nothing is written then. The caller wakes the engine.
+export async function changePrayer(
+  entryId: string,
+  build: (entry: JournalEntry) => RepoResult<PrayerPatch>,
+): Promise<RepoResult<JournalEntry>> {
+  const message = copy.prayers.errors.save;
+  const entry = await readCachedEntry(entryId);
+  if (entry === null || entry.isCrisis) return { ok: false, code: "NOT_FOUND", message };
+  if (entry.status !== "ready") return { ok: false, code: "INVALID", message };
+  const built = build(entry);
+  if (!built.ok) return built;
+  const next = applyPrayerPatch(entry, built.data);
+  try {
+    await cache.upsertEntry(next);
+    try {
+      await mutations.enqueuePatch(entryId, built.data);
+    } catch (error) {
+      // The change could not be kept, so the entry must not show it.
+      await cache.upsertEntry(entry).catch(() => undefined);
+      throw error;
+    }
+  } catch {
+    return { ok: false, code: "UNKNOWN", message };
+  }
+  return { ok: true, data: next };
+}
+
+// What sending one waiting change gave (the sync engine acts on it): saved, or the entry is gone, or the server's status and
+// the database's code.
+export type PrayerSendOutcome =
+  | { kind: "saved" }
+  | { kind: "gone" }
+  | { kind: "failed"; status: number; code: string };
+
+// Sends a waiting change. When the server took it, the cache gets the entry as the server now has it, with any change made
+// while this one was on its way on top, and the change leaves the queue unless such a change was merged into it (it goes next).
+// An entry the server no longer has leaves the cache.
+export async function sendPrayerChange(change: mutations.PendingChange): Promise<PrayerSendOutcome> {
+  const result = await updatePrayerColumns(change.entryId, change.patch);
+  if (!result.ok) return { kind: "failed", status: result.status, code: result.code };
+  const removed = await mutations.removeMutation(change.entryId, change.revision);
+  if (result.row === null) {
+    await cache.removeEntry(change.entryId);
+    return { kind: "gone" };
+  }
+  const saved = toJournalEntry(result.row);
+  const later = removed ? null : await mutations.getMutation(change.entryId);
+  await cache.upsertEntry(later === null ? saved : applyPrayerPatch(saved, later.patch));
+  return { kind: "saved" };
+}
+
+// A change the server refused for good: it leaves the queue (unless another was merged into it while it was on its way, which
+// then goes next), and the entry is read again so the phone shows what the server has. True when the change was dropped.
+export async function dropPrayerChange(change: mutations.PendingChange): Promise<boolean> {
+  if (!(await mutations.removeMutation(change.entryId, change.revision))) return false;
+  const result = await selectEntry(change.entryId);
+  if (result.ok) {
+    if (result.data === null) await cache.removeEntry(change.entryId);
+    else await cache.upsertEntry(toJournalEntry(result.data));
+  }
+  return true;
+}
+
+// A reflection was deleted for good (step 29b): its cached entry, its affirmations and any prayer change that waited for it go. A
+// closed database is "nothing cached".
+export async function forgetEntry(entryId: string): Promise<void> {
+  await safely(() => cache.removeEntry(entryId), undefined);
+  await safely(() => mutations.dropMutation(entryId), undefined);
 }
 
 // The affirmations of an entry, with the same fallbacks as fetchEntry.

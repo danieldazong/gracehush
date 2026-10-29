@@ -73,6 +73,16 @@ export function getPrayerCounts(prayers: Prayer[]): {
   return { active: prayers.length - answered, answered, total: prayers.length };
 }
 
+// The prayer Prayers lists for an entry (step 29), or null when the entry is none. A prayer the model did not write a summary
+// for (one the person marked) shows the reflection's title instead, and never the person's own words. The mapper is left as it
+// is, so it still gives what the Edge Function gives for the same row.
+export function toListedPrayer(entry: JournalEntry): Prayer | null {
+  const { prayer } = entry;
+  if (prayer === null) return null;
+  if (prayer.summary.trim() !== "") return prayer;
+  return { ...prayer, summary: entry.devotional?.title ?? "" };
+}
+
 // Open prayers, the one that has waited longest first. Filtering copies the list, so the sort never touches the input.
 export function selectActivePrayers(prayers: Prayer[]): Prayer[] {
   return prayers

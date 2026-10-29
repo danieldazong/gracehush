@@ -2,7 +2,6 @@ import { useScrollToTop } from "@react-navigation/native";
 import type { SymbolViewProps } from "expo-symbols";
 import { useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
-  ActionSheetIOS,
   FlatList,
   Platform,
   Pressable,
@@ -19,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { BottomSheet } from "@/components/BottomSheet";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DeleteReflectionDialog } from "@/components/DeleteReflectionDialog";
 import { Icon } from "@/components/Icon";
 import { PrayerCard } from "@/components/prayers/PrayerCard";
 import { MarkAnsweredSheet } from "@/components/prayers/MarkAnsweredSheet";
@@ -26,32 +26,30 @@ import { PrimaryButton } from "@/components/PrimaryButton";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Skeleton } from "@/components/Skeleton";
+import { MODAL_HANDOFF_FALLBACK_MS } from "@/constants/app";
 import { copy } from "@/constants/copy";
-import { colors, emotionColors, layout, radii } from "@/constants/theme";
+import { colors, emotionColors, layout, radii, shadows } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
+import { useDeleteReflection } from "@/hooks/useDeleteReflection";
 import { usePrayers } from "@/hooks/usePrayers";
 import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
+import { useNoticeStore } from "@/store/noticeStore";
 import type { Prayer, RepoResult } from "@/types";
-import {
-  calendarDaysBetween,
-  formatEntryDate,
-  formatShortDate,
-  getPrayerTitle,
-} from "@/utils/format";
+import { calendarDaysBetween, getPrayerTitle } from "@/utils/format";
+import { answeredLocalDate, formatAnsweredDay } from "@/utils/prayerDates";
+import { getPrayerMenu, type PrayerMenuAction } from "@/utils/prayerMenu";
 
 type PrayerTab = "active" | "answered";
-type Notice = "marked" | "failed";
+type Notice = "marked" | "failed" | "removed" | "deleted" | "offline";
 type SheetMode = "mark" | "editNote";
 
-const { tabs, notice: noticeText, menu, moveBack } = copy.prayers;
+const { tabs, notice: noticeText, moveBack, removeFromPrayers: removeText } = copy.prayers;
 
 const icons = {
   prayer: { android: "volunteer_activism", ios: "hands.sparkles" },
   leaf: { android: "eco", ios: "leaf" },
   node: { android: "check", ios: "checkmark" },
-  edit: { android: "edit", ios: "pencil" },
-  moveBack: { android: "undo", ios: "arrow.uturn.backward" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 // FlatList clones ListEmptyComponent with a style and an onLayout, so each state forwards both to its root.
@@ -179,14 +177,15 @@ type TimelineItemProps = {
 // One answered prayer on the timeline: the day it was answered and how long it took above its card.
 function TimelineItem({ prayer, index, isLast, now, children }: TimelineItemProps) {
   const { answeredAt, createdAt } = prayer;
+  // The answered day is a calendar day (utils/prayerDates.ts): the same day in every time zone.
+  const answeredDay = answeredAt ? answeredLocalDate(answeredAt) : null;
   // The year shows only when it is not this one.
-  const date = answeredAt
-    ? new Date(answeredAt).getFullYear() === now.getFullYear()
-      ? formatShortDate(answeredAt)
-      : formatEntryDate(answeredAt)
-    : null;
-  const afterDays = answeredAt
-    ? Math.max(0, calendarDaysBetween(new Date(createdAt), new Date(answeredAt)))
+  const date =
+    answeredAt && answeredDay
+      ? formatAnsweredDay(answeredAt, answeredDay.getFullYear() !== now.getFullYear())
+      : null;
+  const afterDays = answeredDay
+    ? Math.max(0, calendarDaysBetween(new Date(createdAt), answeredDay))
     : null;
 
   return (
@@ -239,26 +238,54 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
   const [sheetTarget, setSheetTarget] = useState<{ prayer: Prayer; mode: SheetMode } | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [sheetKey, setSheetKey] = useState(0);
-  // The overflow menu of an answered card: a sheet on Android (iOS has a native action sheet), then the
-  // dialog that asks before a prayer moves back to Active.
+  // The ⋯ menu of a prayer (the app's own sheet on both platforms), then the dialog that asks before a prayer moves back to
+  // Active.
   const [menuPrayer, setMenuPrayer] = useState<Prayer | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [moveTarget, setMoveTarget] = useState<Prayer | null>(null);
   const [moving, setMoving] = useState(false);
+  // The tab the open menu belongs to decides its items (step 29b): an answered prayer also edits its note and moves back.
+  const [menuTab, setMenuTab] = useState<PrayerTab>("active");
+  // What was chosen in the menu, waiting for the sheet to finish closing. Most choices open another Modal (a dialog, the Mark
+  // Answered sheet), and iOS cannot present one while another is still on its way out, so there the choice goes on from the
+  // sheet's onDismiss (or from a timer, if iOS never reports it). Android overlaps its dialogs fine and goes on at once.
+  const afterMenu = useRef<(() => void) | null>(null);
+  // The widest label of the menu so far. Every label gets that width as a minimum, so the icons line up in one column and the
+  // labels start at one edge, while the icon and label of a row stay together as one group centered in the card. It only grows
+  // (a label measured wider raises it), so it never settles on a width that is too small, and it needs no reset.
+  const [menuLabelWidth, setMenuLabelWidth] = useState(0);
+  // An answered prayer asks before it is removed from Prayers (its date and note go with it); an Active one does not.
+  const [removeTarget, setRemoveTarget] = useState<Prayer | null>(null);
+  const [removing, setRemoving] = useState(false);
+  // Delete reflection… (step 29b). The dialog is shared with Reflection. With no connection nothing opens and the banner says why.
+  const deletion = useDeleteReflection(() => setNotice("deleted"));
 
   const ready = state.status === "ready" ? state : null;
+  // A change the server refused for good (step 29) says the same as one that failed here.
+  const refused = useNoticeStore((store) => store.prayerChangeFailed !== null);
   const noticeMessage =
     notice === "marked"
       ? noticeText.marked
-      : notice === "failed"
-        ? noticeText.failed
-        : null;
+      : notice === "removed"
+        ? noticeText.removed
+        : notice === "deleted"
+          ? noticeText.deleted
+          : notice === "offline"
+            ? copy.deleteReflection.offline
+            : notice === "failed" || refused
+              ? noticeText.failed
+              : null;
   useAnnounce(noticeMessage);
+
+  function clearNotice() {
+    setNotice(null);
+    useNoticeStore.getState().clearPrayerChangeFailed();
+  }
 
   // A tab change shows the list from its top and clears the banner.
   function changeTab(next: PrayerTab) {
     setTab(next);
-    setNotice(null);
+    clearNotice();
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }
 
@@ -289,31 +316,62 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
     return result;
   }
 
-  function openMenu(prayer: Prayer) {
-    if (Platform.OS === "ios") {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: getPrayerTitle(prayer),
-          options: [menu.editNote, menu.moveBack, menu.cancel],
-          cancelButtonIndex: 2,
-          userInterfaceStyle: "light",
-        },
-        (index) => {
-          if (index === 0) openSheet(prayer, "editNote");
-          if (index === 1) setMoveTarget(prayer);
-        },
-      );
-      return;
-    }
+  // The menu is the app's own sheet on both platforms (utils/prayerMenu.ts lists its items), not the iPhone's native action
+  // sheet: that one draws system blue and system red, which are not in the palette (DESIGN.md: sheets are blush, and the
+  // destructive colour is Crisis Red).
+  function openMenu(prayer: Prayer, from: PrayerTab) {
     setMenuPrayer(prayer);
+    setMenuTab(from);
     setMenuVisible(true);
   }
 
-  function chooseFromMenu(action: "editNote" | "moveBack") {
+  function runAfterMenu() {
+    const run = afterMenu.current;
+    afterMenu.current = null;
+    run?.();
+  }
+
+  function pickFromMenu(prayer: Prayer, action: PrayerMenuAction) {
     setMenuVisible(false);
-    if (menuPrayer === null) return;
-    if (action === "editNote") openSheet(menuPrayer, "editNote");
-    else setMoveTarget(menuPrayer);
+    afterMenu.current = () => chooseFromMenu(prayer, action);
+    if (Platform.OS === "ios") setTimeout(runAfterMenu, MODAL_HANDOFF_FALLBACK_MS);
+    else runAfterMenu();
+  }
+
+  function chooseFromMenu(prayer: Prayer, action: PrayerMenuAction) {
+    if (action === "editNote") openSheet(prayer, "editNote");
+    else if (action === "moveBack") setMoveTarget(prayer);
+    else if (action === "remove") askRemove(prayer);
+    else askDelete(prayer);
+  }
+
+  // Remove from Prayers: the reflection stays in the Journal. An Active prayer loses only its flag, so it goes at once; an
+  // answered one also loses its date and gratitude note, so it asks first.
+  function askRemove(prayer: Prayer) {
+    if (prayer.isAnswered) setRemoveTarget(prayer);
+    else void removeNow(prayer);
+  }
+
+  async function removeNow(prayer: Prayer) {
+    if (ready === null) return;
+    const result = await ready.removeFromPrayers(prayer.id);
+    // TODO(34): prayer_removed { was_answered: boolean }
+    setNotice(result.ok ? "removed" : "failed");
+  }
+
+  async function confirmRemove() {
+    if (removeTarget === null || removing) return;
+    setRemoving(true);
+    await removeNow(removeTarget);
+    setRemoving(false);
+    setRemoveTarget(null);
+  }
+
+  // Delete reflection…: permanent, so it always asks, and only while there is a connection.
+  function askDelete(prayer: Prayer) {
+    // TODO(34): reflection_deleted { source: "prayers", had_audio: boolean }
+    const opened = deletion.ask({ entryId: prayer.id, answered: prayer.isAnswered });
+    if (!opened) setNotice("offline");
   }
 
   async function confirmMoveBack() {
@@ -337,6 +395,9 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
           <Text className="eyebrow">{copy.prayers.recorded(ready.counts.total)}</Text>
         ) : null}
       </View>
+      {ready.waitingOffline ? (
+        <Text className="mt-1 text-body-sm text-mauve">{copy.prayers.offlinePending}</Text>
+      ) : null}
       <View className="mt-2">
         <SegmentedControl
           accessibilityLabel={tabs.label}
@@ -414,6 +475,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
                 now={ready.now}
                 onOpen={(entryId) => navigation.navigate("Reflection", { entryId })}
                 onMarkAnswered={(prayer) => openSheet(prayer, "mark")}
+                onOpenMenu={(prayer) => openMenu(prayer, "active")}
               />
             );
           }
@@ -428,7 +490,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
                 variant="answered"
                 prayer={item}
                 onOpen={(entryId) => navigation.navigate("Reflection", { entryId })}
-                onOpenMenu={openMenu}
+                onOpenMenu={(prayer) => openMenu(prayer, "answered")}
                 onAddNote={(prayer) => openSheet(prayer, "editNote")}
               />
             </TimelineItem>
@@ -451,7 +513,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
             <RefreshControl
               refreshing={ready.refreshing}
               onRefresh={() => {
-                setNotice(null);
+                clearNotice();
                 ready.refresh();
               }}
               tintColor={colors.plum}
@@ -470,32 +532,63 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
           onSubmit={submitSheet}
         />
       ) : null}
-      {Platform.OS === "android" ? (
-        <BottomSheet visible={menuVisible} onClose={() => setMenuVisible(false)}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={menu.editNote}
-            onPress={() => chooseFromMenu("editNote")}
-            style={({ pressed }) => pressed && styles.pressed}
-          >
-            <View className="list-row">
-              <Icon name={icons.edit} size={22} color={colors.plum} />
-              <Text className="text-body text-ink">{menu.editNote}</Text>
-            </View>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={menu.moveBack}
-            onPress={() => chooseFromMenu("moveBack")}
-            style={({ pressed }) => pressed && styles.pressed}
-          >
-            <View className="list-row">
-              <Icon name={icons.moveBack} size={22} color={colors.plum} />
-              <Text className="text-body text-ink">{menu.moveBack}</Text>
-            </View>
-          </Pressable>
-        </BottomSheet>
-      ) : null}
+      <BottomSheet visible={menuVisible} onClose={() => setMenuVisible(false)} onDismiss={runAfterMenu}>
+        {menuPrayer !== null ? (
+          <Text numberOfLines={2} className="mb-3 text-center text-body-sm text-mauve">
+            {getPrayerTitle(menuPrayer)}
+          </Text>
+        ) : null}
+        {/* The rows sit in one white card with a hairline between them, like Profile's groups (DESIGN.md: cards are white with a
+            petal outline and rows are at least 56 high). The shadow and the clipping are on different views: with both on
+            one view, iOS clips the shadow. */}
+        <View className="rounded-card border border-petal bg-card" style={shadows.card}>
+          <View className="overflow-hidden rounded-card">
+            {getPrayerMenu(menuTab).map((item, index) => (
+              <View key={item.action}>
+                {index > 0 ? <View className="divider mx-4" /> : null}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={item.label}
+                  onPress={() => {
+                    if (menuPrayer !== null) pickFromMenu(menuPrayer, item.action);
+                  }}
+                  style={({ pressed }) => pressed && styles.pressed}
+                >
+                  {/* Icon and label are one group centered in the card (like the sheet's caption, the Filter sheet's chips and the
+                      dialogs); the labels share the widest one's width so the icons and the labels line up from row to row, and
+                      shrink lets a long label wrap. The icon sits in a soft circle as on Profile's rows: linen for a normal row,
+                      a Crisis Red tint for the delete. */}
+                  <View className="list-row justify-center">
+                    <View
+                      className={
+                        item.destructive
+                          ? "size-9 items-center justify-center rounded-full bg-crisis/12"
+                          : "size-9 items-center justify-center rounded-full bg-linen-deep"
+                      }
+                    >
+                      <Icon name={item.icon} size={18} color={item.destructive ? colors.crisis : colors.plum} />
+                    </View>
+                    <Text
+                      onLayout={(event) => {
+                        const width = Math.ceil(event.nativeEvent.layout.width);
+                        setMenuLabelWidth((widest) => Math.max(widest, width));
+                      }}
+                      style={menuLabelWidth > 0 ? { minWidth: menuLabelWidth } : undefined}
+                      className={
+                        item.destructive
+                          ? "shrink text-left text-body text-crisis"
+                          : "shrink text-left text-body text-ink"
+                      }
+                    >
+                      {item.label}
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        </View>
+      </BottomSheet>
       <ConfirmDialog
         visible={moveTarget !== null}
         title={moveBack.title}
@@ -506,6 +599,17 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
         onConfirm={confirmMoveBack}
         onCancel={() => setMoveTarget(null)}
       />
+      <ConfirmDialog
+        visible={removeTarget !== null}
+        title={removeText.title}
+        body={removeText.body}
+        confirmLabel={removeText.confirm}
+        cancelLabel={removeText.cancel}
+        loading={removing}
+        onConfirm={confirmRemove}
+        onCancel={() => setRemoveTarget(null)}
+      />
+      <DeleteReflectionDialog {...deletion.dialog} />
     </SafeAreaView>
   );
 }

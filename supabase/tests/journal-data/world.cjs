@@ -295,19 +295,31 @@ function makeServer() {
     offline: false,
     // A promise every request waits for: holds the network until a check releases it.
     gate: null,
-    // Queues of answers for the two functions: (call) => Response | Promise<Response>. An empty queue answers "finished".
-    functions: { "process-entry": [], "confirm-scripture": [] },
+    // Queues of answers for the functions: (call) => Response | Promise<Response>. An empty queue answers "finished" (and, for
+    // delete-entry, deletes the caller's entry for real, as step 29b's function does).
+    functions: { "process-entry": [], "confirm-scripture": [], "delete-entry": [] },
     functionCalls: [],
+    // The ids delete-entry deleted (step 29b), in order.
+    deletedEntries: [],
     // Answers for the REST tables: the next request of that table is answered with this instead (a Response, or a function).
     rest: { journal_entries: [], daily_affirmations: [] },
     // What a process-entry call with no scripted answer makes of the entry.
     makeEntry: readyResult,
+    // The prayer updates the server took (step 29): the body and the rows it changed.
+    prayerUpdates: [],
   };
 
   function applyFilters(rows, params) {
     let out = rows;
     for (const [key, value] of params) {
       if (["select", "order", "limit", "offset"].includes(key)) continue;
+      // or=(a.eq.x,b.eq.y): any of them (step 29 asks for the tracked or answered prayers this way).
+      if (key === "or") {
+        const parts = value.replace(/^\(|\)$/g, "").split(",").map((part) => /^([a-z_]+)\.eq\.(.*)$/.exec(part));
+        if (parts.some((part) => part === null)) throw new Error(`the fake server does not know the filter or=${value}`);
+        out = out.filter((row) => parts.some(([, column, operand]) => String(row[column]) === operand));
+        continue;
+      }
       const m = /^(eq|neq|lt|lte|gt|gte|in)\.(.*)$/s.exec(value);
       if (!m) throw new Error(`the fake server does not know the filter ${key}=${value}`);
       const [, op, operand] = m;
@@ -364,6 +376,36 @@ function makeServer() {
       }
       return new Response(null, { status: 204 });
     }
+    if (method === "PATCH" && table === "journal_entries") {
+      // The app's grant on journal_entries (step 18): the prayer columns and nothing else.
+      const granted = ["is_active_prayer", "is_answered", "answered_at", "answered_notes", "prayer_category"];
+      const extra = Object.keys(body ?? {}).filter((key) => !granted.includes(key));
+      if (extra.length > 0) {
+        state.violations.push(`grant: ${extra.join(", ")}`);
+        return json(403, { code: "42501", message: "permission denied for table journal_entries", details: null, hint: null });
+      }
+      // The table's prayer rules (step 18), on each row as the update would leave it.
+      for (const row of matched) {
+        const next = { ...row, ...body };
+        const broken =
+          next.is_answered !== (next.answered_at !== null)
+            ? "answered_fields_match"
+            : next.is_crisis && (next.is_active_prayer || next.is_answered)
+              ? "crisis_not_prayer"
+              : next.answered_notes !== null && next.answered_notes.length > 1000
+                ? "answered_note_length"
+                : null;
+        if (broken !== null) {
+          return json(400, { code: "23514", message: `violates check constraint "${broken}"`, details: null, hint: null });
+        }
+      }
+      state.prayerUpdates.push({ body, ids: matched.map((row) => row.id) });
+      matched.forEach((row) => Object.assign(row, body, { updated_at: stamp(clock.now) }));
+      if ((headers.prefer ?? "").includes("return=representation")) {
+        return json(200, project(matched, url.searchParams.get("select"), table));
+      }
+      return new Response(null, { status: 204 });
+    }
     state.violations.push(`${method} ${table}`);
     return json(405, { message: "the fake server does not answer this" });
   }
@@ -393,6 +435,17 @@ function makeServer() {
         state.entries.push(made.row);
         state.affirmations.push(...made.affirmations);
         return json(200, made.response);
+      }
+      if (name === "delete-entry") {
+        // Step 29b: the caller's own entry and its affirmations go; another person's entry and a missing one are the same 404.
+        const index = state.entries.findIndex((row) => row.id === body?.entryId && row.user_id === sub);
+        if (index < 0) return fnError(404, "NOT_FOUND");
+        const [gone] = state.entries.splice(index, 1);
+        for (let i = state.affirmations.length - 1; i >= 0; i -= 1) {
+          if (state.affirmations[i].entry_id === gone.id) state.affirmations.splice(i, 1);
+        }
+        state.deletedEntries.push(gone.id);
+        return json(200, { deleted: true });
       }
       return json(200, { scripture: null });
     }
@@ -427,7 +480,7 @@ function makeUpload() {
 }
 
 // ------------------------------------------------------------------ one world per check
-function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free" } = {}) {
+function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes: extraFakes = {} } = {}) {
   const sqlite = offline.makeSqlite();
   const secure = offline.makeSecureStore();
   const net = offline.makeNetInfo();
@@ -466,6 +519,8 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free" } = {}
       affirmationRequests += 1;
     },
   };
+  // A suite can fake more modules that plain Node cannot load (step 29b: the player store and the devotional files).
+  Object.assign(fakes, extraFakes);
   const env = makeEnv({ fakes });
   const logs = [];
   const real = { log: console.log, info: console.info, warn: console.warn };

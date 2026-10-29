@@ -2,8 +2,9 @@
 // and records how many there are in PRAGMA user_version. A migration that has shipped is never edited: a change is a new
 // entry at the end of the list. Each entry is a list of fixed statements, so no value is ever put into SQL text.
 //
-// What is encrypted is the words. The columns outbox.text, entries_cache.row_json and affirmations_cache.row_json hold a token
-// made by fieldCrypto.ts, never plain text. Everything else is bookkeeping: ids, statuses, counts and times.
+// What is encrypted is the words. The columns outbox.text, entries_cache.row_json, affirmations_cache.row_json and
+// mutations.patch_json hold a token made by fieldCrypto.ts, never plain text. Everything else is bookkeeping: ids, statuses,
+// counts, flags and times.
 export const MIGRATIONS: readonly (readonly string[])[] = [
   // Version 1.
   [
@@ -47,4 +48,21 @@ export const MIGRATIONS: readonly (readonly string[])[] = [
   ],
   // Version 2 (step 25): a recording that is already uploaded is not uploaded again when its reflection is sent again.
   ["ALTER TABLE outbox ADD COLUMN uploaded INTEGER NOT NULL DEFAULT 0"],
+  // Version 3 (step 29). mutations: the prayer changes made on this phone that the server has not confirmed yet, one row per
+  // entry with every change merged into one patch (db/mutations.ts); patch_json is encrypted, because a gratitude note is the
+  // person's words, and revision counts the changes merged in, so the engine removes a row only when nothing was added while
+  // it was being sent. entries_cache.is_prayer: 1 for a cached entry that is a prayer, 0 for one that is not, NULL for one
+  // cached before this version and not read since. Prayers reads the prayers alone, and the cache trim keeps them.
+  [
+    `CREATE TABLE mutations (
+      entry_id TEXT PRIMARY KEY NOT NULL,
+      patch_json TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at INTEGER NOT NULL,
+      last_error_code TEXT,
+      updated_at INTEGER NOT NULL
+    )`,
+    "ALTER TABLE entries_cache ADD COLUMN is_prayer INTEGER",
+  ],
 ];

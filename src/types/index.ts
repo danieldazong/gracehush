@@ -228,6 +228,22 @@ export interface ConfirmScriptureError {
   error: { code: ConfirmScriptureErrorCode; message: string; requestId: string };
 }
 
+// delete-entry (step 29b): deletes one reflection for good: its recording, its devotional audio, its affirmations and the row.
+// NOT_FOUND means it is already gone (or never was this person's): the app counts that as deleted. ALREADY_PROCESSING is a
+// reflection that a request is still making.
+export type DeleteEntryRequest = { entryId: string };
+export type DeleteEntryResponse = { deleted: true };
+export type DeleteEntryErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "NOT_FOUND"
+  | "METHOD_NOT_ALLOWED"
+  | "ALREADY_PROCESSING"
+  | "INTERNAL";
+export interface DeleteEntryError {
+  error: { code: DeleteEntryErrorCode; message: string; requestId: string };
+}
+
 // New Entry (step 10). Step 23 swapped the mock recorder for the real one without changing these; step 24 moved the submit to the
 // sync engine, and step 25 gave the engine the real server.
 export type RecorderStatus = { isRecording: boolean; durationMs: number; metering: number }; // metering 0..1

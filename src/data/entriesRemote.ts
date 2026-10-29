@@ -1,19 +1,21 @@
+import { PRAYERS_LIMIT } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import {
   AFFIRMATION_COLUMNS,
   ENTRY_COLUMNS,
   type AffirmationRow,
   type EntryRow,
+  type PrayerPatch,
 } from "@/data/columns";
 import { getSupabase, getSupabaseUserId } from "@/services/supabaseClient";
 import type { RepoResult } from "@/types";
-import { describeFailure, toFailureCode } from "@/utils/supabaseErrors";
+import { describeFailure, NO_SESSION_CODE, toFailureCode } from "@/utils/supabaseErrors";
 import { normalizeTimestamp } from "@/utils/timestamp";
 
 // The only code that sends a request about journal_entries and daily_affirmations (step 25), as profileRemote.ts is for
 // users_profile. It reads with the explicit column lists of data/columns.ts and writes only what the migration grants the app:
-// is_favorite. Every query filters by the user's id as well as relying on row level security. Nothing here logs more than a
-// table and an error code.
+// is_favorite, and the prayer columns (step 29). Every query filters by the user's id as well as relying on row level security.
+// Nothing here logs more than a table and an error code.
 
 // The statuses the Journal lists. A failed entry is not listed: the phone that made it keeps it as a card of its own until it
 // is prepared, and a refused or deleted one is no reflection (step 25).
@@ -121,6 +123,60 @@ export async function selectAffirmations(entryId: string): Promise<RepoResult<Af
   if (error !== null) return fail("daily_affirmations", status, error, copy.journal.error.message);
   lastError = null;
   return { ok: true, data };
+}
+
+// The entries that are prayers, tracked or answered, newest first, at most PRAYERS_LIMIT (step 29). A crisis entry and an
+// unfinished one never are: the table's rules say so too.
+// TODO: paginate if a user passes 300 prayers.
+export async function selectPrayerRows(): Promise<RepoResult<EntryRow[]>> {
+  const supabase = getSupabase();
+  const userId = getSupabaseUserId();
+  if (supabase === null || userId === null) return unauthorized(copy.prayers.error.message);
+  const { data, error, status } = await supabase
+    .from("journal_entries")
+    .select(ENTRY_COLUMNS)
+    .eq("user_id", userId)
+    .eq("is_crisis", false)
+    .eq("processing_status", "ready")
+    .or("is_active_prayer.eq.true,is_answered.eq.true")
+    .order("created_at", { ascending: false })
+    .limit(PRAYERS_LIMIT);
+  if (error !== null) return fail("journal_entries", status, error, copy.prayers.error.message);
+  lastError = null;
+  return { ok: true, data: data.map(withCanonicalTimes) };
+}
+
+// What sending a prayer change gave: the row as the server now has it (null when this user has no such entry: it was
+// deleted), or the HTTP status and the database's error code, which the failure policy reads (services/syncPolicy.ts).
+// NO_SESSION_CODE is the app's own: nobody is signed in, so nothing was sent.
+export type PrayerWriteResult = { ok: true; row: EntryRow | null } | { ok: false; status: number; code: string };
+
+// Sends one prayer change: the columns of the patch and no other (db/mutations.ts keeps only the prayer columns).
+export async function updatePrayerColumns(entryId: string, patch: PrayerPatch): Promise<PrayerWriteResult> {
+  const supabase = getSupabase();
+  const userId = getSupabaseUserId();
+  if (supabase === null || userId === null) {
+    lastError = "no session";
+    return { ok: false, status: 0, code: NO_SESSION_CODE };
+  }
+  const { data, error, status } = await supabase
+    .from("journal_entries")
+    .update(patch)
+    .eq("id", entryId)
+    .eq("user_id", userId)
+    .select(ENTRY_COLUMNS)
+    .maybeSingle();
+  if (error !== null) {
+    lastError = describeFailure("journal_entries", status, error);
+    if (__DEV__) {
+      console.warn(`[supabase] ${lastError}`);
+    }
+    // A token request that threw before anything was sent (NoSessionError) is the same as no session.
+    const noSession = status === 0 && toFailureCode(status, error) === "UNAUTHORIZED";
+    return { ok: false, status, code: noSession ? NO_SESSION_CODE : (error.code ?? "") };
+  }
+  lastError = null;
+  return { ok: true, row: data === null ? null : withCanonicalTimes(data) };
 }
 
 // The one column of daily_affirmations the app may write. An update that changes no row means the affirmation is missing or

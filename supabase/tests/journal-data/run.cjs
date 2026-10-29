@@ -1279,17 +1279,20 @@ async function engineChecks() {
     assert.equal(w.server.state.requests.length, 0);
   });
 
-  await test("engine: a database from step 24 (version 1) is upgraded to version 2 with its rows and its key kept", async (w) => {
+  await test("engine: a database from step 24 (version 1) is upgraded to the latest version with its rows and its key kept", async (w) => {
     const database = w.use("@/db/database");
     const outbox = w.use("@/db/outbox");
     await outbox.enqueue(text("c1"));
     await outbox.enqueue(audio("a1"));
     const db = database.getDb();
+    // What version 1 did not have yet: version 2's column, and version 3's table and column (step 29).
     await db.execAsync("ALTER TABLE outbox DROP COLUMN uploaded");
+    await db.execAsync("DROP TABLE mutations");
+    await db.execAsync("ALTER TABLE entries_cache DROP COLUMN is_prayer");
     await db.execAsync("PRAGMA user_version = 1");
     await database.closeUserDatabase();
     await database.openUserDatabase("user_a");
-    assert.equal((await database.getDb().getFirstAsync("PRAGMA user_version")).user_version, 2);
+    assert.equal((await database.getDb().getFirstAsync("PRAGMA user_version")).user_version, 3);
     assert.equal((await outbox.get("c1")).text, WORDS, "the words are still readable with the same key");
     assert.equal((await outbox.get("c1")).uploaded, false);
     assert.equal((await outbox.get("a1")).uploaded, false);

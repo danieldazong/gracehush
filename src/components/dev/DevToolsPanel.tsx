@@ -6,15 +6,18 @@ import { Pressable, Text, View } from "react-native";
 import { getLastFunctionCall, type FunctionCall } from "@/api/journalApi";
 import { ENTRIES_PAGE_SIZE } from "@/constants/app";
 import {
+  countPendingPrayerChanges,
   getLatestAffirmations,
   getProfile,
   getUsage,
   listEntries,
   listPrayers,
+  readCachedPrayers,
   setMockSubscriptionTier,
 } from "@/data/journalRepository";
 import { runProcessEntryCheck } from "@/components/dev/processEntryCheck";
 import { supabaseEnv } from "@/constants/env";
+import { changePrayer } from "@/data/entriesLive";
 import { getLastEntriesError } from "@/data/entriesRemote";
 import {
   countVisibleProfileRows,
@@ -32,6 +35,7 @@ import {
   getCurrentSlot,
   getPrayerCounts,
   getReflectionDays,
+  selectActivePrayers,
 } from "@/data/selectors";
 import { isDatabaseOpen } from "@/db/database";
 import * as outbox from "@/db/outbox";
@@ -90,6 +94,21 @@ async function outboxLine(): Promise<string> {
     return "outbox: could not be read";
   }
 }
+
+// How many prayer changes wait on this phone to be sent (step 29): a count only.
+async function pendingChangesLine(): Promise<string> {
+  return `Pending changes: ${await countPendingPrayerChanges()}`;
+}
+
+// Check 8 of the step 29 walk-through: a prayer change the database refuses for good ("answered" with no date breaks the
+// answered_fields_match rule), on the oldest open prayer this phone has. It shows at once, then the server refuses it: the
+// notice shows and the prayer is read again, and nothing is tried again. Real data only.
+async function sendBadPrayerChange(): Promise<void> {
+  const target = selectActivePrayers(await readCachedPrayers())[0];
+  if (target === undefined) return;
+  const changed = await changePrayer(target.id, () => ({ ok: true, data: { is_answered: true } }));
+  if (changed.ok) void syncNow("manual");
+}
 const TOKEN_LABELS: Record<SessionTokenCheck, string> = {
   ok: "has role = authenticated",
   "no-role-claim": "NO role claim: activate the Supabase integration in Clerk",
@@ -146,7 +165,7 @@ async function loadDataCheck(
     getProfile().catch(() => null), // a failure here is shown by the Supabase check, not by this list
     getUsage(),
     listEntries(),
-    listPrayers(),
+    listPrayers().then((result) => (result.ok ? result.data : [])),
     getLatestAffirmations(),
   ]);
   const ready = entries.filter((entry) => entry.status === "ready" && !entry.isCrisis);
@@ -311,6 +330,7 @@ function DevToolsContent() {
   const [affirmationLines, setAffirmationLines] = useState<string[]>(["affirmations: …"]);
   const [affirmationBusy, setAffirmationBusy] = useState(false);
   const [outboxText, setOutboxText] = useState("outbox: …");
+  const [pendingText, setPendingText] = useState("Pending changes: …");
   // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
   const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
   const crisisEntryId = targets.find((target) => target.label === "Crisis")?.entryId ?? null;
@@ -330,12 +350,15 @@ function DevToolsContent() {
     };
   }, [scenario, mockProfileVersion]);
 
-  // The outbox counts follow the sync engine: every change it makes to the queue refreshes them.
+  // The outbox counts follow the sync engine: every change it makes to the queue refreshes them, and the waiting prayer
+  // changes with them.
   useEffect(() => {
     let cancelled = false;
     const read = () => {
-      outboxLine().then((line) => {
-        if (!cancelled) setOutboxText(line);
+      Promise.all([outboxLine(), pendingChangesLine()]).then(([line, pending]) => {
+        if (cancelled) return;
+        setOutboxText(line);
+        setPendingText(pending);
       });
     };
     read();
@@ -561,7 +584,9 @@ function DevToolsContent() {
         <View className="items-center gap-2">
           <Text className="text-center text-body-sm text-mauve">Outbox (dev)</Text>
           <Text className="text-center text-body-sm text-ink">{outboxText}</Text>
+          <Text className="text-center text-body-sm text-ink">{pendingText}</Text>
           <DevButton label="Sync now (dev)" onPress={() => void syncNow("manual")} />
+          <DevButton label="Bad prayer change (dev)" onPress={() => void sendBadPrayerChange()} />
         </View>
         <View className="gap-2">
           <Text className="text-center text-body-sm text-mauve">Data source (dev)</Text>

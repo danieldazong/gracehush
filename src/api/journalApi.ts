@@ -1,11 +1,13 @@
 import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
 
-import { CONFIRM_SCRIPTURE_TIMEOUT_MS, PROCESS_ENTRY_TIMEOUT_MS } from "@/constants/app";
+import { CONFIRM_SCRIPTURE_TIMEOUT_MS, DELETE_ENTRY_TIMEOUT_MS, PROCESS_ENTRY_TIMEOUT_MS } from "@/constants/app";
 import { getSupabase } from "@/services/supabaseClient";
 import type {
   Affirmation,
   ConfirmScriptureRequest,
   ConfirmScriptureResponse,
+  DeleteEntryRequest,
+  DeleteEntryResponse,
   Devotional,
   JournalEntry,
   Prayer,
@@ -15,7 +17,7 @@ import type {
 } from "@/types";
 import { NO_SESSION_ERROR_NAME } from "@/utils/supabaseErrors";
 
-// The only code that calls the two Edge Functions (step 25). supabase-js sends the Clerk session token as the bearer
+// The only code that calls the Edge Functions (step 25, and delete-entry since step 29b). supabase-js sends the Clerk session token as the bearer
 // token by itself (the accessToken option of src/services/supabaseClient.ts), so nothing here builds an Authorization
 // header or asks Clerk for a token. Every call answers with data or with a failure that carries the HTTP status and a
 // code; it never throws.
@@ -24,7 +26,7 @@ import { NO_SESSION_ERROR_NAME } from "@/utils/supabaseErrors";
 // the Response, which is where the function's own error code (and, for a 402, the saved entry and the numbers) is read.
 // Nothing here logs a body, a token, a text or an id: the dev panel's Supabase check reads getLastFunctionCall().
 
-export type FunctionName = "process-entry" | "confirm-scripture";
+export type FunctionName = "process-entry" | "confirm-scripture" | "delete-entry";
 
 export type FunctionResult<T> =
   | { ok: true; data: T }
@@ -146,6 +148,10 @@ function isConfirmScriptureResponse(value: unknown): value is ConfirmScriptureRe
   return isRecord(value) && "scripture" in value && (value.scripture === null || isScripture(value.scripture));
 }
 
+function isDeleteEntryResponse(value: unknown): value is DeleteEntryResponse {
+  return isRecord(value) && value.deleted === true;
+}
+
 // ---- failures ------------------------------------------------------------------------------------------------------
 // For an answer that has none of our codes in it: the platform's own 4xx and 5xx (a function that is not deployed, a
 // worker that ran out of memory, a request that took too long).
@@ -181,7 +187,7 @@ async function readFailure(error: unknown): Promise<{ status: number; code: stri
 
 async function callFunction<T>(
   name: FunctionName,
-  body: ProcessEntryRequest | ConfirmScriptureRequest,
+  body: ProcessEntryRequest | ConfirmScriptureRequest | DeleteEntryRequest,
   timeout: number,
   isValid: (value: unknown) => value is T,
 ): Promise<FunctionResult<T>> {
@@ -210,6 +216,12 @@ export function processEntry(request: ProcessEntryRequest): Promise<FunctionResu
 // confirm-scripture (step 20): the passage of one reflection, read again from the Bible.
 export function confirmScripture(entryId: string): Promise<FunctionResult<ConfirmScriptureResponse>> {
   return callFunction("confirm-scripture", { entryId }, CONFIRM_SCRIPTURE_TIMEOUT_MS, isConfirmScriptureResponse);
+}
+
+// delete-entry (step 29b): one reflection, deleted for good on the server (its files, its affirmations and the row). NOT_FOUND
+// means it is already gone: the caller counts that as deleted.
+export function deleteEntry(entryId: string): Promise<FunctionResult<DeleteEntryResponse>> {
+  return callFunction("delete-entry", { entryId }, DELETE_ENTRY_TIMEOUT_MS, isDeleteEntryResponse);
 }
 
 // The 402 body (step 22): the entry the server saved and when the free week ends. Null for any other body.

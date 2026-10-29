@@ -26,6 +26,7 @@ type PrayerCardProps =
       now: Date;
       onOpen: (prayerId: string) => void;
       onMarkAnswered: (prayer: Prayer) => void;
+      onOpenMenu: (prayer: Prayer) => void;
     }
   | {
       variant: "answered";
@@ -52,7 +53,7 @@ function Reference({ reference }: { reference: string }) {
 
 type ActiveCardProps = Extract<PrayerCardProps, { variant: "active" }>;
 
-function ActiveCard({ prayer, now, onOpen, onMarkAnswered }: ActiveCardProps) {
+function ActiveCard({ prayer, now, onOpen, onMarkAnswered, onOpenMenu }: ActiveCardProps) {
   const title = getPrayerTitle(prayer);
   const days = copy.prayers.card.days(getDaysSince(prayer.createdAt, now));
   const summary = prayer.summary.trim();
@@ -67,9 +68,9 @@ function ActiveCard({ prayer, now, onOpen, onMarkAnswered }: ActiveCardProps) {
         style={({ pressed }) => pressed && styles.pressed}
       >
         <View className="gap-4">
-          {/* min-w-[170px] makes the days chip drop under the title when the title would get narrower than that. */}
-          <View className="flex-row flex-wrap items-start justify-between gap-x-2 gap-y-2">
-            <View className="min-w-[170px] flex-1 gap-1">
+          {/* min-w-[150px] makes the days chip drop under the title when the title would get narrower than that, and pr-9 keeps both clear of the menu button in the corner (step 29b). */}
+          <View className="flex-row flex-wrap items-start justify-between gap-x-2 gap-y-2 pr-9">
+            <View className="min-w-[150px] flex-1 gap-1">
               {prayer.category ? <Text className="eyebrow">{prayer.category}</Text> : null}
               <Text className="text-section text-plum-deep">{title}</Text>
             </View>
@@ -96,6 +97,16 @@ function ActiveCard({ prayer, now, onOpen, onMarkAnswered }: ActiveCardProps) {
           </View>
         </Pressable>
       </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={copy.prayers.card.more(title)}
+        onPress={() => onOpenMenu(prayer)}
+        style={({ pressed }) => [styles.overflow, pressed && styles.pressed]}
+      >
+        <View className="size-11 items-center justify-center">
+          <Icon name={icons.more} size={20} color={colors.mauve} />
+        </View>
+      </Pressable>
     </View>
   );
 }

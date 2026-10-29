@@ -1,4 +1,5 @@
-// TEMP(29): the prayer writes are mocks until step 29 replaces them. The profile (step 17), and the entries, the affirmations and the usage (step 25), are real: they come from Supabase through the read cache of step 24, unless the data source is the mock (a development switch). Keep the names and argument order.
+// The data the screens read and write. The profile (step 17), the entries, the affirmations and the usage (step 25), and the prayers (step 29) are real: they come from Supabase through the read cache of step 24, unless the data source is the mock (a development switch). Keep the names and argument order.
+import { deleteEntry as deleteEntryOnServer } from "@/api/journalApi";
 import {
   AMBIENT_SOUNDS,
   FREE_DEVOTIONALS_PER_WEEK,
@@ -6,9 +7,10 @@ import {
   WEEK_STARTS_ON,
 } from "@/constants/app";
 import { copy } from "@/constants/copy";
+import type { PrayerPatch } from "@/data/columns";
 import * as live from "@/data/entriesLive";
-import { getDeviceTimezone, toAffirmation, toJournalEntry, toPrayer, toUserProfile } from "@/data/mappers";
-import { addMockEntry, getMockDb } from "@/data/mock/db";
+import { getDeviceTimezone, toAffirmation, toJournalEntry, toUserProfile } from "@/data/mappers";
+import { addMockEntry, getMockDb, removeMockEntry } from "@/data/mock/db";
 import {
   getDataSource,
   getEntriesPageSize,
@@ -18,10 +20,14 @@ import {
   type MockSubmitOutcome,
 } from "@/data/mock/scenario";
 import { toPendingEntry } from "@/data/pendingEntries";
+import { answerPatch, notePatch, trackPatch, unanswerPatch } from "@/data/prayerPatches";
+import { toListedPrayer } from "@/data/selectors";
 import { isDatabaseOpen } from "@/db/database";
+import * as mutations from "@/db/mutations";
 import * as outbox from "@/db/outbox";
 import { scheduleProfileSync, syncProfile } from "@/services/profileSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
+import { selectCanSend, useOfflineStore } from "@/store/offlineStore";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 import type {
@@ -42,7 +48,6 @@ import type {
   TimeSlot,
   UserProfile,
 } from "@/types";
-import type { JournalEntryRow } from "@/types/database";
 import { answeredDateToTimestamp, isValidAnsweredDate } from "@/utils/prayerDates";
 import { weekWindow } from "@/utils/week";
 
@@ -282,11 +287,43 @@ export function getKnownTier(): SubscriptionTier | null {
   return userId === null ? null : (readLocalProfile(userId)?.subscriptionTier ?? null);
 }
 
-// The prayer of every mapped entry that has one, so a prayer never disagrees with its entry.
-// Newest first; step 14 selectors filter and sort.
-export async function listPrayers(): Promise<Prayer[]> {
-  await simulateLatency();
-  return readEntries().flatMap((entry) => (entry.prayer ? [entry.prayer] : []));
+// Prayers (step 29). A prayer lives on its entry, so the two never disagree, and a summary the model did not write is the
+// reflection's title (toListedPrayer). Newest first: the step 14 selectors filter and sort.
+function listedPrayers(entries: readonly JournalEntry[]): Prayer[] {
+  return entries.flatMap((entry) => {
+    const prayer = toListedPrayer(entry);
+    return prayer === null ? [] : [prayer];
+  });
+}
+
+// What the phone already has, shown first: the cached prayers, with the changes not sent yet already in them. The mock data has
+// no cache, so it answers nothing here and Prayers waits for listPrayers.
+export async function readCachedPrayers(): Promise<Prayer[]> {
+  if (getDataSource() === "mock") return [];
+  return listedPrayers(await live.readCachedPrayerEntries());
+}
+
+// The prayers the server has, with this phone's waiting changes on top. With no answer it is what the phone has, and no error.
+export async function listPrayers(): Promise<RepoResult<Prayer[]>> {
+  if (getDataSource() === "mock") {
+    await simulateLatency();
+    return { ok: true, data: listedPrayers(readEntries()) };
+  }
+  const result = await live.loadPrayerEntries();
+  if (result.ok) return { ok: true, data: listedPrayers(result.data) };
+  if (result.code !== "NETWORK") return result;
+  return { ok: true, data: listedPrayers(await live.readCachedPrayerEntries()) };
+}
+
+// How many prayer changes this phone has not sent yet: Prayers' offline line and the developer panel. 0 while the database is
+// not open.
+export async function countPendingPrayerChanges(): Promise<number> {
+  if (!isDatabaseOpen()) return 0;
+  try {
+    return await mutations.countMutations();
+  } catch {
+    return 0;
+  }
 }
 
 // A write waits a little here, so a sheet or a dialog shows its spinner. The prayer writes, the profile write and
@@ -299,24 +336,10 @@ export function simulateWrite(ms: number): Promise<void> {
 }
 
 function failure(
-  code: "NOT_FOUND" | "INVALID" | "NETWORK" | "UNAUTHORIZED",
+  code: "NOT_FOUND" | "INVALID" | "NETWORK" | "UNAUTHORIZED" | "UNKNOWN",
   message: string,
 ): RepoResult<never> {
   return { ok: false, code, message };
-}
-
-// The row of a tracked prayer. A missing row, a crisis entry, an entry that is not finished and an entry that
-// is not a prayer all come back null (toPrayer says no to each), and are never changed.
-function findPrayerRow(prayerId: string): JournalEntryRow | null {
-  const row = getMockDb().entries.find((entry) => entry.id === prayerId);
-  return row !== undefined && toPrayer(row) !== null ? row : null;
-}
-
-function prayerResult(row: JournalEntryRow): RepoResult<Prayer> {
-  const prayer = toPrayer(row);
-  return prayer === null
-    ? failure("NOT_FOUND", copy.prayers.errors.save)
-    : { ok: true, data: prayer };
 }
 
 // A note is trimmed, and an empty one is no note.
@@ -325,62 +348,120 @@ function cleanNote(note: string | null): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-// TEMP(29): replace internals with SQLite + Supabase, keep signatures
-export async function markPrayerAnswered(input: MarkAnsweredInput): Promise<RepoResult<Prayer>> {
+// What a prayer write does to its entry: the change of journal_entries columns, or why there is none. It sees the entry as the
+// phone has it, a finished reflection that is not a crisis (anything else is NOT_FOUND before it is asked).
+type BuildChange = (entry: JournalEntry) => RepoResult<PrayerPatch>;
+
+// The mock data: the mock row changes at once, after a short wait so a sheet or a dialog shows its spinner, and the developer
+// panel's "Fail next save" fails it once.
+async function changeMockPrayer(entryId: string, build: BuildChange): Promise<RepoResult<Prayer | null>> {
   await simulateWrite(PRAYER_CHANGE_MS);
   if (takeMockPrayerMutationFailure()) return failure("NETWORK", copy.prayers.errors.save);
-  const row = findPrayerRow(input.prayerId);
-  if (row === null) return failure("NOT_FOUND", copy.prayers.errors.save);
-  const answeredAt = answeredDateToTimestamp(input.answeredDate);
-  if (answeredAt === null || !isValidAnsweredDate(input.answeredDate, row.created_at, new Date())) {
-    return failure("INVALID", copy.prayers.errors.date);
+  const row = getMockDb().entries.find((candidate) => candidate.id === entryId);
+  const entry = row === undefined ? null : toJournalEntry(row);
+  if (row === undefined || entry === null || entry.isCrisis || entry.status !== "ready") {
+    return failure("NOT_FOUND", copy.prayers.errors.save);
   }
-  const note = cleanNote(input.note);
-  if (note !== null && note.length > MAX_GRATITUDE_NOTE_LENGTH) {
-    return failure("INVALID", copy.prayers.errors.save);
+  const built = build(entry);
+  if (!built.ok) return built;
+  if (Object.keys(built.data).length > 0) {
+    Object.assign(row, built.data);
+    row.updated_at = new Date().toISOString();
   }
-  row.is_active_prayer = true;
-  row.is_answered = true;
-  row.answered_at = answeredAt;
-  row.answered_notes = note;
-  row.updated_at = new Date().toISOString();
-  return prayerResult(row);
+  return { ok: true, data: toListedPrayer(toJournalEntry(row)) };
+}
+
+// The prayer writes (steps 14 and 29). Each answers with the prayer as it now stands, or null when the entry is no longer one.
+// With the real data the change shows at once (the cached entry) and waits in the change queue until the sync engine sends it,
+// so it works offline: the caller wakes the engine (syncNow). The mock data changes the mock rows.
+async function changePrayer(entryId: string, build: BuildChange): Promise<RepoResult<Prayer | null>> {
+  if (getDataSource() === "mock") return changeMockPrayer(entryId, build);
+  const changed = await live.changePrayer(entryId, build);
+  return changed.ok ? { ok: true, data: toListedPrayer(changed.data) } : changed;
+}
+
+// The writes on a prayer that stays one: an answer that is not a prayer any more is NOT_FOUND.
+function asPrayer(result: RepoResult<Prayer | null>): RepoResult<Prayer> {
+  if (!result.ok) return result;
+  return result.data === null ? failure("NOT_FOUND", copy.prayers.errors.save) : { ok: true, data: result.data };
+}
+
+// Reflection's Mark as Prayer Request (step 29). Off also clears an answered date and a gratitude note.
+export async function setPrayerTracked(entryId: string, tracked: boolean): Promise<RepoResult<Prayer | null>> {
+  return changePrayer(entryId, () => ({ ok: true, data: trackPatch(tracked) }));
+}
+
+export async function markPrayerAnswered(input: MarkAnsweredInput): Promise<RepoResult<Prayer>> {
+  const result = await changePrayer(input.prayerId, (entry) => {
+    if (entry.prayer === null) return failure("NOT_FOUND", copy.prayers.errors.save);
+    const answeredAt = answeredDateToTimestamp(input.answeredDate);
+    if (answeredAt === null || !isValidAnsweredDate(input.answeredDate, entry.createdAt, new Date())) {
+      return failure("INVALID", copy.prayers.errors.date);
+    }
+    const note = cleanNote(input.note);
+    if (note !== null && note.length > MAX_GRATITUDE_NOTE_LENGTH) {
+      return failure("INVALID", copy.prayers.errors.save);
+    }
+    return { ok: true, data: answerPatch(answeredAt, note) };
+  });
+  return asPrayer(result);
 }
 
 // Back to Active. Unmarking an open prayer changes nothing and answers ok.
-// TEMP(29): replace internals with SQLite + Supabase, keep signatures
 export async function unmarkPrayerAnswered(prayerId: string): Promise<RepoResult<Prayer>> {
-  await simulateWrite(PRAYER_CHANGE_MS);
-  if (takeMockPrayerMutationFailure()) return failure("NETWORK", copy.prayers.errors.save);
-  const row = findPrayerRow(prayerId);
-  if (row === null) return failure("NOT_FOUND", copy.prayers.errors.save);
-  if (row.is_answered === true) {
-    // It stays a tracked prayer: without is_active_prayer, toPrayer would drop it from both tabs.
-    row.is_active_prayer = true;
-    row.is_answered = false;
-    row.answered_at = null;
-    row.answered_notes = null;
-    row.updated_at = new Date().toISOString();
-  }
-  return prayerResult(row);
+  const result = await changePrayer(prayerId, (entry) => {
+    if (entry.prayer === null) return failure("NOT_FOUND", copy.prayers.errors.save);
+    return { ok: true, data: entry.prayer.isAnswered ? unanswerPatch() : {} };
+  });
+  return asPrayer(result);
 }
 
-// TEMP(29): replace internals with SQLite + Supabase, keep signatures
 export async function updateAnsweredNote(
   prayerId: string,
   note: string | null,
 ): Promise<RepoResult<Prayer>> {
-  await simulateWrite(PRAYER_CHANGE_MS);
-  if (takeMockPrayerMutationFailure()) return failure("NETWORK", copy.prayers.errors.save);
-  const row = findPrayerRow(prayerId);
-  if (row === null) return failure("NOT_FOUND", copy.prayers.errors.save);
-  const cleaned = cleanNote(note);
-  if (row.is_answered !== true || (cleaned !== null && cleaned.length > MAX_GRATITUDE_NOTE_LENGTH)) {
-    return failure("INVALID", copy.prayers.errors.save);
+  const result = await changePrayer(prayerId, (entry) => {
+    if (entry.prayer === null) return failure("NOT_FOUND", copy.prayers.errors.save);
+    const cleaned = cleanNote(note);
+    if (!entry.prayer.isAnswered || (cleaned !== null && cleaned.length > MAX_GRATITUDE_NOTE_LENGTH)) {
+      return failure("INVALID", copy.prayers.errors.save);
+    }
+    return { ok: true, data: notePatch(cleaned) };
+  });
+  return asPrayer(result);
+}
+
+// Whether a delete can be tried now: the mock data always; otherwise only while NetInfo does not say there is no connection
+// (step 29b). The screens ask before they open the dialog, so nothing opens that cannot work.
+export function canDeleteNow(): boolean {
+  return getDataSource() === "mock" || selectCanSend(useOfflineStore.getState());
+}
+
+// Deletes a reflection for good (step 29b). The mock data waits a little, honours "Fail next save (dev)" and removes the mock
+// row. Otherwise the server deletes it first (with no connection nothing is sent); an answer of NOT_FOUND means it is already
+// gone, which is the same as deleted. Only then does the phone forget its copy: the cached entry, its affirmations and any
+// prayer change that waits for it. Nothing is queued: a delete is online only. Never throws.
+export async function deleteEntry(entryId: string): Promise<RepoResult<null>> {
+  const message = copy.deleteReflection.failed;
+  if (getDataSource() === "mock") {
+    await simulateWrite(PRAYER_CHANGE_MS);
+    if (takeMockPrayerMutationFailure()) return failure("NETWORK", message);
+    removeMockEntry(entryId);
+    return { ok: true, data: null };
   }
-  row.answered_notes = cleaned;
-  row.updated_at = new Date().toISOString();
-  return prayerResult(row);
+  if (!canDeleteNow()) return failure("NETWORK", message);
+  try {
+    const result = await deleteEntryOnServer(entryId);
+    if (!result.ok && result.code !== "NOT_FOUND") {
+      if (result.code === "NETWORK") return failure("NETWORK", message);
+      if (result.code === "UNAUTHORIZED") return failure("UNAUTHORIZED", message);
+      return failure("UNKNOWN", message);
+    }
+    await live.forgetEntry(entryId);
+    return { ok: true, data: null };
+  } catch {
+    return failure("UNKNOWN", message);
+  }
 }
 
 // The same checks in both modes: an unknown sound or a volume that is not a number is INVALID, and a volume
