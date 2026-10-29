@@ -49,6 +49,7 @@ declare
   n2 integer;
   moved boolean;
   cascade_ok boolean := false;
+  record_ok boolean := false;
 begin
   -- Fixtures, made as the table owner (which bypasses the app's grants and row level security): two users, one entry
   -- and one affirmation each.
@@ -393,6 +394,55 @@ begin
   insert into rls_results values (46, 'the journal_media bucket also accepts WAV, the spoken devotional''s format',
     exists (select 1 from storage.buckets
             where id = 'journal_media' and 'audio/wav' = any (allowed_mime_types)));
+
+  -- ===== the record of deleted devotionals (step 29b) =====
+  insert into rls_results values (47, 'the app cannot read or write the record of deleted devotionals',
+    pg_temp.try_as('authenticated', claims_a, null, 'select * from public.deleted_devotionals') = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into public.deleted_devotionals (entry_id, user_id, made_at)
+         values ('a0000000-0000-4000-8000-0000000000d1', 'selftest_a', now())$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.deleted_devotionals set made_at = now()$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null, 'delete from public.deleted_devotionals') = '42501'
+    and pg_temp.try_as('anon', no_claims, null, 'select * from public.deleted_devotionals') = '42501'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$insert into public.deleted_devotionals (entry_id, user_id, made_at)
+         values ('a0000000-0000-4000-8000-0000000000d1', 'selftest_a', now())$q$) = '42501');
+
+  insert into rls_results values (48, 'the server records a deleted devotional once, for a user that exists',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.deleted_devotionals (entry_id, user_id, made_at)
+         values ('a0000000-0000-4000-8000-0000000000d1', 'selftest_a', now())$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims,
+      $q$insert into public.deleted_devotionals (entry_id, user_id, made_at)
+         values ('a0000000-0000-4000-8000-0000000000d1', 'selftest_a', now())$q$,
+      $q$insert into public.deleted_devotionals (entry_id, user_id, made_at)
+         values ('a0000000-0000-4000-8000-0000000000d1', 'selftest_a', now())$q$) = '23505'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.deleted_devotionals (entry_id, user_id, made_at)
+         values ('a0000000-0000-4000-8000-0000000000d2', 'selftest_nobody', now())$q$) = '23503');
+
+  -- A record outlives its reflection and goes with its account (the same pattern as check 32).
+  begin
+    insert into public.users_profile (id) values ('selftest_d');
+    insert into public.journal_entries (id, user_id, input_type)
+      values ('d0000000-0000-4000-8000-000000000001', 'selftest_d', 'text');
+    insert into public.deleted_devotionals (entry_id, user_id, made_at)
+      values ('d0000000-0000-4000-8000-000000000001', 'selftest_d', now());
+    delete from public.journal_entries where id = 'd0000000-0000-4000-8000-000000000001';
+    select count(*) into n1 from public.deleted_devotionals where entry_id = 'd0000000-0000-4000-8000-000000000001';
+    delete from public.users_profile where id = 'selftest_d';
+    select count(*) into n2 from public.deleted_devotionals where user_id = 'selftest_d';
+    record_ok := n1 = 1 and n2 = 0;
+    raise exception 'rollback' using errcode = 'P0001';
+  exception when sqlstate 'P0001' then
+    null;
+  end;
+  insert into rls_results values (49, 'a record outlives its reflection and goes with its account', record_ok);
+
+  insert into rls_results values (50, 'the record is closed by row level security as well as by grants',
+    exists (select 1 from pg_class where oid = 'public.deleted_devotionals'::regclass and relrowsecurity)
+    and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'deleted_devotionals'));
 
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
   delete from public.users_profile where id like 'selftest\_%';

@@ -34,6 +34,7 @@ const migrations = fs
 const V1 = migrations.find((name) => name.includes("gracehush_v1_schema"));
 const BASELINE = migrations.find((name) => name.includes("baseline"));
 const WAV = migrations.find((name) => name.includes("journal_media_accepts_wav"));
+const DELETED = migrations.find((name) => name.includes("deleted_devotionals"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -149,6 +150,7 @@ for (const model of MODELS) {
     `select (select count(*) from public.users_profile)::int as profiles,
             (select count(*) from public.journal_entries)::int as entries,
             (select count(*) from public.daily_affirmations)::int as affirmations,
+            (select count(*) from public.deleted_devotionals)::int as deleted_devotionals,
             (select count(*) from storage.objects)::int as objects`,
   );
   console.log("rows left behind by the tests:", JSON.stringify(left.rows[0]));
@@ -209,6 +211,13 @@ if (process.argv.includes("--negative")) {
     // An insert stays refused by row level security (no insert policy), so check 13 still passes: the grants are the
     // first lock and the policies the second, and the checks insist on both.
     ["ON: the new tables keep authenticated's default grants", "on", dropLine("revoke all on public.journal_entries, public.daily_affirmations from authenticated;"), [15, 17, 25, 27]],
+    // The record of deleted devotionals (step 29b, its own migration).
+    ["the app may read the record (grant and policy)", "off", (sql) => sql + "\ngrant select on public.deleted_devotionals to authenticated;\ncreate policy deleted_devotionals_read_all on public.deleted_devotionals for select to authenticated using (true);", [47, 50], DELETED],
+    ["ON: the record keeps the API roles' default grants", "on", dropLine("revoke all on public.deleted_devotionals from anon, authenticated;"), [47], DELETED],
+    ["row level security off on the record", "off", (sql) => sql.replace("enable row level security", "disable row level security"), [50], DELETED],
+    ["no primary key on the record's entry_id", "off", (sql) => sql.replace("uuid        primary key,", "uuid        not null,"), [48], DELETED],
+    ["the record is tied to the reflection (it would vanish with it)", "off", (sql) => sql + "\nalter table public.deleted_devotionals add constraint deleted_devotionals_entry_fkey foreign key (entry_id) references public.journal_entries (id) on delete cascade;", [48, 49], DELETED],
+    ["the record does not follow the account", "off", (sql) => sql.replace("references public.users_profile (id) on delete cascade", "references public.users_profile (id)"), [49], DELETED],
   ];
   console.log("\n===== broken variants (every one must be caught) =====");
   for (const [label, modelId, transform, expected, file = V1] of variants) {

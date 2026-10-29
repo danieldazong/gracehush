@@ -38,6 +38,18 @@ from (
         coalesce((select case when public then 'PUBLIC' else 'private' end
                          || ', ' || coalesce((file_size_limit / 1048576)::text || ' MB', 'no size limit')
                          || ', ' || coalesce(array_to_string(allowed_mime_types, ' '), 'any file type')
-                  from storage.buckets where id = 'journal_media'), 'absent'))
+                  from storage.buckets where id = 'journal_media'), 'absent')),
+    (12, 'record of deleted devotionals (step 29b)',
+        case
+          when to_regclass('public.deleted_devotionals') is null then 'absent'
+          else 'exists, row level security '
+               || case when (select relrowsecurity from pg_class where oid = to_regclass('public.deleted_devotionals'))
+                       then 'on' else 'OFF' end
+               || ', the app roles can touch: '
+               || coalesce(nullif((select string_agg(r.name, ', ' order by r.name)
+                                   from (values ('anon'), ('authenticated')) as r (name)
+                                   where has_table_privilege(r.name, 'public.deleted_devotionals',
+                                                             'select, insert, update, delete')), ''), 'nothing')
+        end)
 ) as checks (position, item, found)
 order by position;
