@@ -35,6 +35,7 @@ const V1 = migrations.find((name) => name.includes("gracehush_v1_schema"));
 const BASELINE = migrations.find((name) => name.includes("baseline"));
 const WAV = migrations.find((name) => name.includes("journal_media_accepts_wav"));
 const DELETED = migrations.find((name) => name.includes("deleted_devotionals"));
+const SUBSCRIPTION = migrations.find((name) => name.includes("subscription_sync"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -218,6 +219,11 @@ if (process.argv.includes("--negative")) {
     ["no primary key on the record's entry_id", "off", (sql) => sql.replace("uuid        primary key,", "uuid        not null,"), [48], DELETED],
     ["the record is tied to the reflection (it would vanish with it)", "off", (sql) => sql + "\nalter table public.deleted_devotionals add constraint deleted_devotionals_entry_fkey foreign key (entry_id) references public.journal_entries (id) on delete cascade;", [48, 49], DELETED],
     ["the record does not follow the account", "off", (sql) => sql.replace("references public.users_profile (id) on delete cascade", "references public.users_profile (id)"), [49], DELETED],
+    // The subscription columns (step 30, their own migration). A column-level REVOKE is ignored while a table-wide GRANT
+    // exists, so the server's grant is taken away table-wide (checks 34 and 35 fail with it).
+    ["the app may write when its plan ends", "off", (sql) => sql + "\ngrant update (subscription_expires_at) on public.users_profile to authenticated;", [51], SUBSCRIPTION],
+    ["the app may write when its plan was last checked", "off", (sql) => sql + "\ngrant update (subscription_synced_at) on public.users_profile to authenticated;", [52], SUBSCRIPTION],
+    ["the server may not write the plan's columns", "off", (sql) => sql + "\nrevoke update on public.users_profile from service_role;", [53], SUBSCRIPTION],
   ];
   console.log("\n===== broken variants (every one must be caught) =====");
   for (const [label, modelId, transform, expected, file = V1] of variants) {

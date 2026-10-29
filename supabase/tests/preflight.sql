@@ -50,6 +50,11 @@ from (
                                    from (values ('anon'), ('authenticated')) as r (name)
                                    where has_table_privilege(r.name, 'public.deleted_devotionals',
                                                              'select, insert, update, delete')), ''), 'nothing')
-        end)
+        end),
+    (13, 'subscription columns (step 30)',
+        coalesce((select string_agg(column_name, ', ' order by column_name)
+                  from information_schema.columns
+                  where table_schema = 'public' and table_name = 'users_profile'
+                    and column_name in ('subscription_expires_at', 'subscription_synced_at')), 'absent'))
 ) as checks (position, item, found)
 order by position;

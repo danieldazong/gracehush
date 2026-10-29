@@ -12,6 +12,8 @@ export function buildProfile(now: Date): UserProfileRow {
     id: MOCK_USER_ID,
     created_at: CREATED_AT,
     subscription_tier: "free",
+    subscription_expires_at: null,
+    subscription_synced_at: null,
     reminder_morning: "08:00:00",
     reminder_afternoon: "13:00:00",
     reminder_evening: "20:00:00",

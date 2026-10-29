@@ -444,6 +444,29 @@ begin
     exists (select 1 from pg_class where oid = 'public.deleted_devotionals'::regclass and relrowsecurity)
     and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'deleted_devotionals'));
 
+  -- ===== the subscription columns (step 30) =====
+  -- Only the server writes when a plan ends and when it last read RevenueCat. A user inserting their own row (claims_n) is
+  -- refused only because of the column, the same pattern as check 7.
+  insert into rls_results values (51, 'a user cannot change when their subscription ends',
+    pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.users_profile set subscription_expires_at = now() + interval '1 year'
+         where id = 'selftest_a'$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_n, null,
+      $q$insert into public.users_profile (id, subscription_expires_at) values ('selftest_new', now())$q$) = '42501');
+
+  insert into rls_results values (52, 'a user cannot change when their subscription was last checked',
+    pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.users_profile set subscription_synced_at = now() where id = 'selftest_a'$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_n, null,
+      $q$insert into public.users_profile (id, subscription_synced_at) values ('selftest_new', now())$q$) = '42501');
+
+  insert into rls_results values (53, 'the server writes the plan with its end and the time it checked; the app reads its own',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.users_profile set subscription_tier = 'pro', subscription_expires_at = now() + interval '1 hour',
+         subscription_synced_at = now() where id = 'selftest_a'$q$) = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$select subscription_expires_at, subscription_synced_at from public.users_profile$q$) = 'ok:1');
+
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
   delete from public.users_profile where id like 'selftest\_%';
 end $$;

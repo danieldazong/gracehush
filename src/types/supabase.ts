@@ -93,6 +93,35 @@ export type Database = {
           },
         ];
       };
+      deleted_devotionals: {
+        Row: {
+          deleted_at: string;
+          entry_id: string;
+          made_at: string;
+          user_id: string;
+        };
+        Insert: {
+          deleted_at?: string;
+          entry_id: string;
+          made_at: string;
+          user_id: string;
+        };
+        Update: {
+          deleted_at?: string;
+          entry_id?: string;
+          made_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "deleted_devotionals_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users_profile";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       journal_entries: {
         Row: {
           answered_at: string | null;
@@ -202,6 +231,8 @@ export type Database = {
           reminder_afternoon: string;
           reminder_evening: string;
           reminder_morning: string;
+          subscription_expires_at: string | null;
+          subscription_synced_at: string | null;
           subscription_tier: string;
           timezone: string;
           updated_at: string;
@@ -216,6 +247,8 @@ export type Database = {
           reminder_afternoon?: string;
           reminder_evening?: string;
           reminder_morning?: string;
+          subscription_expires_at?: string | null;
+          subscription_synced_at?: string | null;
           subscription_tier?: string;
           timezone?: string;
           updated_at?: string;
@@ -230,6 +263,8 @@ export type Database = {
           reminder_afternoon?: string;
           reminder_evening?: string;
           reminder_morning?: string;
+          subscription_expires_at?: string | null;
+          subscription_synced_at?: string | null;
           subscription_tier?: string;
           timezone?: string;
           updated_at?: string;
