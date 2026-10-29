@@ -1,15 +1,29 @@
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import type { SymbolViewProps } from "expo-symbols";
 import { useEffect, useRef } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 
+import { GlassSurface } from "@/components/GlassSurface";
 import { Icon } from "@/components/Icon";
 import { copy } from "@/constants/copy";
 import { colors, layout, shadows } from "@/constants/theme";
 import type { RootStackScreenProps } from "@/navigation/types";
 
+// The pen's filled glyph, in the mic's style. iOS has it from 18.4 (SF Symbols 6.3); the app supports iOS 16.4, and
+// iOS draws nothing for a symbol it lacks, so an older iPhone keeps the outline compose glyph. Android's Material
+// Symbols are outline only, so its pen and mic already match.
+function hasFilledPenGlyph(): boolean {
+  if (Platform.OS !== "ios") {
+    return false;
+  }
+  const [major = 0, minor = 0] = String(Platform.Version).split(".").map(Number);
+  return major > 18 || (major === 18 && minor >= 4);
+}
+
+const penGlyph = hasFilledPenGlyph() ? "long.text.page.and.pencil.fill" : "square.and.pencil";
+
 const icons = {
-  pen: { android: "edit_note", ios: "square.and.pencil" },
+  pen: { android: "edit_note", ios: penGlyph },
   mic: { android: "mic", ios: "mic.fill" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
@@ -37,19 +51,21 @@ export function FloatingInputDock() {
   }
 
   // box-none: the empty space around the two buttons stays tappable for the screen underneath.
+  // The two buttons are one size with one icon style: the mic is the solid plum one, the main action, and the pen
+  // wears the tab bar's glass, rim and halo. They stand in a column at the right edge, the pen above the mic, so the
+  // space above the tab bar stays clear and the mic stays nearest the thumb, between the glass pen and the glass bar.
   return (
-    <View pointerEvents="box-none" className="flex-row items-end gap-2" style={styles.dock}>
+    <View pointerEvents="box-none" className="flex-col items-center gap-2" style={styles.dock}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={copy.dock.write}
         onPress={() => open("write")}
         style={({ pressed }) => pressed && styles.pressed}
       >
-        <View
-          className="items-center justify-center rounded-full border border-petal bg-card"
-          style={[styles.pen, shadows.card]}
-        >
-          <Icon name={icons.pen} size={20} color={colors.plumDeep} />
+        <View className="items-center justify-center" style={styles.button}>
+          <GlassSurface material="bar" />
+          <View className="absolute inset-0 rounded-full border border-white/80" style={shadows.glass} />
+          <Icon name={icons.pen} size={26} color={colors.plum} />
         </View>
       </Pressable>
       <Pressable
@@ -60,7 +76,7 @@ export function FloatingInputDock() {
       >
         <View
           className="items-center justify-center rounded-full bg-plum"
-          style={[styles.orb, shadows.orb]}
+          style={[styles.button, shadows.orb]}
         >
           <Icon name={icons.mic} size={26} color="white" />
         </View>
@@ -76,7 +92,6 @@ const styles = StyleSheet.create({
     bottom: "100%",
     marginBottom: layout.dockOffset,
   },
-  pen: { width: layout.dockPen, height: layout.dockPen },
-  orb: { width: layout.dockOrb, height: layout.dockOrb },
+  button: { width: layout.dockOrb, height: layout.dockOrb },
   pressed: { transform: [{ scale: 0.96 }] },
 });

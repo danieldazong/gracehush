@@ -28,6 +28,8 @@
   --color-mauve: #6E636D;
   --color-petal: #EADFDB;
   --color-crisis: #B4443A;
+  /* The floating tab bar's glass tint (step 08b follow-up): the Hopeful badge's background under the name of its role. */
+  --color-glass: #F7E9DF;
 
   --color-anxious-bg: #F3E6EE;
   --color-anxious-fg: #5B3A5E;

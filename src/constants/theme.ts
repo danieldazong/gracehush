@@ -17,6 +17,9 @@ export const colors = {
   mauve: "#6E636D", // darkened from the design's #8A7F88 for AA contrast
   petal: "#EADFDB",
   crisis: "#B4443A",
+  // The floating tab bar's glass tint (step 08b follow-up): the Hopeful badge's background, under the name of its
+  // role, so the tab bar code does not read as an emotion.
+  glass: "#F7E9DF",
 } as const;
 
 export type EmotionColors = { bg: string; fg: string };
@@ -73,11 +76,20 @@ export const layout = {
   buttonHeight: 48,
   recordOrb: 84,
   recordHalo: 124,
+  // The floating tab bar (step 08b): a capsule as wide as the cards, tabBarHeight tall, that sits tabBarBottom above
+  // the bottom inset. The tabs share its width inside tabPillPadding at each end, and the lens over the active tab
+  // sits tabLensInset inside the capsule's edges, so it never leaves the capsule.
   tabBarHeight: 64,
+  tabBarBottom: 12,
+  tabPillPadding: 6,
+  tabLensInset: 4,
+  // The input dock, dockOffset above the capsule: a column of two dockOrb buttons, the pen above the mic, 8 apart, so
+  // dockHeight tall (the fifth step 08b follow-up; until the fourth the pen was 44 and beside the mic). A tab screen's
+  // content ends dockClearance above the capsule: the offset, the column and 36 of air.
   dockOffset: 20,
-  dockPen: 44,
   dockOrb: 56,
-  dockClearance: 112,
+  dockHeight: 120,
+  dockClearance: 176,
 } as const;
 
 export const gradients = {
@@ -106,5 +118,23 @@ export const shadows = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 6,
+  },
+  // The two below are React Native's own boxShadow (0.76 and later, New Architecture), which draws the same shadow
+  // on both platforms and can draw an inset one. `glass` lifts the floating tab bar on every side: a soft halo
+  // (ink at 16%, about 7% at the bar's top edge and 9% at its bottom edge once the blur spreads it) and a tight
+  // contact edge (ink at 8%). A fainter halo (12%, 4 down, blur 28) left about 5% at the top edge, which linen hid.
+  // `lens` is the inset highlight (top) and shade (bottom) that make the lens over the active tab read as a thick
+  // curved drop.
+  glass: {
+    boxShadow: [
+      { offsetX: 0, offsetY: 2, blurRadius: 20, color: `${colors.ink}29` },
+      { offsetX: 0, offsetY: 1, blurRadius: 3, color: `${colors.ink}14` },
+    ],
+  },
+  lens: {
+    boxShadow: [
+      { offsetX: 0, offsetY: 2, blurRadius: 4, color: `${colors.card}F2`, inset: true },
+      { offsetX: 0, offsetY: -3, blurRadius: 6, color: `${colors.ink}14`, inset: true },
+    ],
   },
 });

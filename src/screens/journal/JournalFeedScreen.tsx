@@ -40,7 +40,7 @@ import {
   type JournalFilter,
 } from "@/data/selectors";
 import { useJournalHome } from "@/hooks/useJournalHome";
-import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
+import { useTabBarClearance, useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
 import { discardItem } from "@/services/syncEngine";
 import { usePlayerStore } from "@/store/playerStore";
@@ -251,6 +251,7 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
   const state = useJournalHome();
   const { width } = useWindowDimensions();
   const paddingBottom = useTabScreenBottomPadding();
+  const barClearance = useTabBarClearance();
   const listRef = useRef<FlatList<HomeEntry>>(null);
   useScrollToTop(listRef);
 
@@ -393,6 +394,8 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
         ListFooterComponent={ready?.loadingMore ? <LoadingMore /> : undefined}
         onEndReached={ready ? ready.loadMore : undefined}
         onEndReachedThreshold={0.5}
+        // The content runs under the floating tab bar; the indicator stops above it.
+        scrollIndicatorInsets={{ bottom: barClearance }}
         contentContainerStyle={{
           flexGrow: 1,
           paddingHorizontal:

@@ -32,7 +32,7 @@ import { colors, emotionColors, layout, radii, shadows } from "@/constants/theme
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useDeleteReflection } from "@/hooks/useDeleteReflection";
 import { usePrayers } from "@/hooks/usePrayers";
-import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
+import { useTabBarClearance, useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
 import { useNoticeStore } from "@/store/noticeStore";
 import type { Prayer, RepoResult } from "@/types";
@@ -227,6 +227,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
   const state = usePrayers();
   const { width } = useWindowDimensions();
   const paddingBottom = useTabScreenBottomPadding();
+  const barClearance = useTabBarClearance();
   const listRef = useRef<FlatList<Prayer>>(null);
   useScrollToTop(listRef);
 
@@ -501,6 +502,8 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
         ItemSeparatorComponent={tab === "answered" ? TimelineSeparator : CardGap}
         ListHeaderComponent={header ?? undefined}
         ListEmptyComponent={emptyState ?? undefined}
+        // The content runs under the floating tab bar; the indicator stops above it.
+        scrollIndicatorInsets={{ bottom: barClearance }}
         contentContainerStyle={{
           flexGrow: 1,
           paddingHorizontal:

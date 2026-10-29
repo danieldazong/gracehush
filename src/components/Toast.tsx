@@ -5,6 +5,7 @@ import { Animated, StyleSheet, Text, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { emotionColors, layout } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
+import { useTabBarClearance } from "@/hooks/useTabScreenBottomPadding";
 
 const FADE_MS = 200;
 
@@ -31,6 +32,8 @@ export function Toast({ message, visible }: ToastProps) {
   }
 
   useAnnounce(visible ? message : null);
+  // The floating tab bar covers the end of the scene, and the dock sits above the bar.
+  const barClearance = useTabBarClearance();
 
   useEffect(() => {
     if (!mounted) {
@@ -52,7 +55,10 @@ export function Toast({ message, visible }: ToastProps) {
   }
 
   return (
-    <View pointerEvents="none" style={styles.anchor}>
+    <View
+      pointerEvents="none"
+      style={[styles.anchor, { bottom: barClearance + layout.dockOffset + layout.dockHeight + 12 }]}
+    >
       <Animated.View
         accessible
         accessibilityLabel={message}
@@ -69,12 +75,12 @@ export function Toast({ message, visible }: ToastProps) {
 }
 
 const styles = StyleSheet.create({
-  // Clears the dock: its top edge is dockOffset + dockOrb above the bar, and this adds 12.
+  // Clears the dock: its top edge is dockOffset + dockHeight above the floating bar, and the anchor adds 12 (the bottom
+  // offset is set where the bar's clearance is known).
   anchor: {
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: layout.dockOffset + layout.dockOrb + 12,
     alignItems: "center",
   },
 });

@@ -1,18 +1,40 @@
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { CommonActions } from "@react-navigation/native";
 import type { SymbolViewProps } from "expo-symbols";
-import { useEffect, useState } from "react";
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import {
+  Animated,
+  Easing,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 
 import { FloatingInputDock } from "@/components/FloatingInputDock";
+import { GlassSurface } from "@/components/GlassSurface";
 import { Icon } from "@/components/Icon";
 import { copy } from "@/constants/copy";
-import { colors, layout } from "@/constants/theme";
+import { colors, layout, shadows } from "@/constants/theme";
+import { useReduceMotion } from "@/hooks/useReduceMotion";
 import type { MainTabParamList } from "@/navigation/types";
 import { haptics } from "@/services/haptics";
 
-// The two colored layers cross-fade when a tab is selected or deselected.
+// The two colored layers of a tab cross-fade when it is selected or deselected, and the selected one grows a little
+// inside the lens.
 const FADE_MS = 150;
+const ACTIVE_SCALE = 1.06;
+// The lens travels on a spring that settles in about 450 ms with a soft overshoot (a damping ratio of 0.61, so
+// about 9% past the target, one wobble). On the way it stretches sideways and flattens, like a drop that keeps its
+// mass, and the more the farther it goes: 1.08 wide and 0.95 tall for one tab over, 1.14 and 0.92 for two.
+const LENS_SPRING = { stiffness: 220, damping: 18, mass: 1 } as const;
+const LENS_STRETCH = 1.08;
+const LENS_STRETCH_PER_TAB = 0.06;
+const LENS_SQUASH = 0.95;
+const LENS_SQUASH_PER_TAB = 0.03;
+const LENS_STRETCH_MS = 160;
 
 type TabConfig = {
   label: string;
@@ -40,7 +62,14 @@ const tabs: Record<keyof MainTabParamList, TabConfig> = {
   },
 };
 
+// Where the lens sits over a tab: the capsule's padding and the lens's own inset, then one tab width for every tab
+// before it.
+function lensOffset(index: number, itemWidth: number): number {
+  return layout.tabPillPadding + layout.tabLensInset + index * itemWidth;
+}
+
 type TabItemProps = TabConfig & {
+  width: number;
   accessibilityLabel: string;
   focused: boolean;
   onPress: () => void;
@@ -53,20 +82,31 @@ function TabItem({
   label,
   icon,
   activeIcon,
+  width,
   accessibilityLabel,
   focused,
   onPress,
   onLongPress,
 }: TabItemProps) {
+  const reduceMotion = useReduceMotion();
   const [progress] = useState(() => new Animated.Value(focused ? 1 : 0));
+  const [scale] = useState(() => new Animated.Value(focused ? ACTIVE_SCALE : 1));
 
   useEffect(() => {
-    Animated.timing(progress, {
-      toValue: focused ? 1 : 0,
-      duration: FADE_MS,
-      useNativeDriver: true,
-    }).start();
-  }, [focused, progress]);
+    const toProgress = focused ? 1 : 0;
+    const toScale = focused ? ACTIVE_SCALE : 1;
+    if (reduceMotion) {
+      progress.setValue(toProgress);
+      scale.setValue(toScale);
+      return undefined;
+    }
+    const animation = Animated.parallel([
+      Animated.timing(progress, { toValue: toProgress, duration: FADE_MS, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: toScale, duration: FADE_MS, useNativeDriver: true }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [focused, reduceMotion, progress, scale]);
 
   const inactiveOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
 
@@ -77,10 +117,10 @@ function TabItem({
       accessibilityState={{ selected: focused }}
       onPress={onPress}
       onLongPress={onLongPress}
-      style={({ pressed }) => pressed && styles.pressed}
+      style={({ pressed }) => [styles.item, { width }, pressed && styles.pressed]}
     >
-      <View
-        className="min-w-14 flex-1 items-center justify-center"
+      <Animated.View
+        style={[styles.itemContent, { transform: [{ scale }] }]}
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
       >
@@ -102,25 +142,110 @@ function TabItem({
             {label}
           </Text>
         </Animated.View>
-      </View>
+      </Animated.View>
     </Pressable>
   );
 }
 
+// A floating capsule as wide as the cards, centered above the bottom inset, with a lens that slides over the active
+// tab (step 08b). The bar is absolutely positioned, so it takes none of the scenes' space and the content runs
+// under it: every tab screen keeps its end clear through useTabScreenBottomPadding().
 export function GracehushTabBar({ state, navigation, insets }: BottomTabBarProps) {
-  // The dock sits above the bar through a percentage offset, and Yoga resolves that against the
-  // parent's content box. So the outer view has no padding or border (its content box is the whole
-  // bar), and the visible bar, with the border and the bottom inset, is the inner view. Nothing here
-  // sets overflow: "hidden", because the dock extends above the bar.
+  const reduceMotion = useReduceMotion();
+  const { width: windowWidth } = useWindowDimensions();
+  // The capsule spans the content width, like the cards (20 from each edge, 16 on a narrow screen), and the tabs
+  // share what is left inside its padding.
+  const sidePadding =
+    windowWidth < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding;
+  const capsuleWidth = windowWidth - sidePadding * 2;
+  const itemWidth = (capsuleWidth - layout.tabPillPadding * 2) / state.routes.length;
+
+  const [lensX] = useState(() => new Animated.Value(lensOffset(state.index, itemWidth)));
+  const [lensStretch] = useState(() => new Animated.Value(1));
+  const [lensSquash] = useState(() => new Animated.Value(1));
+  // The tab the lens last moved to. Read and written only inside the effect below, so a run that changes no tab
+  // (the mount, a width change, or Reduce Motion switching) puts the lens where it belongs with no motion.
+  const lensIndex = useRef(state.index);
+
+  useEffect(() => {
+    const toValue = lensOffset(state.index, itemWidth);
+    const from = lensIndex.current;
+    if (from === state.index) {
+      lensX.setValue(toValue);
+      return undefined;
+    }
+    lensIndex.current = state.index;
+    if (reduceMotion) {
+      lensX.setValue(toValue);
+      lensStretch.setValue(1);
+      lensSquash.setValue(1);
+      return undefined;
+    }
+    const tabsAway = Math.abs(state.index - from);
+    const stretch = LENS_STRETCH + LENS_STRETCH_PER_TAB * (tabsAway - 1);
+    const squash = LENS_SQUASH - LENS_SQUASH_PER_TAB * (tabsAway - 1);
+    const easing = Easing.out(Easing.quad);
+    const animation = Animated.parallel([
+      Animated.spring(lensX, { toValue, ...LENS_SPRING, useNativeDriver: true }),
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(lensStretch, {
+            toValue: stretch,
+            duration: LENS_STRETCH_MS,
+            easing,
+            useNativeDriver: true,
+          }),
+          Animated.timing(lensSquash, {
+            toValue: squash,
+            duration: LENS_STRETCH_MS,
+            easing,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.spring(lensStretch, { toValue: 1, ...LENS_SPRING, useNativeDriver: true }),
+          Animated.spring(lensSquash, { toValue: 1, ...LENS_SPRING, useNativeDriver: true }),
+        ]),
+      ]),
+    ]);
+    animation.start();
+    // A tab chosen mid-flight stops this one where it is, and the next spring starts from there.
+    return () => animation.stop();
+  }, [state.index, itemWidth, reduceMotion, lensX, lensStretch, lensSquash]);
+
+  // One absolute layer over the scenes, with the capsule centered in it and the dock beside the capsule. The layer
+  // has no padding or border, so the dock's percentage offset resolves against the capsule's height (see the vendor
+  // note on percentage offsets). box-none: the strip beside the capsule stays the screen's.
   return (
-    <View>
-      <View className="border-t border-petal bg-linen" style={{ paddingBottom: insets.bottom }}>
-        {/* Each item stretches to the row's height, so the whole 64 is its touch area. */}
+    <View pointerEvents="box-none" style={[styles.overlay, { bottom: insets.bottom + layout.tabBarBottom }]}>
+      <View style={[styles.capsule, { width: capsuleWidth }]}>
+        {/* The material, its rim, then the lens, then the tabs. The first three are decoration and take no touch;
+            a touch on the capsule's padding ends at the capsule and never reaches the screen under it. */}
+        <GlassSurface material="bar" />
         <View
-          accessibilityRole="tablist"
-          className="flex-row justify-around px-4"
-          style={styles.row}
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          className="absolute inset-0 rounded-full border border-white/80"
+          style={shadows.glass}
+        />
+        <Animated.View
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={[
+            styles.lens,
+            {
+              width: itemWidth - layout.tabLensInset * 2,
+              transform: [{ translateX: lensX }, { scaleX: lensStretch }, { scaleY: lensSquash }],
+            },
+          ]}
         >
+          <GlassSurface material="lens" />
+          <View className="absolute inset-0 rounded-full border border-white/90" style={shadows.lens} />
+        </Animated.View>
+        {/* Each item is a whole tab wide and the capsule's whole height, so all of it is its touch area. */}
+        <View accessibilityRole="tablist" className="flex-row" style={styles.row}>
           {state.routes.map((route, index) => {
             const focused = state.index === index;
             // MainTabs registers exactly the routes of MainTabParamList.
@@ -147,6 +272,7 @@ export function GracehushTabBar({ state, navigation, insets }: BottomTabBarProps
               <TabItem
                 key={route.key}
                 {...tab}
+                width={itemWidth}
                 accessibilityLabel={
                   Platform.OS === "ios"
                     ? copy.tabs.a11yLabel(tab.label, index + 1, state.routes.length)
@@ -166,7 +292,19 @@ export function GracehushTabBar({ state, navigation, insets }: BottomTabBarProps
 }
 
 const styles = StyleSheet.create({
-  row: { height: layout.tabBarHeight },
+  overlay: { position: "absolute", left: 0, right: 0, alignItems: "center" },
+  capsule: { height: layout.tabBarHeight },
+  row: { height: layout.tabBarHeight, paddingHorizontal: layout.tabPillPadding },
+  // Inside the capsule, inset from its top and bottom edges (and from its tab's sides, through the width above).
+  lens: {
+    position: "absolute",
+    top: layout.tabLensInset,
+    left: 0,
+    height: layout.tabBarHeight - layout.tabLensInset * 2,
+  },
+  item: { height: layout.tabBarHeight },
+  itemContent: { flex: 1, alignItems: "center", justifyContent: "center" },
   layer: { alignItems: "center", justifyContent: "center", gap: 4 },
-  pressed: { opacity: 0.6 },
+  // The tab under the finger dims and squashes a little, like the dock's buttons.
+  pressed: { opacity: 0.6, transform: [{ scale: 0.96 }] },
 });

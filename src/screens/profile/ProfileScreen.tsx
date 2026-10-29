@@ -35,7 +35,7 @@ import { copy } from "@/constants/copy";
 import { colors } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
-import { useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
+import { useTabBarClearance, useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
 import { countPendingPrayerChanges, countUnsentItems } from "@/data/journalRepository";
 import { deleteAccount, requestDataExport, signOutCleanup } from "@/services/account";
@@ -335,6 +335,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const scrollRef = useRef<ScrollViewInstance>(null);
   useScrollToTop(scrollRef);
   const paddingBottom = useTabScreenBottomPadding();
+  const barClearance = useTabBarClearance();
   const reminders = useOnboardingStore((store) => store.reminders);
   const setReminder = useOnboardingStore((store) => store.setReminder);
 
@@ -568,6 +569,8 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
       <ScrollView
         ref={scrollRef}
         scrollEnabled={!isSeeking}
+        // The content runs under the floating tab bar; the indicator stops above it.
+        scrollIndicatorInsets={{ bottom: barClearance }}
         contentContainerStyle={{ paddingBottom }}
         refreshControl={
           ready ? (
