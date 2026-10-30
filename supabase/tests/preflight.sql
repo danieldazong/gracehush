@@ -55,6 +55,11 @@ from (
         coalesce((select string_agg(column_name, ', ' order by column_name)
                   from information_schema.columns
                   where table_schema = 'public' and table_name = 'users_profile'
-                    and column_name in ('subscription_expires_at', 'subscription_synced_at')), 'absent'))
+                    and column_name in ('subscription_expires_at', 'subscription_synced_at')), 'absent')),
+    (14, 'bucket exports (step 31)',
+        coalesce((select case when public then 'PUBLIC' else 'private' end
+                         || ', ' || coalesce((file_size_limit / 1048576)::text || ' MB', 'no size limit')
+                         || ', ' || coalesce(array_to_string(allowed_mime_types, ' '), 'any file type')
+                  from storage.buckets where id = 'exports'), 'absent'))
 ) as checks (position, item, found)
 order by position;

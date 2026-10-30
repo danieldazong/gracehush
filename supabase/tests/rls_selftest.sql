@@ -467,6 +467,31 @@ begin
     and pg_temp.try_as('authenticated', claims_a, null,
       $q$select subscription_expires_at, subscription_synced_at from public.users_profile$q$) = 'ok:1');
 
+  -- ===== the exports bucket (step 31) =====
+  -- export-data writes {userId}/{exportId}.zip as the server; people only ever get a signed link. No policy names the bucket, so
+  -- the app can neither put a file there, read one nor list the folder, its own included.
+  insert into rls_results values (54, 'the exports bucket is private, limited to 50 MB and to ZIP files',
+    exists (select 1 from storage.buckets
+            where id = 'exports' and not public and file_size_limit = 52428800
+              and allowed_mime_types = array['application/zip']));
+
+  insert into rls_results values (55, 'a signed-in user can neither upload into, read nor list the exports bucket',
+    pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into storage.objects (bucket_id, name) values ('exports', 'selftest_a/one.zip')$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a,
+      $q$insert into storage.objects (bucket_id, name) values ('exports', 'selftest_a/one.zip')$q$,
+      $q$select * from storage.objects where bucket_id = 'exports'$q$) in ('ok:0', '42501')
+    and pg_temp.try_as('authenticated', claims_a,
+      $q$insert into storage.objects (bucket_id, name) values ('exports', 'selftest_a/one.zip')$q$,
+      $q$select * from storage.objects where bucket_id = 'exports' and name like 'selftest\_a/%'$q$) in ('ok:0', '42501'));
+
+  insert into rls_results values (56, 'a signed-out visitor sees nothing in the exports bucket and cannot put a file there',
+    pg_temp.try_as('anon', no_claims,
+      $q$insert into storage.objects (bucket_id, name) values ('exports', 'selftest_a/one.zip')$q$,
+      $q$select * from storage.objects where bucket_id = 'exports'$q$) in ('ok:0', '42501')
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$insert into storage.objects (bucket_id, name) values ('exports', 'selftest_a/one.zip')$q$) = '42501');
+
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
   delete from public.users_profile where id like 'selftest\_%';
 end $$;

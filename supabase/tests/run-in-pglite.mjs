@@ -36,6 +36,7 @@ const BASELINE = migrations.find((name) => name.includes("baseline"));
 const WAV = migrations.find((name) => name.includes("journal_media_accepts_wav"));
 const DELETED = migrations.find((name) => name.includes("deleted_devotionals"));
 const SUBSCRIPTION = migrations.find((name) => name.includes("subscription_sync"));
+const EXPORTS = migrations.find((name) => name.includes("exports_bucket"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -224,6 +225,11 @@ if (process.argv.includes("--negative")) {
     ["the app may write when its plan ends", "off", (sql) => sql + "\ngrant update (subscription_expires_at) on public.users_profile to authenticated;", [51], SUBSCRIPTION],
     ["the app may write when its plan was last checked", "off", (sql) => sql + "\ngrant update (subscription_synced_at) on public.users_profile to authenticated;", [52], SUBSCRIPTION],
     ["the server may not write the plan's columns", "off", (sql) => sql + "\nrevoke update on public.users_profile from service_role;", [53], SUBSCRIPTION],
+    // The exports bucket (step 31, its own migration): only the server reads and writes it, and people get signed links.
+    ["the exports bucket is public", "off", (sql) => sql.replace("values ('exports', 'exports', false,", "values ('exports', 'exports', true,").replace("      public = false,", "      public = true,"), [54], EXPORTS],
+    ["the app may read and list the exports bucket", "off", (sql) => sql + "\ncreate policy exports_select_own on storage.objects for select to authenticated using (bucket_id = 'exports' and (storage.foldername(name))[1] = (select public.requesting_user_id()));", [55], EXPORTS],
+    ["the app may upload into the exports bucket", "off", (sql) => sql + "\ncreate policy exports_insert_own on storage.objects for insert to authenticated with check (bucket_id = 'exports' and (storage.foldername(name))[1] = (select public.requesting_user_id()));", [55], EXPORTS],
+    ["visitors may read the exports bucket", "off", (sql) => sql + "\ncreate policy exports_select_anyone on storage.objects for select to anon using (bucket_id = 'exports');", [56], EXPORTS],
   ];
   console.log("\n===== broken variants (every one must be caught) =====");
   for (const [label, modelId, transform, expected, file = V1] of variants) {
