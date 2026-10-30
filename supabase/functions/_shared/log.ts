@@ -4,11 +4,12 @@
 // durations, attempt and token counts, the model name, what became of the passage as one word (step 20), what the
 // crisis screening answered as one word, with the stage that decided (step 21), and what the speech step and the free
 // tier's check did, as one word each with their numbers (step 22), and what billing did, as one word with its time and, for
-// RevenueCat's webhook, the event's type as one word (step 30). Never: a token or its claims, an email, a
+// RevenueCat's webhook, the event's type as one word (step 30), and what an export or an account deletion did, as one word with
+// counts (step 31). Never: a token or its claims, an email, a
 // transcript, entry text, audio, model output, the script that was read aloud, scripture (not even which book or chapter),
 // the categories of concern the screening named, a phrase that matched, a link, a storage path, a key, the service
 // account's address, SQL, a provider's error message (those can quote what the user wrote), a webhook's body, a RevenueCat
-// answer, a price, a product or a store transaction.
+// answer, a price, a product or a store transaction, a file name, an export's link or an id of any kind.
 
 // What became of the passage: verified on the first try, replaced by a second choice that was verified, kept without its
 // text because the Bible text could not be read, or dropped because no valid passage was found. null: no passage was
@@ -62,6 +63,22 @@ export type BillingStatus =
   | `bad_config:${string}`
   | `failed:${string}`;
 
+// What export-data or delete-account did (step 31). null in the log: neither ran. An export was built, or handed back again
+// within its ten minutes, or failed with a short reason (storage_list_failed, db:export_read, storage_upload, storage_sign...). A
+// deletion finished (":cascade_missed": rows were left after the profile went and were deleted one table at a time;
+// ":late_data": the final pass found files or rows written during the run and removed them; ":final_pass_failed": the final
+// pass itself failed, after the account was gone), or failed at a step (config, clerk, storage, database, revenuecat) with a
+// short reason. Never a path, a link, a file name or an id.
+export type AccountStatus =
+  | "export:built"
+  | "export:reused"
+  | `export:failed:${string}`
+  | "delete:done"
+  | "delete:done:cascade_missed"
+  | "delete:done:late_data"
+  | "delete:done:final_pass_failed"
+  | `delete:failed:${string}`;
+
 export type LogLine = {
   requestId: string;
   status: number;
@@ -106,6 +123,14 @@ export type LogLine = {
   billing: BillingStatus | null;
   billingMs: number;
   billingEvent: string | null;
+  // Exports and account deletion (step 31): what happened as one word, and its counts. An export: the entries in it, the audio
+  // files in it, the audio files left out and the ZIP's size. A deletion: the files removed (accountFiles). null when it does
+  // not apply.
+  account: AccountStatus | null;
+  accountEntries: number | null;
+  accountFiles: number | null;
+  accountLeftOut: number | null;
+  accountBytes: number | null;
 };
 
 // The first 8 hex characters of SHA-256(value): enough to follow one user through the logs, not to find them.
@@ -156,6 +181,11 @@ export function blankLogLine(fields: Pick<LogLine, "requestId" | "status"> & Par
     billing: null,
     billingMs: 0,
     billingEvent: null,
+    account: null,
+    accountEntries: null,
+    accountFiles: null,
+    accountLeftOut: null,
+    accountBytes: null,
     ...rest,
   };
 }

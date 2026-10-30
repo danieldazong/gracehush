@@ -185,6 +185,35 @@ export function planFromSubscriber(subscriber: Subscriber, now: Date): Plan {
   return { tier: subscription?.period_type === "trial" ? "trial" : "pro", expiresAt };
 }
 
+// Account deletion (step 31): DELETE /subscribers/{id} permanently deletes the customer (RevenueCat queues it and answers at once);
+// 404 is a customer that does not exist, which counts as done. One attempt of 8 seconds, never a retry: a deletion that fails
+// stops, and the person's next try continues it. Deleting the customer does not cancel an App Store or Google Play subscription.
+export type DeleteSubscriberResult = { ok: true; notFound: boolean } | { ok: false; reason: string };
+
+export async function deleteSubscriber(
+  apiKey: string,
+  userId: string,
+  options: { timeoutMs?: number; fetch?: typeof fetch } = {},
+): Promise<DeleteSubscriberResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  try {
+    const response = await (options.fetch ?? fetch)(`${REVENUECAT_API}/subscribers/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+      signal: controller.signal,
+    });
+    await response.body?.cancel();
+    if (response.ok) return { ok: true, notFound: false };
+    if (response.status === 404) return { ok: true, notFound: true };
+    return { ok: false, reason: response.status >= 500 ? "http_5xx" : `http_${response.status}` };
+  } catch {
+    return { ok: false, reason: controller.signal.aborted ? "timeout" : "network" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export type SyncResult = { ok: true; plan: Plan; updated: boolean } | { ok: false; reason: string };
 
 // Reads RevenueCat and writes the plan on this user's row (service role, filtered by the id). No row: updated false, and

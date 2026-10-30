@@ -161,3 +161,33 @@ export type SyncSubscriptionErrorCode =
 export interface SyncSubscriptionError {
   error: { code: SyncSubscriptionErrorCode; message: string; requestId: string };
 }
+
+// export-data (step 31): a ZIP of everything the person has (a README, the data as JSON, the journal as Markdown, and their audio
+// while it fits), kept in the private exports bucket, and a link to it that lives one hour. `partial` is an export that left
+// audio out (the README lists it); `reused` is the same ZIP handed back again within ten minutes. The body is ignored.
+export type ExportDataResponse = {
+  url: string;
+  expiresAt: string;
+  partial: boolean;
+  reused: boolean;
+  sizeBytes: number;
+};
+export type ExportDataErrorCode = "UNAUTHORIZED" | "METHOD_NOT_ALLOWED" | "INTERNAL";
+export interface ExportDataError {
+  error: { code: ExportDataErrorCode; message: string; requestId: string };
+}
+
+// delete-account (step 31): deletes the caller's account for good: their files, their rows, their RevenueCat customer and their
+// Clerk user. The body must be exactly { confirm: "DELETE" }. DELETE_INCOMPLETE is a step that failed: what was done stays done,
+// and the same request sent again continues.
+export type DeleteAccountRequest = { confirm: "DELETE" };
+export type DeleteAccountResponse = { deleted: true };
+export type DeleteAccountErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "METHOD_NOT_ALLOWED"
+  | "DELETE_INCOMPLETE"
+  | "INTERNAL";
+export interface DeleteAccountError {
+  error: { code: DeleteAccountErrorCode; message: string; requestId: string };
+}

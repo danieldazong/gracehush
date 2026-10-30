@@ -447,6 +447,11 @@ export async function handle(req: Request): Promise<Response> {
       billing: context.billing,
       billingMs: context.billingMs,
       billingEvent: null,
+      account: null,
+      accountEntries: null,
+      accountFiles: null,
+      accountLeftOut: null,
+      accountBytes: null,
     };
     writeLog(line);
   }

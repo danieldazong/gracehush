@@ -219,6 +219,11 @@ export async function handle(req: Request): Promise<Response> {
       billing: null,
       billingMs: 0,
       billingEvent: null,
+      account: null,
+      accountEntries: null,
+      accountFiles: null,
+      accountLeftOut: null,
+      accountBytes: null,
     };
     writeLog(line);
   }

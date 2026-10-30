@@ -2,6 +2,7 @@ import { createAdmin } from "../admin.ts";
 import { assert, assertEquals } from "../../process-entry/testing/assert.ts";
 import { installWorld, rcCustomer, type World } from "../../process-entry/testing/fakes.ts";
 import {
+  deleteSubscriber,
   fetchSubscriber,
   planFromSubscriber,
   readBillingConfig,
@@ -310,5 +311,45 @@ Deno.test(
     }) as unknown as typeof fetch;
     const result = await syncSubscription(createAdmin(), "sk_key", USER, NOW, { ...fast, fetch: send, attempts: 1 });
     assertEquals(result.ok, false);
+  }),
+);
+
+// ---- deleting the customer (step 31) -----------------------------------------------------------------------------------
+Deno.test("delete: one DELETE with the secret key and the id encoded; 200 deletes, 404 was already gone", async () => {
+  const gone = new Response(JSON.stringify({ app_user_id: USER, deleted: true }), { status: 200 });
+  const { send, calls } = scripted([gone, status(404)]);
+  assertEquals(await deleteSubscriber("sk_key", "user/one two", { timeoutMs: 50, fetch: send }), {
+    ok: true,
+    notFound: false,
+  });
+  assertEquals(calls[0].url, `${REVENUECAT_API}/subscribers/user%2Fone%20two`);
+  assertEquals(calls[0].headers.get("authorization"), "Bearer sk_key");
+  assertEquals(await deleteSubscriber("sk_key", USER, { timeoutMs: 50, fetch: send }), { ok: true, notFound: true });
+});
+
+Deno.test("delete: every failure is a word after one attempt, never a retry and never a throw", async () => {
+  const cases: [Reply, string][] = [
+    [status(401), "http_401"],
+    [status(400), "http_400"],
+    [status(429), "http_429"],
+    [status(503), "http_5xx"],
+    ["hang", "timeout"],
+    ["network", "network"],
+  ];
+  for (const [reply, reason] of cases) {
+    const { send, calls } = scripted([reply, new Response("{}", { status: 200 })]);
+    assertEquals(await deleteSubscriber("sk_key", USER, { timeoutMs: 30, fetch: send }), { ok: false, reason });
+    assertEquals(calls.length, 1, `${reason} was retried`);
+  }
+});
+
+Deno.test(
+  "delete: against the fake RevenueCat, the customer goes and nobody else's",
+  withWorld(async (world) => {
+    world.revenuecat.set(USER, rcCustomer({ expires: null }));
+    world.revenuecat.set("user_other", rcCustomer(null));
+    assertEquals(await deleteSubscriber("sk_key", USER), { ok: true, notFound: false });
+    assertEquals([...world.revenuecat.keys()], ["user_other"]);
+    assertEquals(world.revenuecatCalls.map((call) => call.method), ["DELETE"]);
   }),
 );

@@ -21,6 +21,7 @@ export const BIBLE_HOST = "bible.helloao.org";
 export const GOOGLE_TOKEN_HOST = "oauth2.googleapis.com";
 export const GOOGLE_TTS_HOST = "texttospeech.googleapis.com";
 export const REVENUECAT_HOST = "api.revenuecat.com";
+export const CLERK_API_HOST = "api.clerk.com";
 
 type Row = Record<string, unknown>;
 
@@ -47,6 +48,11 @@ export const FIXTURE_WAV_MS = 1282;
 // to 25 MiB.
 const BUCKET_MIME_TYPES = ["audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac", "audio/mpeg", "audio/wav"];
 const BUCKET_MAX_BYTES = 26_214_400;
+// The exports bucket (step 31): ZIP files only, up to the project's 50 MB upload limit (the dashboard counts a megabyte as
+// 1,048,576 bytes).
+export const EXPORTS_MAX_BYTES = 52_428_800;
+// What Storage's list reports as created_at for a journal_media file a test put there by hand.
+export const MEDIA_CREATED_AT = "2026-10-01T09:00:00.000Z";
 
 // The speech secrets of the test world: a real RSA key in a service account (so the sign-in signs for real), made once.
 const SPEECH_ACCOUNT = await makeServiceAccount();
@@ -78,6 +84,8 @@ const ENV = {
   REVENUECAT_SECRET_API_KEY: "sk_test_billing_key",
   REVENUECAT_WEBHOOK_AUTH: "test-webhook-auth",
   REVENUECAT_WEBHOOK_SIGNING_SECRET: "test-signing-secret",
+  // Account deletion (step 31): the Clerk instance's secret key, for its Backend API.
+  CLERK_SECRET_KEY: "sk_test_clerk_backend_key",
 };
 
 const ENTRY_DEFAULTS = (): Row => ({
@@ -176,12 +184,43 @@ export type World = {
   // sent it, and calls to fail on purpose (each counter is how many more calls of that kind will fail, one after another).
   deletedDevotionals: Row[];
   removals: string[][];
-  fail: { storageRemove: number; recordDeleted: number; deleteEntry: number; profileUpdate: number };
+  // Calls to fail on purpose (each counter is how many more calls of that kind will fail, one after another). Step 31 added
+  // storageList (a folder listing in any bucket), storageSign (a signed link), exportUpload (a ZIP into the exports bucket),
+  // profileDelete (deleting a users_profile row) and rowsRead (reading journal_entries or daily_affirmations); storageRemove
+  // covers every bucket since then.
+  fail: {
+    storageRemove: number;
+    recordDeleted: number;
+    deleteEntry: number;
+    profileUpdate: number;
+    storageList: number;
+    storageSign: number;
+    exportUpload: number;
+    profileDelete: number;
+    rowsRead: number;
+  };
   // RevenueCat (step 30): GET /v1/subscribers/{id} with a secret key. A queued reply answers first; otherwise the customer
   // stored here for that app user id (200), or, as the real API does for an id it has never seen, a new empty customer (201).
+  // DELETE /v1/subscribers/{id} (step 31) removes the stored customer (200), or answers 404 when there is none.
   revenuecat: Map<string, Row>;
   revenuecatQueue: GeminiReply[];
   revenuecatCalls: Recorded[];
+  // The exports bucket (step 31): the ZIPs export-data wrote, with the time each was made (what Storage's list reports as
+  // created_at). Its uploads and removals are kept apart from journal_media's (`uploads`, `removals`).
+  exports: Map<string, { bytes: Uint8Array; createdAt: string }>;
+  exportUploads: { path: string; contentType: string; upsert: boolean }[];
+  exportRemovals: string[][];
+  // Every Storage request of step 31's kinds, as storage-js sent it: folder listings, signed links and files read.
+  lists: { bucket: string; prefix: string; limit: number; offset: number }[];
+  signs: { bucket: string; path: string; expiresIn: number }[];
+  downloads: string[];
+  // Clerk's Backend API (step 31): GET and DELETE /v1/users/{id} with the instance's secret key. The users that exist are the
+  // ids in clerkUsers; a queued reply answers first. A well-formed secret key of another instance finds nobody (404).
+  clerkUsers: Set<string>;
+  clerkQueue: GeminiReply[];
+  clerkCalls: Recorded[];
+  // False makes deleting a profile leave its entries, affirmations and records behind: a cascade that did not happen.
+  cascade: boolean;
   logs: string[];
   // The database's clock: every call gives a later time than the one before, to the millisecond, so that two rows never
   // share a created_at (the real database hands out a distinct time to each insert).
@@ -306,6 +345,22 @@ function matches(row: Row, filters: Filter[]): boolean {
   });
 }
 
+// PostgREST's `order=created_at.asc,id.asc`: compared as text, which is exact for the ISO timestamps and the ids used here.
+function sortRows(rows: Row[], order: string): Row[] {
+  const keys = order.split(",").map((part) => {
+    const [column, direction] = part.split(".");
+    return { column, sign: direction === "desc" ? -1 : 1 };
+  });
+  return [...rows].sort((a, b) => {
+    for (const { column, sign } of keys) {
+      const left = String(a[column] ?? "");
+      const right = String(b[column] ?? "");
+      if (left !== right) return left < right ? -sign : sign;
+    }
+    return 0;
+  });
+}
+
 function prefer(request: Recorded): Set<string> {
   return new Set((request.headers.get("prefer") ?? "").split(",").map((part) => part.trim()).filter(Boolean));
 }
@@ -333,17 +388,33 @@ function rest(world: World, table: string, request: Recorded): Response {
   };
 
   if (request.method === "GET" || request.method === "HEAD") {
+    if (
+      request.method === "GET" && world.fail.rowsRead > 0 &&
+      (table === "journal_entries" || table === "daily_affirmations")
+    ) {
+      world.fail.rowsRead -= 1;
+      throw new PgError(500, "XX000", "the rows could not be read");
+    }
     for (const { column } of filters) {
       if (!columns.includes(column)) throw new PgError(400, "42703", `column ${table}.${column} does not exist`);
     }
-    const found = rows.filter((row) => matches(row, filters));
+    const order = request.url.searchParams.get("order");
+    const found = order === null
+      ? rows.filter((row) => matches(row, filters))
+      : sortRows(rows.filter((row) => matches(row, filters)), order);
+    // `.range(from, to)` is sent as offset and limit (step 31 pages through a person's rows).
+    const offset = Number(request.url.searchParams.get("offset") ?? 0);
+    const limit = request.url.searchParams.get("limit");
+    const page = limit === null ? found.slice(offset) : found.slice(offset, offset + Number(limit));
     const headers: Record<string, string> = {};
     if (wants.has("count=exact")) {
-      headers["Content-Range"] = found.length === 0 ? "*/0" : `0-${found.length - 1}/${found.length}`;
+      headers["Content-Range"] = page.length === 0
+        ? `*/${found.length}`
+        : `${offset}-${offset + page.length - 1}/${found.length}`;
     }
     return request.method === "HEAD"
       ? new Response(null, { status: 200, headers })
-      : jsonResponse(200, found.map((row) => ({ ...row })), headers);
+      : jsonResponse(200, page.map((row) => ({ ...row })), headers);
   }
 
   if (request.method === "POST") {
@@ -414,6 +485,10 @@ function rest(world: World, table: string, request: Recorded): Response {
       world.fail.deleteEntry -= 1;
       throw new PgError(500, "XX000", "the row could not be deleted");
     }
+    if (table === "users_profile" && world.fail.profileDelete > 0) {
+      world.fail.profileDelete -= 1;
+      throw new PgError(500, "XX000", "the profile could not be deleted");
+    }
     const removed = rows.filter((candidate) => matches(candidate, filters));
     for (const row of removed) rows.splice(rows.indexOf(row), 1);
     // The affirmations of a deleted entry go with it (the foreign key's on delete cascade, step 18).
@@ -421,6 +496,15 @@ function rest(world: World, table: string, request: Recorded): Response {
       const gone = new Set(removed.map((row) => row.id));
       const kept = world.affirmations.filter((affirmation) => !gone.has(affirmation.entry_id));
       world.affirmations.splice(0, world.affirmations.length, ...kept);
+    }
+    // A deleted profile takes everything of its user with it (each table's user_id foreign key, on delete cascade): the
+    // entries, the affirmations and the records of deleted devotionals. world.cascade false is a cascade that did not happen.
+    if (table === "users_profile" && world.cascade) {
+      const gone = new Set(removed.map((row) => row.id));
+      for (const list of [world.entries, world.affirmations, world.deletedDevotionals]) {
+        const kept = list.filter((row) => !gone.has(row.user_id));
+        list.splice(0, list.length, ...kept);
+      }
     }
     // Like PostgREST: the deleted rows come back when the request asks for them.
     return representation ? jsonResponse(200, removed.map((row) => ({ ...row }))) : new Response(null, { status: 204 });
@@ -530,7 +614,7 @@ function bibleFixture(key: string): BibleReply {
 
 // storage-js remove(): DELETE /object/{bucket} with { prefixes }. Storage answers with the objects it removed; a path that is not
 // there is simply not in the answer, and that is not an error.
-function removeObjects(world: World, request: Recorded): Response {
+function removeObjects(world: World, bucket: string, request: Recorded): Response {
   if (world.fail.storageRemove > 0) {
     world.fail.storageRemove -= 1;
     return jsonResponse(500, { statusCode: "500", error: "Internal", message: "the files could not be removed" });
@@ -539,9 +623,146 @@ function removeObjects(world: World, request: Recorded): Response {
   if (!Array.isArray(prefixes) || !prefixes.every((path) => typeof path === "string")) {
     return jsonResponse(400, { statusCode: "400", error: "Bad Request", message: "prefixes must be a list of paths" });
   }
-  world.removals.push([...prefixes]);
-  const removed = prefixes.filter((path) => world.storage.delete(path));
-  return jsonResponse(200, removed.map((name) => ({ name, bucket_id: "journal_media" })));
+  // The real Storage API takes at most 1,000 paths in one request.
+  if (prefixes.length > 1000) {
+    return jsonResponse(400, { statusCode: "400", error: "Bad Request", message: "too many paths" });
+  }
+  (bucket === "exports" ? world.exportRemovals : world.removals).push([...prefixes]);
+  const removed = prefixes.filter((path) =>
+    bucket === "exports" ? world.exports.delete(path) : world.storage.delete(path)
+  );
+  return jsonResponse(200, removed.map((name) => ({ name, bucket_id: bucket })));
+}
+
+// The files of a bucket as Storage's list sees them: each path with its size, its type and when it was made.
+function bucketFiles(world: World, bucket: string): Map<string, { size: number; mimetype: string; createdAt: string }> {
+  const files = new Map<string, { size: number; mimetype: string; createdAt: string }>();
+  if (bucket === "exports") {
+    for (const [path, file] of world.exports) {
+      files.set(path, { size: file.bytes.length, mimetype: "application/zip", createdAt: file.createdAt });
+    }
+  } else {
+    for (const [path, bytes] of world.storage) {
+      const mimetype = path.endsWith(".wav") ? "audio/wav" : path.endsWith(".mp3") ? "audio/mpeg" : "audio/mp4";
+      files.set(path, { size: bytes.length, mimetype, createdAt: MEDIA_CREATED_AT });
+    }
+  }
+  return files;
+}
+
+// storage-js list(prefix, { limit, offset }): POST /object/list/{bucket}. Like the real API it answers one level of the folder
+// at a time, sorted by name: a file with its id and metadata, a sub-folder as an entry whose id and metadata are null.
+function listObjects(world: World, bucket: string, json: unknown): Response {
+  if (world.fail.storageList > 0) {
+    world.fail.storageList -= 1;
+    return jsonResponse(500, { statusCode: "500", error: "Internal", message: "the folder could not be listed" });
+  }
+  const body = (json ?? {}) as { prefix?: unknown; limit?: unknown; offset?: unknown };
+  const prefix = typeof body.prefix === "string" ? body.prefix.replace(/\/+$/, "") : "";
+  const limit = typeof body.limit === "number" ? body.limit : 100;
+  const offset = typeof body.offset === "number" ? body.offset : 0;
+  world.lists.push({ bucket, prefix, limit, offset });
+  const children = new Map<string, Row>();
+  for (const [path, file] of bucketFiles(world, bucket)) {
+    if (prefix !== "" && !path.startsWith(`${prefix}/`)) continue;
+    const rest = prefix === "" ? path : path.slice(prefix.length + 1);
+    const slash = rest.indexOf("/");
+    if (slash >= 0) {
+      const name = rest.slice(0, slash);
+      children.set(name, {
+        name,
+        id: null,
+        updated_at: null,
+        created_at: null,
+        last_accessed_at: null,
+        metadata: null,
+      });
+    } else {
+      children.set(rest, {
+        name: rest,
+        id: crypto.randomUUID(),
+        updated_at: file.createdAt,
+        created_at: file.createdAt,
+        last_accessed_at: file.createdAt,
+        metadata: { size: file.size, mimetype: file.mimetype, cacheControl: "max-age=3600", httpStatusCode: 200 },
+      });
+    }
+  }
+  const sorted = [...children.values()].sort((a, b) =>
+    String(a.name) < String(b.name) ? -1 : String(a.name) > String(b.name) ? 1 : 0
+  );
+  return jsonResponse(200, sorted.slice(offset, offset + limit));
+}
+
+// storage-js createSignedUrl(path, expiresIn): POST /object/sign/{bucket}/{path}. Storage refuses to sign a file that is not
+// there (a 400 whose body says 404), and answers a relative signedURL that carries the token.
+function signObject(world: World, bucket: string, path: string, json: unknown): Response {
+  if (world.fail.storageSign > 0) {
+    world.fail.storageSign -= 1;
+    return jsonResponse(500, { statusCode: "500", error: "Internal", message: "the link could not be made" });
+  }
+  const exists = bucket === "exports" ? world.exports.has(path) : world.storage.has(path);
+  if (!exists) return jsonResponse(400, { statusCode: "404", error: "not_found", message: "Object not found" });
+  const expiresIn = Number((json as { expiresIn?: unknown } | null)?.expiresIn);
+  world.signs.push({ bucket, path, expiresIn });
+  return jsonResponse(200, { signedURL: `/object/sign/${bucket}/${path}?token=signed-test-token` });
+}
+
+// A ZIP sent to the exports bucket: only application/zip, up to EXPORTS_MAX_BYTES, and never over a file that is there unless
+// the upload says it may replace it.
+function uploadExport(world: World, path: string, headers: Headers, bytes: Uint8Array): Response {
+  if (world.fail.exportUpload > 0) {
+    world.fail.exportUpload -= 1;
+    return jsonResponse(500, { statusCode: "500", error: "Internal", message: "the file could not be stored" });
+  }
+  const contentType = headers.get("content-type") ?? "";
+  if (contentType !== "application/zip") {
+    return jsonResponse(415, {
+      statusCode: "415",
+      error: "invalid_mime_type",
+      message: `mime type ${contentType} is not supported`,
+    });
+  }
+  if (bytes.length > EXPORTS_MAX_BYTES) {
+    return jsonResponse(413, {
+      statusCode: "413",
+      error: "Payload too large",
+      message: "The object exceeded the maximum allowed size",
+    });
+  }
+  const upsert = headers.get("x-upsert") === "true";
+  if (world.exports.has(path) && !upsert) {
+    return jsonResponse(400, { statusCode: "409", error: "Duplicate", message: "The resource already exists" });
+  }
+  world.exports.set(path, { bytes, createdAt: world.now() });
+  world.exportUploads.push({ path, contentType, upsert });
+  return jsonResponse(200, { Id: crypto.randomUUID(), Key: `exports/${path}` });
+}
+
+// Clerk's Backend API (step 31): GET and DELETE /v1/users/{id}. The instance's own secret key finds the users in clerkUsers; a
+// well-formed secret key of another instance finds nobody (404), and anything else is refused (401).
+async function clerkApi(world: World, request: Request, recorded: Recorded): Promise<Response> {
+  world.clerkCalls.push(recorded);
+  const authorization = request.headers.get("authorization") ?? "";
+  if (!authorization.startsWith("Bearer sk_")) {
+    return jsonResponse(401, { errors: [{ code: "authentication_invalid", message: "Unauthorized request" }] });
+  }
+  const queued = world.clerkQueue.shift();
+  if (queued) return await play(queued, request);
+  const match = /^\/v1\/users\/([^/]+)$/.exec(recorded.url.pathname);
+  if (!match) throw new Error(`the test world has no Clerk route for ${recorded.url.pathname}`);
+  const id = decodeURIComponent(match[1]);
+  // The instance's own key is the world's, whatever a test has put in the environment since.
+  const sameInstance = authorization === `Bearer ${ENV.CLERK_SECRET_KEY}`;
+  if (!sameInstance || !world.clerkUsers.has(id)) {
+    return jsonResponse(404, { errors: [{ code: "resource_not_found", message: "not found" }] });
+  }
+  if (request.method === "GET") return jsonResponse(200, { id, object: "user" });
+  if (request.method === "DELETE") {
+    world.clerkUsers.delete(id);
+    return jsonResponse(200, { id, object: "user", deleted: true });
+  }
+  throw new Error(`the test world has no Clerk route for ${request.method}`);
 }
 
 export function installWorld(): World {
@@ -589,10 +810,30 @@ export function installWorld(): World {
     uploads: [],
     deletedDevotionals: [],
     removals: [],
-    fail: { storageRemove: 0, recordDeleted: 0, deleteEntry: 0, profileUpdate: 0 },
+    fail: {
+      storageRemove: 0,
+      recordDeleted: 0,
+      deleteEntry: 0,
+      profileUpdate: 0,
+      storageList: 0,
+      storageSign: 0,
+      exportUpload: 0,
+      profileDelete: 0,
+      rowsRead: 0,
+    },
     revenuecat: new Map(),
     revenuecatQueue: [],
     revenuecatCalls: [],
+    exports: new Map(),
+    exportUploads: [],
+    exportRemovals: [],
+    lists: [],
+    signs: [],
+    downloads: [],
+    clerkUsers: new Set(),
+    clerkQueue: [],
+    clerkCalls: [],
+    cascade: true,
     logs: [],
     now: isoNow,
     async token(claims = {}, options = {}) {
@@ -649,7 +890,8 @@ export function installWorld(): World {
     const url = new URL(request.url);
     // A file sent to Storage is binary, so it is read as bytes and never as text.
     const isUpload = url.origin === SUPABASE_URL && request.method === "POST" &&
-      url.pathname.startsWith("/storage/v1/object/journal_media/");
+      (url.pathname.startsWith("/storage/v1/object/journal_media/") ||
+        url.pathname.startsWith("/storage/v1/object/exports/"));
     const bytes = isUpload ? new Uint8Array(await request.arrayBuffer()) : null;
     const text = bytes !== null || request.method === "GET" || request.method === "HEAD" ? "" : await request.text();
     let json: unknown = null;
@@ -683,6 +925,8 @@ export function installWorld(): World {
       return await play(world.ttsQueue.shift() ?? synthOk(FIXTURE_WAV), request);
     }
 
+    if (url.host === CLERK_API_HOST) return await clerkApi(world, request, recorded);
+
     if (url.host === REVENUECAT_HOST) {
       world.revenuecatCalls.push(recorded);
       // The real API refuses a request without a secret key (a public SDK key cannot read a customer).
@@ -692,6 +936,11 @@ export function installWorld(): World {
       const queued = world.revenuecatQueue.shift();
       if (queued) return await play(queued, request);
       const id = decodeURIComponent(url.pathname.slice("/v1/subscribers/".length));
+      // Step 31: deleting the customer. RevenueCat queues the deletion and answers at once; an id it does not know is a 404.
+      if (request.method === "DELETE") {
+        if (!world.revenuecat.delete(id)) return jsonResponse(404, { code: 7259, message: "Subscriber not found." });
+        return jsonResponse(200, { app_user_id: id, deleted: true });
+      }
       const known = world.revenuecat.get(id);
       return jsonResponse(known ? 200 : 201, {
         request_date: new Date().toISOString(),
@@ -719,12 +968,22 @@ export function installWorld(): World {
       world.requests.push(recorded);
       try {
         if (url.pathname.startsWith("/rest/v1/")) return rest(world, url.pathname.slice("/rest/v1/".length), recorded);
-        if (url.pathname === "/storage/v1/object/journal_media" && request.method === "DELETE") {
-          return removeObjects(world, recorded);
+        const removal = /^\/storage\/v1\/object\/(journal_media|exports)$/.exec(url.pathname);
+        if (removal && request.method === "DELETE") return removeObjects(world, removal[1], recorded);
+        const listing = /^\/storage\/v1\/object\/list\/(journal_media|exports)$/.exec(url.pathname);
+        if (listing && request.method === "POST") return listObjects(world, listing[1], json);
+        const signing = /^\/storage\/v1\/object\/sign\/(journal_media|exports)\/(.+)$/.exec(url.pathname);
+        if (signing && request.method === "POST") {
+          return signObject(world, signing[1], decodeURIComponent(signing[2]), json);
+        }
+        if (url.pathname.startsWith("/storage/v1/object/exports/") && bytes !== null) {
+          const path = decodeURIComponent(url.pathname.slice("/storage/v1/object/exports/".length));
+          return uploadExport(world, path, request.headers, bytes);
         }
         if (url.pathname.startsWith("/storage/v1/object/journal_media/")) {
           const path = decodeURIComponent(url.pathname.slice("/storage/v1/object/journal_media/".length));
           if (bytes !== null) return upload(world, path, request.headers, bytes);
+          world.downloads.push(path);
           const stored = world.storage.get(path);
           return stored
             ? new Response(new Uint8Array(stored), { status: 200, headers: { "Content-Type": "audio/mp4" } })
@@ -858,6 +1117,26 @@ export function unscopedRequests(world: World, userId: string): string[] {
     } else if (request.url.searchParams.get("user_id") !== `eq.${userId}`) {
       offenders.push(`${request.method} ${table}${request.url.search}`);
     }
+  }
+  return offenders;
+}
+
+// Every Storage request of step 31's kinds stayed inside this user's own folder: the listings, the signed links, the files read,
+// the ZIPs written and every path removed in either bucket. Returns the requests that did not.
+export function unscopedStorage(world: World, userId: string): string[] {
+  const own = (path: string) => path.startsWith(`${userId}/`) && !path.includes("..");
+  const offenders: string[] = [];
+  for (const list of world.lists) {
+    if (list.prefix !== userId && !own(list.prefix)) offenders.push(`list ${list.bucket}:${list.prefix}`);
+  }
+  for (const sign of world.signs) if (!own(sign.path)) offenders.push(`sign ${sign.bucket}:${sign.path}`);
+  for (const path of world.downloads) if (!own(path)) offenders.push(`download journal_media:${path}`);
+  for (const upload of world.exportUploads) if (!own(upload.path)) offenders.push(`upload exports:${upload.path}`);
+  for (const batch of world.removals) {
+    for (const path of batch) if (!own(path)) offenders.push(`remove journal_media:${path}`);
+  }
+  for (const batch of world.exportRemovals) {
+    for (const path of batch) if (!own(path)) offenders.push(`remove exports:${path}`);
   }
   return offenders;
 }

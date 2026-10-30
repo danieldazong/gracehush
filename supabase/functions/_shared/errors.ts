@@ -4,7 +4,8 @@
 // copy of that list must match (src/types/contractParity.ts checks it). process-entry never answers NOT_FOUND;
 // confirm-scripture does, and so does delete-entry (which also answers ALREADY_PROCESSING, for a reflection that is still
 // being made). sync-subscription (step 30) answers NOT_FOUND for a caller with no profile and BILLING_UNAVAILABLE when
-// RevenueCat cannot be read.
+// RevenueCat cannot be read. delete-account (step 31) answers DELETE_INCOMPLETE when a step of the deletion failed: what was done
+// stays done, and the same request sent again continues.
 
 export type ErrorCode =
   | "INVALID_REQUEST"
@@ -20,7 +21,8 @@ export type ErrorCode =
   | "RATE_LIMITED"
   | "INTERNAL"
   | "AI_UNAVAILABLE"
-  | "BILLING_UNAVAILABLE";
+  | "BILLING_UNAVAILABLE"
+  | "DELETE_INCOMPLETE";
 
 export const STATUS_BY_CODE: Record<ErrorCode, number> = {
   INVALID_REQUEST: 400,
@@ -37,6 +39,7 @@ export const STATUS_BY_CODE: Record<ErrorCode, number> = {
   INTERNAL: 500,
   AI_UNAVAILABLE: 503,
   BILLING_UNAVAILABLE: 503,
+  DELETE_INCOMPLETE: 500,
 };
 
 // The only text a response ever carries about a failure: calm, user-safe, and never built from a provider's words.
@@ -56,6 +59,7 @@ export const MESSAGE_BY_CODE: Record<ErrorCode, string> = {
   AI_UNAVAILABLE: "We couldn’t prepare your reflection right now. Please try again.",
   // Never shown in the app, which treats sync-subscription as best effort (step 30).
   BILLING_UNAVAILABLE: "We couldn’t check your subscription right now. Please try again in a moment.",
+  DELETE_INCOMPLETE: "We couldn’t finish deleting your account. Please try again.",
 };
 
 export class AppError extends Error {

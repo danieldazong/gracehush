@@ -141,6 +141,6 @@ Deno.test(
     for (const word of [USER, "sk_test", "Bearer", "subscription_expires_at"]) {
       assert(!text.includes(word), `the log holds "${word}"`);
     }
-    assertEquals(Object.keys(JSON.parse(text)).length, 33);
+    assertEquals(Object.keys(JSON.parse(text)).length, 38);
   }),
 );

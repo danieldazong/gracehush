@@ -331,6 +331,11 @@ Deno.test(
     assertEquals(world.logs.length, 1);
     const line = JSON.parse(world.logs[0]);
     assertEquals(Object.keys(line).sort(), [
+      "account",
+      "accountBytes",
+      "accountEntries",
+      "accountFiles",
+      "accountLeftOut",
       "attempts",
       "audioMs",
       "authMs",

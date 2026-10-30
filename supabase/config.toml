@@ -22,3 +22,11 @@ verify_jwt = false
 [functions.revenuecat-webhook]
 # RevenueCat sends no Clerk token. The function checks RevenueCat's Authorization header and HMAC signature instead.
 verify_jwt = false
+
+[functions.export-data]
+# The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false
+
+[functions.delete-account]
+# The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false
