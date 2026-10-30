@@ -19,6 +19,12 @@ const titleClass = {
   muted: "text-label-lg text-mauve",
 } as const;
 
+const subtitleClass = {
+  default: "text-body-sm text-mauve",
+  // A row whose state has changed and now asks for a tap (the finished export, step 31).
+  accent: "text-body-sm text-plum",
+} as const;
+
 type SettingsRowProps = {
   icon: SymbolViewProps["name"];
   // "default" is a linen tile with a plum icon, "destructive" a crisis-red tile, and "bare" has no tile (the About rows).
@@ -26,8 +32,9 @@ type SettingsRowProps = {
   title: string;
   subtitle?: string;
   titleTone?: keyof typeof titleClass;
-  // A picture only: a chevron, a warning glyph, the switch. It is hidden from touch and from screen readers, because
-  // the row carries the label and the state.
+  subtitleTone?: keyof typeof subtitleClass;
+  // A picture only: a chevron, a warning glyph, the switch, the download badge. It is hidden from touch and from screen
+  // readers, because the row carries the label and the state.
   trailing?: ReactNode;
   // Without it the row is plain information, not a button.
   onPress?: () => void;
@@ -72,6 +79,7 @@ export function SettingsRow({
   title,
   subtitle,
   titleTone = "default",
+  subtitleTone = "default",
   trailing,
   onPress,
   accessibilityLabel,
@@ -84,7 +92,7 @@ export function SettingsRow({
       <RowIcon icon={icon} tone={iconTone} muted={titleTone === "muted"} />
       <View className="flex-1">
         <Text className={titleClass[titleTone]}>{title}</Text>
-        {subtitle ? <Text className="text-body-sm text-mauve">{subtitle}</Text> : null}
+        {subtitle ? <Text className={subtitleClass[subtitleTone]}>{subtitle}</Text> : null}
       </View>
       {trailing ? (
         <View

@@ -38,6 +38,13 @@ export async function openLegalPage(url: string): Promise<LinkResult> {
   }
 }
 
+// The export's ZIP (step 31): a one-hour link, opened in the system browser, which saves the file (Safari to Files, Chrome to
+// Downloads). Anything that is not an https: link is refused.
+export function openExportDownload(url: string): Promise<LinkResult> {
+  if (!url.startsWith("https://")) return Promise.resolve({ ok: false });
+  return openUrl(url);
+}
+
 // No device details, no user id and no body: the person writes what they want to say.
 export function openSupportEmail(): Promise<LinkResult> {
   return openUrl(`mailto:${SUPPORT_EMAIL}?subject=Gracehush%20feedback`);

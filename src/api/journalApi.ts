@@ -2,7 +2,9 @@ import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@s
 
 import {
   CONFIRM_SCRIPTURE_TIMEOUT_MS,
+  DELETE_ACCOUNT_TIMEOUT_MS,
   DELETE_ENTRY_TIMEOUT_MS,
+  EXPORT_DATA_TIMEOUT_MS,
   PROCESS_ENTRY_TIMEOUT_MS,
   SYNC_SUBSCRIPTION_TIMEOUT_MS,
 } from "@/constants/app";
@@ -11,9 +13,12 @@ import type {
   Affirmation,
   ConfirmScriptureRequest,
   ConfirmScriptureResponse,
+  DeleteAccountRequest,
+  DeleteAccountResponse,
   DeleteEntryRequest,
   DeleteEntryResponse,
   Devotional,
+  ExportDataResponse,
   JournalEntry,
   Prayer,
   ProcessEntryRequest,
@@ -23,7 +28,8 @@ import type {
 } from "@/types";
 import { NO_SESSION_ERROR_NAME } from "@/utils/supabaseErrors";
 
-// The only code that calls the Edge Functions (step 25, delete-entry since step 29b, and sync-subscription since step 30). supabase-js sends the Clerk session token as the bearer
+// The only code that calls the Edge Functions (step 25, delete-entry since step 29b, sync-subscription since step 30, and export-data
+// and delete-account since step 31). supabase-js sends the Clerk session token as the bearer
 // token by itself (the accessToken option of src/services/supabaseClient.ts), so nothing here builds an Authorization
 // header or asks Clerk for a token. Every call answers with data or with a failure that carries the HTTP status and a
 // code; it never throws.
@@ -32,7 +38,13 @@ import { NO_SESSION_ERROR_NAME } from "@/utils/supabaseErrors";
 // the Response, which is where the function's own error code (and, for a 402, the saved entry and the numbers) is read.
 // Nothing here logs a body, a token, a text or an id: the dev panel's Supabase check reads getLastFunctionCall().
 
-export type FunctionName = "process-entry" | "confirm-scripture" | "delete-entry" | "sync-subscription";
+export type FunctionName =
+  | "process-entry"
+  | "confirm-scripture"
+  | "delete-entry"
+  | "sync-subscription"
+  | "export-data"
+  | "delete-account";
 
 export type FunctionResult<T> =
   | { ok: true; data: T }
@@ -164,6 +176,21 @@ function isSyncSubscriptionResponse(value: unknown): value is SyncSubscriptionRe
   return isRecord(value) && isString(value.tier) && TIERS.includes(value.tier) && isNullableString(value.expiresAt);
 }
 
+function isExportDataResponse(value: unknown): value is ExportDataResponse {
+  return (
+    isRecord(value) &&
+    isString(value.url) &&
+    isString(value.expiresAt) &&
+    typeof value.partial === "boolean" &&
+    typeof value.reused === "boolean" &&
+    typeof value.sizeBytes === "number"
+  );
+}
+
+function isDeleteAccountResponse(value: unknown): value is DeleteAccountResponse {
+  return isRecord(value) && value.deleted === true;
+}
+
 // ---- failures ------------------------------------------------------------------------------------------------------
 // For an answer that has none of our codes in it: the platform's own 4xx and 5xx (a function that is not deployed, a
 // worker that ran out of memory, a request that took too long).
@@ -199,7 +226,7 @@ async function readFailure(error: unknown): Promise<{ status: number; code: stri
 
 async function callFunction<T>(
   name: FunctionName,
-  body: ProcessEntryRequest | ConfirmScriptureRequest | DeleteEntryRequest | Record<string, never>,
+  body: ProcessEntryRequest | ConfirmScriptureRequest | DeleteEntryRequest | DeleteAccountRequest | Record<string, never>,
   timeout: number,
   isValid: (value: unknown) => value is T,
 ): Promise<FunctionResult<T>> {
@@ -240,6 +267,18 @@ export function deleteEntry(entryId: string): Promise<FunctionResult<DeleteEntry
 // body: the session token says who is asking.
 export function syncSubscription(): Promise<FunctionResult<SyncSubscriptionResponse>> {
   return callFunction("sync-subscription", {}, SYNC_SUBSCRIPTION_TIMEOUT_MS, isSyncSubscriptionResponse);
+}
+
+// export-data (step 31): a ZIP of everything the person has, kept in the private exports bucket, and a link to it that lives one
+// hour. Nothing travels in the body: the session token says whose data it is.
+export function exportData(): Promise<FunctionResult<ExportDataResponse>> {
+  return callFunction("export-data", {}, EXPORT_DATA_TIMEOUT_MS, isExportDataResponse);
+}
+
+// delete-account (step 31): the account goes for good, its files, rows, RevenueCat customer and Clerk user. The body is the confirm
+// the function insists on; DELETE_INCOMPLETE is a step that failed, and the same call again continues.
+export function deleteAccount(): Promise<FunctionResult<DeleteAccountResponse>> {
+  return callFunction("delete-account", { confirm: "DELETE" }, DELETE_ACCOUNT_TIMEOUT_MS, isDeleteAccountResponse);
 }
 
 // The 402 body (step 22): the entry the server saved and when the free week ends. Null for any other body.

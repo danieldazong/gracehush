@@ -5,6 +5,7 @@ import { Image } from "expo-image";
 import type { SymbolViewProps } from "expo-symbols";
 import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
+  Animated,
   Linking,
   Platform,
   Pressable,
@@ -36,6 +37,7 @@ import { colors } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
+import { usePulse } from "@/hooks/usePulse";
 import { useTabBarClearance, useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
 import { countPendingPrayerChanges, countUnsentItems } from "@/data/journalRepository";
@@ -43,6 +45,7 @@ import { deleteAccount, requestDataExport, signOutCleanup } from "@/services/acc
 import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
 import { isPreviewing, previewAmbient, stopPreview, subscribePreview } from "@/services/ambientPlayer";
 import {
+  openExportDownload,
   openLegalPage,
   openManageSubscription,
   openSupportEmail,
@@ -70,6 +73,7 @@ const icons = {
   synced: { android: "check_circle", ios: "checkmark.circle.fill" },
   pending: { android: "cloud_upload", ios: "icloud.and.arrow.up" },
   export: { android: "download", ios: "square.and.arrow.down" },
+  download: { android: "download", ios: "arrow.down" },
   document: { android: "description", ios: "doc.text" },
   lock: { android: "lock", ios: "lock" },
   delete: { android: "delete", ios: "trash" },
@@ -89,6 +93,25 @@ const icons = {
 // page that leaves the app.
 const chevron = <Icon name={icons.chevron} size={20} color={colors.mauve} />;
 const externalMark = <Icon name={icons.external} size={20} color={colors.mauve} />;
+
+// The Export Journal row's trailing picture while the export is ready (step 31): a plum disc with a download arrow in the
+// chevron's place, and a soft halo that grows and fades every 2 seconds until the person taps the row (or leaves the tab).
+// Under Reduce Motion it never moves (usePulse rests at 1).
+function DownloadBadge() {
+  const scale = usePulse(1.45, true);
+  const opacity = scale.interpolate({ inputRange: [1, 1.45], outputRange: [0, 0.45] });
+
+  return (
+    <View className="size-8 items-center justify-center">
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity, transform: [{ scale }] }]}>
+        <View className="flex-1 rounded-full bg-plum/40" />
+      </Animated.View>
+      <View className="size-8 items-center justify-center rounded-full bg-plum">
+        <Icon name={icons.download} size={16} color={colors.card} />
+      </View>
+    </View>
+  );
+}
 
 // One ConfirmDialog serves all four, so the content follows the step. The delete dialog has two steps.
 type DialogKind = "signOut" | "export" | "delete1" | "delete2";
@@ -116,7 +139,7 @@ type NoticeKind =
   | "restored"
   | "restoreNone"
   | "restoreError"
-  | "exportRequested"
+  | "download"
   | "email"
   | "page";
 
@@ -355,6 +378,10 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  // The finished export (step 31): its one-hour link, when that link stops working, and whether audio was left out. While
+  // it is set the Export Journal row is the download. It goes with the notices when the tab loses focus, so the row never
+  // offers an export older than what the person has just written (a new one within 10 minutes is the same file anyway).
+  const [exportLink, setExportLink] = useState<{ url: string; expiresAt: string; partial: boolean } | null>(null);
   // What this phone holds that the server has never been given, which signing out deletes: reflections (step 24) and prayers
   // with changes waiting (step 29 follow-up).
   const [unsent, setUnsent] = useState({ reflections: 0, prayers: 0 });
@@ -362,15 +389,17 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const [restoring, setRestoring] = useState(false);
   const restoreRunning = useRef(false);
   useAnnounce(dialogError);
+  useAnnounce(exportLink ? text.privacy.exportReady : null);
   // The ambient preview (step 27) plays only while no devotional is playing.
   const previewing = useSyncExternalStore(subscribePreview, isPreviewing);
   const devotionalPlaying = usePlayerStore((store) => store.status === "playing");
 
-  // Leaving the tab (or opening a screen over it) clears every notice and stops a preview.
+  // Leaving the tab (or opening a screen over it) clears every notice and the finished export, and stops a preview.
   useFocusEffect(
     useCallback(
       () => () => {
         setNotices([]);
+        setExportLink(null);
         stopPreview();
       },
       [],
@@ -474,6 +503,24 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
     setDialogError(result.ok ? null : text.errors.subscription);
   }
 
+  // The ready Export Journal row: opens the link while it lives, and once the browser has it the row is Export Journal
+  // again (the app cannot see the download finish; a new export within 10 minutes gives back the same file). A link that
+  // cannot be opened keeps the row ready, with the calm line under the group. A link that has run out starts a new export.
+  async function downloadExport() {
+    if (exportLink !== null && Date.parse(exportLink.expiresAt) > Date.now()) {
+      const result = await openExportDownload(exportLink.url);
+      if (result.ok) {
+        hideNotice("download");
+        setExportLink(null);
+      } else {
+        showNotice("download");
+      }
+      return;
+    }
+    setExportLink(null);
+    openDialog("export");
+  }
+
   function openDialog(kind: DialogKind) {
     setDialog(kind);
     setDialogError(null);
@@ -494,6 +541,9 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
       if (runCleanup) await signOutCleanup();
       await signOut();
     } catch {
+      // After an account deletion (deleteAccount ran the cleanup) the session is already gone on this phone: clerk-js clears it
+      // before it asks Clerk to end it, and that request fails because the user no longer exists (step 31). Nothing to show.
+      if (!runCleanup) return;
       setBusy(false);
       setDialogError(text.errors.signOut);
     }
@@ -516,7 +566,8 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
       setBusy(false);
       if (result.ok) {
         setDialogOpen(false);
-        showNotice("exportRequested");
+        hideNotice("download");
+        setExportLink({ url: result.data.url, expiresAt: result.data.expiresAt, partial: result.data.partial });
         // TODO(34): data_export_requested {}
       } else {
         setDialogError(result.message);
@@ -760,17 +811,30 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
 
               <View className="gap-2">
                 <SettingsGroup title={text.groups.privacy}>
-                  <SettingsRow
-                    icon={icons.export}
-                    title={text.privacy.exportTitle}
-                    subtitle={text.privacy.exportSubtitle}
-                    trailing={chevron}
-                    onPress={() => openDialog("export")}
-                    accessibilityLabel={text.rowLabel(
-                      text.privacy.exportTitle,
-                      text.privacy.exportSubtitle,
-                    )}
-                  />
+                  {exportLink ? (
+                    <SettingsRow
+                      icon={icons.export}
+                      title={text.privacy.exportTitle}
+                      subtitle={text.privacy.exportReadySubtitle}
+                      subtitleTone="accent"
+                      trailing={<DownloadBadge />}
+                      onPress={downloadExport}
+                      accessibilityLabel={text.privacy.downloadLabel}
+                      accessibilityHint={text.privacy.downloadHint}
+                    />
+                  ) : (
+                    <SettingsRow
+                      icon={icons.export}
+                      title={text.privacy.exportTitle}
+                      subtitle={text.privacy.exportSubtitle}
+                      trailing={chevron}
+                      onPress={() => openDialog("export")}
+                      accessibilityLabel={text.rowLabel(
+                        text.privacy.exportTitle,
+                        text.privacy.exportSubtitle,
+                      )}
+                    />
+                  )}
                   <SettingsRow
                     icon={icons.delete}
                     iconTone="destructive"
@@ -785,9 +849,8 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
                     )}
                   />
                 </SettingsGroup>
-                {has("exportRequested") ? (
-                  <Notice message={text.privacy.exportRequested} tone="mauve" />
-                ) : null}
+                {exportLink?.partial ? <Notice message={text.privacy.exportPartial} tone="mauve" /> : null}
+                {has("download") ? <Notice message={text.errors.link} /> : null}
               </View>
             </>
           ) : null}

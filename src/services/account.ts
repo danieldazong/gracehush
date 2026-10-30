@@ -1,45 +1,87 @@
-// TEMP(31): replace internals with Edge Function calls, keep signatures
+import { deleteAccount as deleteAccountOnServer, exportData } from "@/api/journalApi";
 import { copy } from "@/constants/copy";
 import { simulateWrite } from "@/data/journalRepository";
-import { takeMockPrayerMutationFailure } from "@/data/mock/scenario";
+import { getDataSource, takeMockPrayerMutationFailure } from "@/data/mock/scenario";
 import { deleteUserDatabase } from "@/db/database";
 import { clearAffirmations } from "@/services/affirmationScheduler";
 import { deleteAllDevotionalAudio } from "@/services/devotionalAudio";
 import { endOfflineSession } from "@/services/offlineSession";
-import { cancelProfileSync } from "@/services/profileSync";
+import { cancelProfileSync, pauseProfileSync, resumeProfileSync } from "@/services/profileSync";
 import { deleteAllRecordings } from "@/services/recordingFiles";
 import { endRevenueCatSession } from "@/services/revenuecat";
-import { stopPlanWatch } from "@/services/subscriptionSync";
+import { startPlanWatch, stopPlanWatch } from "@/services/subscriptionSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
+import { isSyncEngineStarted, startSyncEngine, stopSyncEngine } from "@/services/syncEngine";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 import type { RepoResult } from "@/types";
 
+// Profile's two account actions, and the cleanup every sign-out shares. The export and the deletion run on the server (step 31:
+// export-data and delete-account, called through src/api/journalApi.ts). The mock data source keeps the step 15 mocks, which a
+// release build never reaches.
+
 // How long a mock request waits, so a dialog shows its spinner.
 const ACCOUNT_REQUEST_MS = 600;
+// The mock export's link: a placeholder, development only.
+const MOCK_EXPORT_URL = "https://example.com/gracehush-journal.zip";
 
-// Asks for a copy of the user's data. The mock only answers; step 31 builds the ZIP and the download link.
-// It shares the dev failure flag with the mock data's prayer changes and the profile save ("Fail next save (dev)").
-// TODO(31): include the prayers, their answered dates and their gratitude notes in the data export.
-export async function requestDataExport(): Promise<RepoResult<{ requestedAt: string }>> {
-  await simulateWrite(ACCOUNT_REQUEST_MS);
-  if (takeMockPrayerMutationFailure()) {
-    return { ok: false, code: "NETWORK", message: copy.profile.errors.export };
-  }
-  return { ok: true, data: { requestedAt: new Date().toISOString() } };
+// What Profile needs of a finished export: the one-hour link, and whether audio was left out or the ZIP was handed back again.
+export type ExportLink = { url: string; expiresAt: string; partial: boolean; reused: boolean };
+
+function failureCode(code: string): "NETWORK" | "UNAUTHORIZED" | "UNKNOWN" {
+  return code === "NETWORK" || code === "UNAUTHORIZED" ? code : "UNKNOWN";
 }
 
-// The caller signs out of Clerk afterwards. This never deletes the real Clerk user.
-export async function deleteAccount(): Promise<RepoResult<null>> {
-  await simulateWrite(ACCOUNT_REQUEST_MS);
-  if (takeMockPrayerMutationFailure()) {
-    return { ok: false, code: "NETWORK", message: copy.profile.errors.delete };
+// A ZIP of everything the person has, prayers, answered dates and gratitude notes included, and a link to it. The mock shares
+// the dev failure flag with the mock data's writes ("Fail next save (dev)").
+export async function requestDataExport(): Promise<RepoResult<ExportLink>> {
+  if (getDataSource() === "mock") {
+    await simulateWrite(ACCOUNT_REQUEST_MS);
+    if (takeMockPrayerMutationFailure()) return { ok: false, code: "NETWORK", message: copy.profile.errors.export };
+    const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
+    return { ok: true, data: { url: MOCK_EXPORT_URL, expiresAt, partial: false, reused: false } };
   }
-  // TODO(31): the server deletes the Supabase rows, the storage files, the RevenueCat customer and the Clerk user.
+  const result = await exportData();
+  if (!result.ok) return { ok: false, code: failureCode(result.code), message: copy.profile.errors.export };
+  const { url, expiresAt, partial, reused } = result.data;
+  return { ok: true, data: { url, expiresAt, partial, reused } };
+}
+
+// Deletes the account for good: its files, its rows, its RevenueCat customer and its Clerk user (delete-account). The caller
+// signs out of Clerk afterwards.
+//
+// First this phone stops its own background work, so nothing it does can make the account's data again while the server
+// deletes it: the sync engine (a reflection being prepared makes the profile row), the plan watch (a sync re-reads RevenueCat,
+// which makes a customer) and the profile sync (it makes the profile row). A success, or UNAUTHORIZED (the account or its
+// session is already gone), runs the sign-out cleanup and forgets the account's settings kept on this phone: signing out is
+// always safe. A failure clears nothing and starts again what was stopped.
+export async function deleteAccount(): Promise<RepoResult<null>> {
+  if (getDataSource() === "mock") return await deleteMockAccount();
+  const userId = getSupabaseUserId();
+  const engineWasRunning = isSyncEngineStarted();
+  stopSyncEngine();
+  stopPlanWatch();
+  if (userId !== null) pauseProfileSync(userId);
+  const result = await deleteAccountOnServer();
+  if (result.ok || result.code === "UNAUTHORIZED") {
+    await signOutCleanup();
+    if (userId !== null) useProfilePrefsStore.getState().forgetUser(userId);
+    return { ok: true, data: null };
+  }
+  resumeProfileSync();
+  if (engineWasRunning) startSyncEngine();
+  if (userId !== null) startPlanWatch(userId);
+  return { ok: false, code: failureCode(result.code), message: copy.profile.errors.delete };
+}
+
+// The step 15 mock: it waits, honours "Fail next save (dev)" and clears the phone as a real deletion does. It never deletes the
+// real Clerk user.
+async function deleteMockAccount(): Promise<RepoResult<null>> {
+  await simulateWrite(ACCOUNT_REQUEST_MS);
+  if (takeMockPrayerMutationFailure()) return { ok: false, code: "NETWORK", message: copy.profile.errors.delete };
   const userId = getSupabaseUserId();
   await signOutCleanup();
-  // The settings kept on this device for the account go with it.
   if (userId !== null) useProfilePrefsStore.getState().forgetUser(userId);
   return { ok: true, data: null };
 }

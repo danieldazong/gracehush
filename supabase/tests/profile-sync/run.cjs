@@ -399,6 +399,9 @@ const row = ({
     fakes["@/db/cache"] = {};
     fakes["@/db/mutations"] = {};
     fakes["@/services/offlineSession"] = { endOfflineSession: async () => undefined };
+    // Step 31: account.ts stops and starts the sync engine around an account deletion; react-native behind it cannot load in
+    // Node. These checks run the mock deletion, which never touches it.
+    fakes["@/services/syncEngine"] = { isSyncEngineStarted: () => false, startSyncEngine: () => undefined, stopSyncEngine: () => undefined };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
     env.use("@/store/devStore").useDevStore.getState().setDataSource(source);
@@ -1000,6 +1003,7 @@ const row = ({
         "@/db/cache": {},
         "@/db/mutations": {},
         "@/services/offlineSession": { endOfflineSession: async () => undefined },
+        "@/services/syncEngine": { isSyncEngineStarted: () => false, startSyncEngine: () => undefined, stopSyncEngine: () => undefined },
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();

@@ -79,10 +79,23 @@ let running: Promise<RepoResult<null>> | null = null;
 let runAgain = false;
 let lastOkAt = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
+// Account deletion (step 31): while the server deletes an account, no sync may make its profile row again (a foreground, an
+// edit, a screen's first read). A deletion that fails resumes it; one that succeeds leaves it paused for that account, which can
+// never sign in again (the next account is another user id).
+let pausedFor: string | null = null;
+
+export function pauseProfileSync(userId: string): void {
+  pausedFor = userId;
+  cancelProfileSync();
+}
+
+export function resumeProfileSync(): void {
+  pausedFor = null;
+}
 
 async function runOnce(): Promise<RepoResult<null>> {
   const userId = getSupabaseUserId();
-  if (userId === null) return unauthorized();
+  if (userId === null || userId === pausedFor) return unauthorized();
   // The mock profile needs no network.
   if (getDataSource() !== "supabase") return { ok: true, data: null };
 

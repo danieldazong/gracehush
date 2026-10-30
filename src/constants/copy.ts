@@ -796,8 +796,13 @@ export const copy = {
       exportSubtitle: "Download a copy of your entries and prayers.",
       deleteTitle: "Delete Account",
       deleteSubtitle: "Permanently remove your account and data.",
-      // TEMP(31): "Your export is ready." and a Download button
-      exportRequested: "Export requested.",
+      // The finished export (step 31): the Export Journal row itself becomes the download while its one-hour link lives.
+      // `exportReady` is what a screen reader hears when it becomes ready.
+      exportReady: "Your export is ready.",
+      exportReadySubtitle: "Your export is ready. Tap to download.",
+      downloadLabel: "Download your journal export",
+      downloadHint: "Opens the download in your browser.",
+      exportPartial: "Some audio didn’t fit. The README in your download lists it.",
     },
     about: {
       support: "Support & Helpline Resources",
@@ -838,7 +843,6 @@ export const copy = {
         cancel: "Stay signed in",
       },
       export: {
-        // TODO(31): true once step 31 builds the download link
         title: "Export your journal?",
         body: "We’ll prepare a copy of your entries, prayers and affirmations. You’ll get a link to download it.",
         confirm: "Prepare export",

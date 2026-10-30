@@ -62,6 +62,10 @@ export const DELETE_ENTRY_TIMEOUT_MS = 30_000;
 // a purchase or a restore, so this caps how long "Welcome to Gracehush Pro" can take; a sync that times out changes nothing,
 // and the webhook and the next foreground catch up.
 export const SYNC_SUBSCRIPTION_TIMEOUT_MS = 10_000;
+// export-data and delete-account (step 31) stop themselves at the platform's 150 seconds; the app waits a little longer, so it
+// never gives up on an export or a deletion that is still running.
+export const EXPORT_DATA_TIMEOUT_MS = 155_000;
+export const DELETE_ACCOUNT_TIMEOUT_MS = 155_000;
 
 // The one entitlement (AGENTS.md, Subscription Rules). The server's billing module has the same constant.
 export const PRO_ENTITLEMENT_ID = "pro";
@@ -91,3 +95,6 @@ export const MANAGE_SUBSCRIPTION_URL = {
 export const PRIVACY_POLICY_URL = "https://example.com/TODO-privacy"; // TODO: real URL before release
 export const TERMS_URL = "https://example.com/TODO-terms"; // TODO: real URL before release
 export const SUPPORT_EMAIL = "support@example.com"; // TODO: real address before release
+// The web page where someone can ask for their account and its data to be deleted without the app (Google Play's Data safety
+// form asks for it; step 31). It is not shown in the app.
+export const ACCOUNT_DELETION_URL = "https://example.com/TODO-delete-account"; // TODO: real URL before release

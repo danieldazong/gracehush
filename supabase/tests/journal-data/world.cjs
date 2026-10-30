@@ -297,10 +297,20 @@ function makeServer() {
     gate: null,
     // Queues of answers for the functions: (call) => Response | Promise<Response>. An empty queue answers "finished" (and, for
     // delete-entry, deletes the caller's entry for real, as step 29b's function does).
-    functions: { "process-entry": [], "confirm-scripture": [], "delete-entry": [], "sync-subscription": [] },
+    functions: {
+      "process-entry": [],
+      "confirm-scripture": [],
+      "delete-entry": [],
+      "sync-subscription": [],
+      "export-data": [],
+      "delete-account": [],
+    },
     functionCalls: [],
     // The ids delete-entry deleted (step 29b), in order.
     deletedEntries: [],
+    // Step 31: the accounts delete-account deleted, in order. An empty queue answers as the real function does: only the exact
+    // confirm body deletes, and then everything of the caller goes.
+    deletedAccounts: [],
     // Step 30: what RevenueCat says each user's plan is, and the plan the server wrote (users_profile.subscription_tier). An
     // empty sync-subscription queue answers as the real function does: it reads the first and writes it as the second.
     revenueCatPlans: {},
@@ -454,6 +464,22 @@ function makeServer() {
           if (state.affirmations[i].entry_id === gone.id) state.affirmations.splice(i, 1);
         }
         state.deletedEntries.push(gone.id);
+        return json(200, { deleted: true });
+      }
+      if (name === "export-data") {
+        // Step 31: a link to the caller's ZIP, valid for an hour, as the real function signs it.
+        const expiresAt = new RealDate(clock.now + 3600_000).toISOString();
+        const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/storage/v1/object/sign/exports/${sub}/export.zip?token=signed&download=gracehush-journal.zip`;
+        return json(200, { url, expiresAt, partial: false, reused: false, sizeBytes: 2048 });
+      }
+      if (name === "delete-account") {
+        const exact = body !== null && typeof body === "object" && !Array.isArray(body) &&
+          Object.keys(body).length === 1 && body.confirm === "DELETE";
+        if (!exact) return fnError(400, "INVALID_REQUEST");
+        for (const list of [state.entries, state.affirmations]) {
+          for (let i = list.length - 1; i >= 0; i -= 1) if (list[i].user_id === sub) list.splice(i, 1);
+        }
+        state.deletedAccounts.push(sub);
         return json(200, { deleted: true });
       }
       return json(200, { scripture: null });
