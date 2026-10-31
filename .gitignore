@@ -44,6 +44,8 @@ deno.lock
 # Step 22: the voice audition's MP3 files, and a Google service account's key file if one ever lands in the project folder
 # (it belongs outside the repo: see prompts/22-tts-and-storage.md, step C)
 tts-audition/
+# Step 32: the tone evaluation's outputs (made-up entries, the reflections, the grades, three WAV files and the review sheet)
+tone-eval/
 *-service-account*.json
 gracehush-tts*.json
 
