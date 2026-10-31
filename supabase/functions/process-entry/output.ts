@@ -2,18 +2,40 @@ import { isUsfmBookId } from "../_shared/bible/books.ts";
 import type { ScriptureRef } from "../_shared/bible/reference.ts";
 import { EMOTIONS, LIMITS, PRAYER_CATEGORIES, SCRIPTURE_NUMBER_LIMITS, TIME_SLOTS } from "./constants.ts";
 import type { EmotionKey, PrayerCategory, TimeSlot } from "./contracts.ts";
+import {
+  correctionNote,
+  firstNeverSay,
+  hasVerseReference,
+  hookProblem,
+  leakedWords,
+  privateWords,
+  type SalvageReason,
+  salvageReflection,
+} from "./tone.ts";
 
 // The schema guarantees the shape, not the meaning. This checks the model's JSON again, cleans the text the person will
 // read and hear, and returns a typed value. Anything out of range is invalid (nothing is truncated): the caller makes
 // one more attempt and then answers AI_UNAVAILABLE.
+//
+// After the shape, the tone checks of step 32 (tone.ts), in this order: a verse reference in the devotional or the prayer,
+// a never-say phrase anywhere the person reads or hears, and last a word the person wrote in the title or a headline (both
+// reach a lock screen). A tone failure carries a note for the retry (gemini.ts sends it), and a reply whose only fault is a
+// private word also carries itself with safe texts in the leaking fields, which is kept in case no clean reply comes.
 
 export class OutputInvalid extends Error {
   // A short category for the log. Never the model's words.
   readonly reason: string;
-  constructor(reason: string) {
+  // What the next attempt is told to fix (tone.ts correctionNote). It can hold the person's own words, so it only ever goes
+  // into the retry of the same request: never a log, a store or a print.
+  readonly note?: string;
+  // The reply with safe texts in place of the words that leaked, for a reply whose only fault that was.
+  readonly salvage?: unknown;
+  constructor(reason: string, extra: { note?: string | null; salvage?: unknown } = {}) {
     super(reason);
     this.name = "OutputInvalid";
     this.reason = reason;
+    if (extra.note) this.note = extra.note;
+    if (extra.salvage !== undefined) this.salvage = extra.salvage;
   }
 }
 
@@ -31,7 +53,14 @@ export type ReadyReflection = {
   closingPrayer: string;
   prayer: { title: string; summary: string; category: PrayerCategory } | null;
   affirmations: { slot: TimeSlot; headline: string; text: string }[];
+  // Null for every clean reply. Set when this is a reply kept after a word from the entry stayed in its title or a headline,
+  // with the safe text in its place (decision 17 of step 32): the log line says so.
+  salvaged: SalvageReason | null;
 };
+
+// What the checks need besides the reply: the words the reflection was written from (the screened text).
+// `recentFirstWords`: the first word of each recent devotional of the person's (tone.ts firstWord), for the hook guard.
+export type ParseContext = { entry: string; recentFirstWords?: readonly string[] };
 
 // The model's own is_crisis flag is the last of the three layers (the crisis screening is the first two). The words of a
 // crisis entry are the screening's, so the flag carries nothing else.
@@ -157,8 +186,37 @@ function readAffirmations(value: unknown): ReadyReflection["affirmations"] {
   return TIME_SLOTS.map((slot) => bySlot.get(slot)!);
 }
 
-// `text` is the model's reply.
-export function parseReflection(text: string): Reflection {
+// The tone checks on a reflection that has the right shape, in their order, or null when it passes them all. The tone
+// evaluation calls this too, to measure replies the instruction's older version wrote.
+export function checkTone(reflection: ReadyReflection, entry: string): OutputInvalid | null {
+  const words = privateWords(entry);
+  const toneFailure = (reason: string, leaked: string[] = [], salvage?: unknown) =>
+    new OutputInvalid(reason, { note: correctionNote(reason, words, leaked), salvage });
+
+  if (hasVerseReference(reflection.devotional) || hasVerseReference(reflection.closingPrayer)) {
+    return toneFailure("verse_reference");
+  }
+  const read = [
+    reflection.devotional,
+    reflection.closingPrayer,
+    reflection.title,
+    ...reflection.affirmations.flatMap((item) => [item.headline, item.text]),
+  ];
+  for (const part of read) {
+    const id = firstNeverSay(part);
+    if (id) return toneFailure(`never_say:${id}`);
+  }
+
+  // Last and together: only a reply that passed everything else gets here, so its salvage is safe to keep.
+  const titleLeaks = leakedWords(reflection.title, words);
+  const headlineLeaks = leakedWords(reflection.affirmations.map((item) => item.headline).join("\n"), words);
+  if (titleLeaks.length === 0 && headlineLeaks.length === 0) return null;
+  const reason = titleLeaks.length > 0 ? "title_private" : "headline_private";
+  return toneFailure(reason, [...titleLeaks, ...headlineLeaks], salvageReflection(reflection, words));
+}
+
+// `text` is the model's reply; `context.entry` the words it was written from.
+export function parseReflection(text: string, context: ParseContext): Reflection {
   let data: unknown;
   try {
     data = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -196,7 +254,7 @@ export function parseReflection(text: string): Reflection {
     fail("closing_prayer_words");
   }
 
-  return {
+  const reflection: ReadyReflection = {
     kind: "ready",
     emotion,
     title,
@@ -205,5 +263,14 @@ export function parseReflection(text: string): Reflection {
     closingPrayer,
     prayer: readPrayer(data.prayer),
     affirmations: readAffirmations(data.affirmations),
+    salvaged: null,
   };
+  const problem = checkTone(reflection, context.entry);
+  if (problem) throw problem;
+  // The hook guard (gen-v2.2), last: only a reply that passed every hard check gets here, so it is safe to keep as it is.
+  const hook = hookProblem(reflection.devotional, context.recentFirstWords ?? []);
+  if (hook) {
+    throw new OutputInvalid(hook.reason, { note: hook.note, salvage: { ...reflection, salvaged: hook.reason } });
+  }
+  return reflection;
 }

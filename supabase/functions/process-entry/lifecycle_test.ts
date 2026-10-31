@@ -11,9 +11,11 @@ import {
   failEntry,
   findEntry,
   listAffirmations,
+  listRecentReflections,
   markSpeechFailed,
   needsSpeech,
   readProfile,
+  RECENT_REFLECTION_COLUMNS,
   saveAudio,
   saveCrisisEntry,
   saveReadyEntry,
@@ -516,5 +518,66 @@ Deno.test(
     } finally {
       globalThis.fetch = real;
     }
+  }),
+);
+
+Deno.test(
+  "listRecentReflections: this user's three newest finished reflections made before this entry, and only three columns",
+  withWorld(async (world, admin) => {
+    const older = ["One", "Two", "Three", "Four"].map((title, index) =>
+      seedDevotional(world, USER, {
+        devotional_title: title,
+        scripture_reference: `Psalm ${index + 1}:1`,
+        transcript: `PRIVATE-WORDS-${index}`,
+      })
+    );
+    seedDevotional(world, "user_b", { devotional_title: "Someone else" });
+    world.seedEntry({
+      user_id: USER,
+      input_type: "text",
+      processing_status: "ready",
+      is_crisis: true,
+      transcript: "x",
+    });
+    world.seedEntry({ user_id: USER, input_type: "text", processing_status: "failed", transcript: "x" });
+    world.seedEntry({ user_id: USER, input_type: "text", processing_status: "ready", transcript: "x" });
+    const current = world.seedEntry({
+      user_id: USER,
+      client_entry_id: ENTRY_ID,
+      input_type: "text",
+      processing_status: "processing",
+    });
+    seedDevotional(world, USER, { devotional_title: "Made later" });
+
+    const rows = await listRecentReflections(admin, USER, String(current.id), String(current.created_at));
+    assertEquals(rows.map((row) => row.devotional_title), ["Four", "Three", "Two"]);
+    assertEquals(rows.map((row) => row.scripture_reference), ["Psalm 4:1", "Psalm 3:1", "Psalm 2:1"]);
+    for (const row of rows) {
+      assertEquals(Object.keys(row).sort(), ["devotional_script", "devotional_title", "scripture_reference"]);
+    }
+    assertEquals(older.length, 4);
+
+    const [request] = world.requests.filter((item) =>
+      item.method === "GET" && item.url.pathname.endsWith("/journal_entries")
+    );
+    const params = request.url.searchParams;
+    assertEquals(params.get("select"), RECENT_REFLECTION_COLUMNS.replaceAll(" ", ""));
+    assert(!request.url.search.includes("transcript"), "the person's words are never asked for");
+    assertEquals(params.get("user_id"), `eq.${USER}`);
+    assertEquals(params.get("processing_status"), "eq.ready");
+    assertEquals(params.get("is_crisis"), "eq.false");
+    assertEquals(params.get("devotional_script"), "not.is.null");
+    assertEquals(params.get("id"), `neq.${current.id}`);
+    assertEquals(params.get("created_at"), `lt.${current.created_at}`);
+    assertEquals(params.get("order"), "created_at.desc");
+    assertEquals(params.get("limit"), "3");
+
+    // A database that refuses is reported like every other read; the handler turns it into no recent reflections.
+    world.fail.recentRead = 1;
+    await expectAppError(
+      () => listRecentReflections(admin, USER, String(current.id), String(current.created_at)),
+      "INTERNAL",
+      "db:recent:XX000",
+    );
   }),
 );

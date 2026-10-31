@@ -359,11 +359,15 @@ Deno.test(
     };
     const props = body.response_format.schema.properties.scripture.properties;
     assertEquals(Object.keys(props).sort(), ["book_id", "chapter", "verse_end", "verse_start"]);
-    assertEquals(props.book_id.enum?.length, 66);
+    // Every book but the Song of Solomon (step 32).
+    assertEquals(props.book_id.enum?.length, 65);
     assert(
-      props.book_id.enum?.includes("PHP") && props.book_id.enum?.includes("SNG") && props.book_id.enum?.includes("1JN"),
+      props.book_id.enum?.includes("PHP") && !props.book_id.enum?.includes("SNG") &&
+        props.book_id.enum?.includes("1JN"),
     );
     assert(body.system_instruction.includes("USFM id"));
-    assert(!/book name/i.test(body.system_instruction));
+    // The model is never asked for a book's name (gen-v2 does mention "book names with numbers", as what the devotional must
+    // never hold).
+    assert(!/book_name|the book's name|name of the book/i.test(body.system_instruction));
   }),
 );

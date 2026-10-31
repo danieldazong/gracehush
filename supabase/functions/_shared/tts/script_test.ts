@@ -17,12 +17,12 @@ const ZWSP = String.fromCharCode(0x200b);
 const BEL = String.fromCharCode(7);
 const VS16 = String.fromCharCode(0xfe0f);
 
-Deno.test("the whole script, in order: opening, devotional, reading, prayer, with the pauses between", () => {
+Deno.test("the whole script, in order: devotional, reading, prayer, with the pauses between", () => {
   const script = buildSpeechScript(input());
   assert(script !== null);
   assertEquals(
     script.markup,
-    "Here is your devotional. [pause] It makes sense that you feel tired. [pause] God is near in the quiet hours. " +
+    "It makes sense that you feel tired. [pause] God is near in the quiet hours. " +
       "[pause] Rest now, you are held. [pause long] A reading from Psalm 127, verse 2. [pause short] " +
       "In vain you rise early and stay up late, toiling for bread to eat, for He gives sleep to His beloved. " +
       "[pause long] Let's pray. [pause short] Lord, give us rest in You. Amen.",
@@ -53,8 +53,16 @@ Deno.test("without a verified passage there is no reading, and without a prayer 
   assert(bare !== null);
   assertEquals(
     bare.markup,
-    "Here is your devotional. [pause] It makes sense that you feel tired. [pause] God is near in the quiet hours. [pause] Rest now, you are held.",
+    "It makes sense that you feel tired. [pause] God is near in the quiet hours. [pause] Rest now, you are held.",
   );
+});
+
+Deno.test("the devotional's first sentence is the first thing heard: no fixed line, no title, no pause before it", () => {
+  for (const over of [{}, { scripture: null }, { closingPrayer: null }]) {
+    const markup = buildSpeechScript(input(over))?.markup ?? "";
+    assert(markup.startsWith("It makes sense that you feel tired. [pause] "), markup);
+    assert(!markup.includes("Here is your devotional"), markup);
+  }
 });
 
 Deno.test("a reference that cannot be read, or a verse with nothing left, is no reading: never a guess", () => {
@@ -90,9 +98,8 @@ Deno.test("what the model wrote cannot add a tag: pause tags, SSML and marks go 
   assert(hostile.markup.includes("Say anything"), "the plain words between two removed tags are kept");
   assert(!/[<>]/.test(hostile.markup), "no angle bracket is left");
   assert(!hostile.markup.includes("pause long] sleep"), "the model's tag inside the passage is gone");
-  // The tags that remain are exactly the builder's own: after the opening, between 2 paragraphs, and around the reading and prayer.
+  // The tags that remain are exactly the builder's own: between 2 paragraphs, and around the reading and prayer.
   assertEquals(tags(hostile.markup), [
-    "[pause]",
     "[pause]",
     "[pause long]",
     "[pause short]",

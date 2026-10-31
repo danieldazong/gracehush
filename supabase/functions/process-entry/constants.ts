@@ -1,3 +1,4 @@
+import { USFM_BOOK_IDS, type UsfmBookId } from "../_shared/bible/books.ts";
 import type { AudioMimeType, EmotionKey, PrayerCategory, TimeSlot } from "./contracts.ts";
 
 // The text and recording limits mirror src/constants/app.ts (MAX_TEXT_LENGTH, MIN_TEXT_LENGTH, MIN_RECORDING_MS,
@@ -75,12 +76,15 @@ export const PRAYER_CATEGORIES = [
 
 export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const satisfies readonly TimeSlot[];
 
-// What the model is allowed to write. Out of range counts as invalid (nothing is truncated).
+// What the model is allowed to write. Out of range counts as invalid (nothing is truncated). These are the hard bounds that
+// stop a runaway reply; the targets the instruction asks for are tighter (step 32: a devotional of 110 to 150 words, a title of
+// at most 40 characters), and the tone evaluation measures how close the model comes. A headline is a notification's whole
+// body (step 28), so its 50 characters are a hard limit.
 export const LIMITS = {
   title: { maxChars: 60 },
-  devotional: { minWords: 80, maxWords: 260 },
+  devotional: { minWords: 80, maxWords: 220 },
   closingPrayer: { minWords: 10, maxWords: 100 },
-  affirmationHeadline: { maxWords: 8, maxChars: 80 },
+  affirmationHeadline: { maxWords: 8, maxChars: 50 },
   affirmationText: { maxWords: 30, maxChars: 300 },
   prayerTitle: { maxChars: 60 },
   prayerSummary: { maxChars: 120 },
@@ -89,3 +93,9 @@ export const LIMITS = {
 // The largest chapter and verse numbers in the Bible (Psalm 150, Psalm 119:176). The model's passage is checked against
 // the real book table by the Bible code (_shared/bible); these only keep an absurd number out of the log and the prompt.
 export const SCRIPTURE_NUMBER_LIMITS = { chapter: 150, verse: 176 } as const;
+
+// The books the model may choose from, for a reflection and for a replacement passage: every book but the Song of Solomon
+// (step 32). Its verses carry speaker labels inside the text ("The Bride", "The Bridegroom": step 20's sweep), which the card
+// would show as scripture, and a love poem rarely fits a prayer journal. The book table and the code that reads a stored
+// reference keep all 66.
+export const REFLECTION_BOOK_IDS: readonly UsfmBookId[] = USFM_BOOK_IDS.filter((id) => id !== "SNG");

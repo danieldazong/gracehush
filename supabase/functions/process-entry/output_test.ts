@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "./testing/assert.ts";
-import { crisisOutput, readyOutput } from "./testing/fakes.ts";
+import { crisisOutput, readyOutput, TEXT } from "./testing/fakes.ts";
 import {
   countWords,
   curlyApostrophes,
@@ -7,26 +7,31 @@ import {
   OutputInvalid,
   parseReflection,
   parseScripturePick,
+  type ReadyReflection,
   removeAmen,
   singleLine,
   stripMarkup,
   tidyParagraphs,
 } from "./output.ts";
+import { SAFE_HEADLINES, SAFE_TITLE } from "./tone.ts";
 
-const parse = (value: unknown) => parseReflection(typeof value === "string" ? value : JSON.stringify(value));
+const parse = (value: unknown, entry = TEXT) =>
+  parseReflection(typeof value === "string" ? value : JSON.stringify(value), { entry });
 
-function invalid(value: unknown, reason: string) {
+function invalid(value: unknown, reason: string, entry = TEXT): OutputInvalid {
   try {
-    parse(value);
+    parse(value, entry);
   } catch (error) {
     assert(error instanceof OutputInvalid, `expected OutputInvalid, got ${String(error)}`);
     assertEquals(error.reason, reason);
-    return;
+    return error;
   }
   throw new Error(`expected "${reason}" but the output was accepted`);
 }
 
 const words = (count: number) => Array.from({ length: count }, (_, index) => `word${index}`).join(" ");
+// Filler prose of `count` words whose first sentence is ten words long, so the hook guard (gen-v2.2) leaves it alone.
+const prose = (count: number) => words(count).replace(/^((?:\S+ ){9}\S+)/, "$1.");
 
 Deno.test("a good written reflection is accepted and cleaned", () => {
   const result = parse(readyOutput());
@@ -146,11 +151,11 @@ Deno.test("the reply to a request for another passage is the same four fields on
   }
 });
 
-Deno.test("devotional length: 79 words is too few, 80 and 260 pass, 261 is too many (nothing is truncated)", () => {
-  invalid({ ...readyOutput(), devotional_text: words(79) }, "devotional_words");
-  assert(parse({ ...readyOutput(), devotional_text: words(80) }).kind === "ready");
-  assert(parse({ ...readyOutput(), devotional_text: words(260) }).kind === "ready");
-  invalid({ ...readyOutput(), devotional_text: words(261) }, "devotional_words");
+Deno.test("devotional length: 79 words is too few, 80 and 220 pass, 221 is too many (nothing is truncated)", () => {
+  invalid({ ...readyOutput(), devotional_text: prose(79) }, "devotional_words");
+  assert(parse({ ...readyOutput(), devotional_text: prose(80) }).kind === "ready");
+  assert(parse({ ...readyOutput(), devotional_text: prose(220) }).kind === "ready");
+  invalid({ ...readyOutput(), devotional_text: prose(221) }, "devotional_words");
   invalid({ ...readyOutput(), devotional_text: null }, "devotional");
 });
 
@@ -186,6 +191,11 @@ Deno.test("affirmation rules", () => {
   invalid(aff([one("morning", words(9)), one("afternoon"), one("evening")]), "affirmation_headline");
   invalid(aff([one("morning", "Short", words(31)), one("afternoon"), one("evening")]), "affirmation_body");
   invalid(aff([one("morning", "", "x"), one("afternoon"), one("evening")]), "affirmation_headline");
+  // A headline is a notification's whole body: 50 characters at most (step 32).
+  const fifty = "Your weary heart is held by unfailing faithfulness";
+  assertEquals(fifty.length, 50);
+  assert(parse(aff([one("morning", fifty), one("afternoon"), one("evening")])).kind === "ready");
+  invalid(aff([one("morning", `${fifty}!`), one("afternoon"), one("evening")]), "affirmation_headline");
   // Any order in, canonical order out.
   const result = parse(aff([one("evening"), one("morning"), one("afternoon")]));
   assert(result.kind === "ready");
@@ -234,7 +244,7 @@ Deno.test("cleaning: markup, emoji, apostrophes, paragraphs, Amen", () => {
 Deno.test("the cleaned reply never carries tags or emoji into the saved text", () => {
   const dirty = readyOutput({
     reflection_title: "Rest <i>now</i> 🙏",
-    devotional_text: `<speak>${words(100)}</speak> 🙏`,
+    devotional_text: `<speak>${prose(100)}</speak> 🙏`,
     closing_prayer: `${words(20)} <break/> 🙏 Amen`,
   });
   const result = parse(dirty);
@@ -242,4 +252,206 @@ Deno.test("the cleaned reply never carries tags or emoji into the saved text", (
   for (const field of [result.title, result.devotional, result.closingPrayer]) {
     assertEquals(/[<>]|\p{Extended_Pictographic}/u.test(field), false);
   }
+});
+
+// ---- The tone checks of step 32 -----------------------------------------------------------------------------------------
+
+const BLESSING = "Please pray for my sister Blessing. She moved to Ibadan last month and I miss her.";
+const devotionalWith = (sentence: string) => `${sentence}\n\n${readyOutput().devotional_text as string}`;
+const headlines = (morning: string, evening = "It is enough") => ({
+  ...readyOutput(),
+  affirmations: [
+    { time_slot: "morning", headline: morning, text: "Begin the day knowing you are held." },
+    { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
+    { time_slot: "evening", headline: evening, text: "You did what you could today." },
+  ],
+});
+
+Deno.test("a clean reply is not salvaged", () => {
+  const result = parse(readyOutput());
+  assert(result.kind === "ready");
+  assertEquals(result.salvaged, null);
+});
+
+Deno.test("verse_reference: the devotional and the closing prayer never point to a passage", () => {
+  invalid(readyOutput({ devotional_text: devotionalWith("Psalm 23 says you are not alone.") }), "verse_reference");
+  invalid(readyOutput({ devotional_text: devotionalWith("This verse is for you tonight.") }), "verse_reference");
+  invalid(
+    readyOutput({
+      closing_prayer: "Lord, as 1 Peter 5:7 says, we cast our cares on you and rest tonight in your care.",
+    }),
+    "verse_reference",
+  );
+  // A book's name alone is not a reference.
+  assert(parse(readyOutput({ devotional_text: devotionalWith("Like Job, you have waited long.") })).kind === "ready");
+  const error = invalid(readyOutput({ devotional_text: devotionalWith("The psalmist knew this.") }), "verse_reference");
+  assert(error.note?.includes("Bible passage"));
+  assertEquals(error.salvage, undefined, "a reply that points to scripture is never kept");
+});
+
+Deno.test("never_say: checked in the devotional, the prayer, the title, the headlines and the affirmation texts", () => {
+  invalid(readyOutput({ devotional_text: devotionalWith("Everything happens for a reason.") }), "never_say:reason");
+  invalid(
+    readyOutput({ closing_prayer: "Lord, we know everything will work out, and we rest in you tonight with thanks." }),
+    "never_say:work_out",
+  );
+  invalid(readyOutput({ reflection_title: "Just Trust Him" }), "never_say:just_believe");
+  invalid(headlines("Heaven needed another angel"), "never_say:angel");
+  const texts = readyOutput({
+    affirmations: [
+      { time_slot: "morning", headline: "You are held", text: "This is a punishment for nothing; you are loved." },
+      { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe." },
+      { time_slot: "evening", headline: "It is enough", text: "You did what you could today." },
+    ],
+  });
+  const error = invalid(texts, "never_say:punishment");
+  assert(error.note?.includes("“suffering as a punishment”"));
+  assertEquals(error.salvage, undefined);
+  // A denial is what the instruction asks for, and it passes.
+  assert(
+    parse(readyOutput({ devotional_text: devotionalWith("This is not a punishment for anything you did.") })).kind ===
+      "ready",
+  );
+});
+
+Deno.test("title_private and headline_private: a name the person wrote never reaches a lock screen", () => {
+  // The headline leaks "blessing": the failure carries a note naming it and the reply with the safe headline.
+  const headline = invalid(headlines("You are a blessing"), "headline_private", BLESSING);
+  assert(headline.note?.endsWith("any headline: blessing, ibadan."), headline.note);
+  const kept = headline.salvage as ReadyReflection;
+  assertEquals(kept.salvaged, "headline_private");
+  assertEquals(kept.affirmations.map((item) => item.headline), [
+    SAFE_HEADLINES.morning,
+    "Rest is allowed",
+    "It is enough",
+  ]);
+  assertEquals(kept.title, "Peace in the Waiting");
+
+  // The title leaks: title_private, whatever the headlines do, and the note puts the leaked word first.
+  const both = invalid(
+    { ...headlines("You are a blessing", "Ibadan is near"), reflection_title: "Missing Ibadan" },
+    "title_private",
+    BLESSING,
+  );
+  assert(both.note?.endsWith("any headline: ibadan, blessing."), both.note);
+  const salvaged = both.salvage as ReadyReflection;
+  assertEquals(salvaged.salvaged, "title_private");
+  assertEquals(salvaged.title, SAFE_TITLE);
+  assertEquals(salvaged.affirmations.map((item) => item.headline), [
+    SAFE_HEADLINES.morning,
+    "Rest is allowed",
+    SAFE_HEADLINES.evening,
+  ]);
+
+  // The same words from an entry that never wrote the name are fine, and the devotional may say it (it stays in the app).
+  assert(parse(headlines("You are a blessing")).kind === "ready");
+  assert(parse(readyOutput({ devotional_text: devotionalWith("Blessing is near.") }), BLESSING).kind === "ready");
+});
+
+Deno.test("the checks run in order: shape, then scripture, then never-say, and privacy last", () => {
+  // A reply that both says a never-say phrase and leaks a name is a never-say failure, with no salvage.
+  const error = invalid(
+    { ...headlines("You are a blessing"), devotional_text: devotionalWith("Everything happens for a reason.") },
+    "never_say:reason",
+    BLESSING,
+  );
+  assertEquals(error.salvage, undefined);
+  invalid(
+    {
+      ...headlines("You are a blessing"),
+      devotional_text: devotionalWith("Psalm 23 is for you. Everything happens for a reason."),
+    },
+    "verse_reference",
+    BLESSING,
+  );
+  // A shape problem comes first, and carries neither a note nor a salvage.
+  const shape = invalid(
+    { ...headlines(`You are a blessing ${"a".repeat(40)}`), reflection_title: "Missing Ibadan" },
+    "affirmation_headline",
+    BLESSING,
+  );
+  assertEquals([shape.note, shape.salvage], [undefined, undefined]);
+});
+
+// ---- The hook guard (gen-v2.2) -----------------------------------------------------------------------------------------
+
+const parseAfter = (value: unknown, recentFirstWords: string[]) =>
+  parseReflection(JSON.stringify(value), { entry: TEXT, recentFirstWords });
+
+function hookInvalid(value: unknown, recentFirstWords: string[], reason: string): OutputInvalid {
+  try {
+    parseAfter(value, recentFirstWords);
+  } catch (error) {
+    assert(error instanceof OutputInvalid, `expected OutputInvalid, got ${String(error)}`);
+    assertEquals(error.reason, reason);
+    return error;
+  }
+  throw new Error(`expected "${reason}" but the output was accepted`);
+}
+
+Deno.test("the hook guard: a stock opening is asked for again, and the reply is kept as it was in case none is better", () => {
+  for (
+    const sentence of ["It sounds like a heavy week.", "The phone stayed quiet.", "Today was long.", "I hear you."]
+  ) {
+    const error = hookInvalid(readyOutput({ devotional_text: devotionalWith(sentence) }), [], "hook_stock");
+    assert(error.note?.startsWith("Your last reply began the devotional with a stock opening."), error.note);
+    const kept = error.salvage as ReadyReflection;
+    assertEquals(kept.salvaged, "hook_stock");
+    assert(kept.devotional.startsWith(sentence), "the salvage is the reply itself");
+    assertEquals(kept.title, "Peace in the Waiting");
+  }
+  // A fresh opening passes, and with no recent devotionals nothing else is compared.
+  assert(
+    parseAfter(readyOutput({ devotional_text: devotionalWith("Another night at your desk.") }), []).kind === "ready",
+  );
+  assert(parseAfter(readyOutput(), []).kind === "ready");
+});
+
+Deno.test("the hook guard: a first word a recent devotional began with is asked for again, named in the note", () => {
+  const error = hookInvalid(readyOutput(), ["paragraph", "another"], "hook_repeated");
+  assert(error.note?.startsWith("Your last reply began the devotional with “paragraph”"), error.note);
+  assert(error.note?.includes("not “paragraph”, “another”"), error.note);
+  assertEquals((error.salvage as ReadyReflection).salvaged, "hook_repeated");
+  // A stock opening names the recent first words too, so the retry avoids both.
+  const stock = hookInvalid(
+    readyOutput({ devotional_text: devotionalWith("The night was long.") }),
+    ["waiting"],
+    "hook_stock",
+  );
+  assert(stock.note?.includes("or with “waiting”, which began their recent devotionals"), stock.note);
+  // Other first words pass; the comparison is by the whole first word.
+  assert(parseAfter(readyOutput(), ["morning", "paragraphs", "para"]).kind === "ready");
+});
+
+Deno.test("the hook guard comes last: a hard check or a private word wins over it, with its own note and salvage", () => {
+  // A never-say phrase in a devotional that also opens with a stock word is a never-say failure, with no salvage.
+  const neverSay = hookInvalid(
+    readyOutput({ devotional_text: devotionalWith("It happened for a reason.") }),
+    [],
+    "never_say:reason",
+  );
+  assertEquals(neverSay.salvage, undefined);
+  // A name in a headline is the private-word salvage (its safe texts), not the hook's.
+  try {
+    parseReflection(
+      JSON.stringify({ ...headlines("You are a blessing"), devotional_text: devotionalWith("The night was long.") }),
+      {
+        entry: BLESSING,
+        recentFirstWords: [],
+      },
+    );
+    throw new Error("accepted");
+  } catch (error) {
+    assert(error instanceof OutputInvalid);
+    assertEquals(error.reason, "headline_private");
+    assertEquals((error.salvage as ReadyReflection).salvaged, "headline_private");
+  }
+});
+
+Deno.test("the hook guard: a first sentence over sixteen words is asked for again; sixteen or fewer is left alone", () => {
+  const sentence = (count: number) => `${words(count - 1)} end.`;
+  const error = hookInvalid(readyOutput({ devotional_text: devotionalWith(sentence(17)) }), [], "hook_long");
+  assert(error.note?.startsWith("Your last reply began the devotional with a first sentence of 17 words."), error.note);
+  assertEquals((error.salvage as ReadyReflection).salvaged, "hook_long");
+  assert(parseAfter(readyOutput({ devotional_text: devotionalWith(sentence(16)) }), []).kind === "ready");
 });

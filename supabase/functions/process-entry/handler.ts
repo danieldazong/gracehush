@@ -30,15 +30,18 @@ import {
   failEntry,
   findEntry,
   listAffirmations,
+  listRecentReflections,
   needsSpeech,
   readProfile,
+  type RecentReflectionRow,
   saveCrisisEntry,
   saveReadyEntry,
   saveTranscript,
   type StoredProfile,
 } from "./lifecycle.ts";
 import { parseReflection, type Reflection } from "./output.ts";
-import { buildSystemInstruction, PROMPT_VERSION, wrapEntry } from "./prompt.ts";
+import { firstWord } from "./tone.ts";
+import { buildSystemInstruction, buildUserTurn, PROMPT_VERSION, type RecentReflection } from "./prompt.ts";
 import { toResponse } from "./response.ts";
 import { buildSchema } from "./schema.ts";
 import { resolveScripture } from "./scripture.ts";
@@ -81,6 +84,9 @@ type Context = {
   limitUsed: number | null;
   billing: BillingStatus | null;
   billingMs: number;
+  // "salvaged:title_private" or "salvaged:headline_private" when the reflection was saved with a safe title or headline
+  // (step 32). It is the 200 line's `reason`: one word, never what the model wrote or a word of the person's.
+  salvaged: string | null;
   counters: Counters;
 };
 
@@ -280,6 +286,12 @@ async function run(req: Request, context: Context): Promise<Response> {
     // The reflection is written from the screened words alone, never from the recording again.
     const words = screening.transcript;
 
+    // The person's last reflections (their titles, openings and passages, never their words), read while the profile and the
+    // limit are, so that the model can vary its title, its opening and its passage (step 32). A read that fails means no block,
+    // never a failed reflection, and its time is not part of dbMs.
+    const recentReflections = listRecentReflections(admin, user.userId, entryId, claim.row.created_at)
+      .catch((): RecentReflectionRow[] => []);
+
     // The free tier's limit. Only a clear screening gets this far, so a crisis is never counted and never blocked. An entry
     // over the limit is saved as failed with LIMIT_REACHED (the catch below does that) and answered with a 402 that carries
     // the entry and the week's numbers; sent again after an upgrade or when the week turns, it is claimed and checked again.
@@ -297,6 +309,12 @@ async function run(req: Request, context: Context): Promise<Response> {
       });
     }
 
+    const recent: RecentReflection[] = (await recentReflections).map((row) => ({
+      title: row.devotional_title,
+      devotional: row.devotional_script,
+      reference: row.scripture_reference,
+    }));
+
     let reflection: Reflection;
     try {
       reflection = await generate({
@@ -305,10 +323,15 @@ async function run(req: Request, context: Context): Promise<Response> {
         fallbackModel: gemini.fallbackModel,
         thinkingLevel: gemini.thinkingLevel,
         system: buildSystemInstruction(),
-        input: { kind: "text", text: wrapEntry(words) },
+        input: { kind: "text", text: buildUserTurn(words, recent) },
         schema: buildSchema(),
         deadlineAt,
-        validate: parseReflection,
+        // The hook guard compares the new opening with the first words the recent devotionals began with.
+        validate: (reply) =>
+          parseReflection(reply, {
+            entry: words,
+            recentFirstWords: recent.flatMap((item) => (item.devotional ? [firstWord(item.devotional)] : [])),
+          }),
       }, context.stats);
     } catch (error) {
       // The last of the three layers: a request a safety filter blocks is treated as a possible crisis.
@@ -317,6 +340,8 @@ async function run(req: Request, context: Context): Promise<Response> {
     }
     // ... and so is the model's own flag, even when the screening said clear.
     if (reflection.kind === "crisis") return await answerCrisis(words, "model");
+    // A reflection kept with a safe title or headline is saved like any other, and its log line says so.
+    if (reflection.salvaged) context.salvaged = `salvaged:${reflection.salvaged}`;
 
     // The model said where the passage is; the words come from the Bible. If that passage does not exist, one small
     // follow-up request chooses another, and if none can be found the reflection is saved without a passage.
@@ -392,6 +417,7 @@ export async function handle(req: Request): Promise<Response> {
     limitUsed: null,
     billing: null,
     billingMs: 0,
+    salvaged: null,
     counters: { authMs: 0, dbMs: 0 },
   };
   let status = 200;
@@ -417,7 +443,7 @@ export async function handle(req: Request): Promise<Response> {
       requestId: context.requestId,
       status,
       code: failure?.code ?? null,
-      reason: failure?.reason ?? null,
+      reason: failure?.reason ?? context.salvaged,
       inputType: context.inputType,
       user: context.userHash,
       authMs: context.counters.authMs,

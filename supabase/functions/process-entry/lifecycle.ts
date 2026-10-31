@@ -202,6 +202,37 @@ export async function saveTranscript(
   if (error) throw dbFailure("save_transcript", error);
 }
 
+// What the reflection is told about the person's earlier reflections (step 32), so that titles, openings and passages stop
+// repeating: only what the model wrote and the passage's reference. Never a transcript or any other words of theirs.
+export const RECENT_REFLECTION_COLUMNS = "devotional_title, devotional_script, scripture_reference";
+
+export type RecentReflectionRow = {
+  devotional_title: string | null;
+  devotional_script: string | null;
+  scripture_reference: string | null;
+};
+
+// Up to three of this user's finished reflections (ready, not a crisis, with a devotional) made before this entry, newest
+// first. The caller treats a failure as "none": a reflection is never lost to it.
+export async function listRecentReflections(
+  admin: SupabaseClient,
+  userId: string,
+  entryId: string,
+  beforeIso: string,
+): Promise<RecentReflectionRow[]> {
+  const { data, error } = await admin.from("journal_entries").select(RECENT_REFLECTION_COLUMNS)
+    .eq("user_id", userId).eq("processing_status", "ready").eq("is_crisis", false)
+    .not("devotional_script", "is", null).neq("id", entryId).lt("created_at", beforeIso)
+    .order("created_at", { ascending: false }).limit(3);
+  if (error) throw dbFailure("recent", error);
+  // Only the three columns, whatever comes back.
+  return (data as RecentReflectionRow[]).map((row) => ({
+    devotional_title: row.devotional_title,
+    devotional_script: row.devotional_script,
+    scripture_reference: row.scripture_reference,
+  }));
+}
+
 // Marks a claimed entry failed. The person's text or recording stays saved. Never throws: the error being handled is
 // the one that matters.
 export async function failEntry(

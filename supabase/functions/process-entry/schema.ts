@@ -1,5 +1,4 @@
-import { USFM_BOOK_IDS } from "../_shared/bible/books.ts";
-import { EMOTIONS, PRAYER_CATEGORIES, TIME_SLOTS } from "./constants.ts";
+import { EMOTIONS, PRAYER_CATEGORIES, REFLECTION_BOOK_IDS, TIME_SLOTS } from "./constants.ts";
 
 // The response schema for the Gemini call (response_format.schema). It uses only what Google's structured output
 // page lists as supported: types, a "null" in a type array for a nullable property, enum, required, items and
@@ -12,11 +11,12 @@ const text = (description: string): JsonSchema => ({ type: "string", description
 const nullableText = (description: string): JsonSchema => ({ type: ["string", "null"], description });
 
 // Where a passage is: the book as a USFM id from the one list in _shared/bible/books.ts (so the enum and the code that
-// checks it cannot disagree), the chapter and the verses. Used inside the reflection and alone for a replacement.
+// checks it cannot disagree), less the Song of Solomon (REFLECTION_BOOK_IDS, step 32), the chapter and the verses. Used
+// inside the reflection and alone for a replacement.
 const passageProperties = (): Record<string, JsonSchema> => ({
   book_id: {
     type: "string",
-    enum: [...USFM_BOOK_IDS],
+    enum: [...REFLECTION_BOOK_IDS],
     description: "The USFM id of the book, such as PHP for Philippians, PSA for Psalms or 1CO for 1 Corinthians.",
   },
   chapter: { type: "integer" },
@@ -42,15 +42,21 @@ export function buildSchema(): JsonSchema {
         description: "True when the entry suggests suicide or self-harm risk, intent to harm others, or danger now.",
       },
       dominant_emotion: { type: "string", enum: [...EMOTIONS], description: "The core feeling in the entry." },
-      reflection_title: nullableText("A title of at most 60 characters. Null when is_crisis is true."),
+      reflection_title: nullableText(
+        "2 to 6 words in Title Case, at most 40 characters. Null when is_crisis is true.",
+      ),
       scripture: {
         type: ["object", "null"],
         description: "Where the chosen Berean Standard Bible passage is. Null when is_crisis is true.",
         properties: passageProperties(),
         required: PASSAGE_REQUIRED,
       },
-      devotional_text: nullableText("About 140 to 200 words of plain text. Null when is_crisis is true."),
-      closing_prayer: nullableText("About 30 to 60 words, without Amen. Null when is_crisis is true."),
+      devotional_text: nullableText(
+        "110 to 150 words in 3 or 4 short paragraphs. Null when is_crisis is true.",
+      ),
+      closing_prayer: nullableText(
+        "2 to 4 sentences, 30 to 50 words, without Amen. Null when is_crisis is true.",
+      ),
       prayer: {
         type: "object",
         properties: {
@@ -69,8 +75,8 @@ export function buildSchema(): JsonSchema {
           type: "object",
           properties: {
             time_slot: { type: "string", enum: [...TIME_SLOTS] },
-            headline: text("At most 8 words."),
-            text: text("At most 30 words."),
+            headline: text("2 to 8 words, at most 50 characters, second person."),
+            text: text("12 to 30 words, second person."),
           },
           required: ["time_slot", "headline", "text"],
         },

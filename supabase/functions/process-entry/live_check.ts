@@ -38,7 +38,7 @@ import { wavDurationMs } from "../_shared/tts/wavDuration.ts";
 import { buildSpeechScript } from "../_shared/tts/script.ts";
 import { readTtsConfig } from "../_shared/tts/config.ts";
 import { synthesize } from "../_shared/tts/synthesize.ts";
-import { buildSystemInstruction, PROMPT_VERSION, wrapEntry } from "./prompt.ts";
+import { buildSystemInstruction, buildUserTurn, PROMPT_VERSION, wrapEntry } from "./prompt.ts";
 import { buildSchema } from "./schema.ts";
 import { resolveScripture } from "./scripture.ts";
 import { GEMINI_DEADLINE_MS } from "./constants.ts";
@@ -142,7 +142,7 @@ async function shape() {
       model,
       thinkingLevel,
       system: buildSystemInstruction(),
-      input: { kind: "text", text: wrapEntry(WRITTEN[0].text) },
+      input: { kind: "text", text: buildUserTurn(WRITTEN[0].text, []) },
       schema: buildSchema(),
     }),
   );
@@ -158,6 +158,7 @@ function describe(result: Reflection): string {
     `passage chosen ${formatReference(result.scripture)}`,
     `tracked prayer ${result.prayer ? "yes" : "no"}`,
     `affirmations ${result.affirmations.length}`,
+    result.salvaged ? `salvaged ${result.salvaged}` : "",
   ].filter(Boolean).join(" | ");
 }
 
@@ -229,10 +230,10 @@ async function run(name: string, input: ScreenInput, expect: "ready" | "crisis" 
         fallbackModel,
         thinkingLevel,
         system: buildSystemInstruction(),
-        input: { kind: "text", text: wrapEntry(screening.transcript) },
+        input: { kind: "text", text: buildUserTurn(screening.transcript, []) },
         schema: buildSchema(),
         deadlineAt: Date.now() + GEMINI_DEADLINE_MS,
-        validate: parseReflection,
+        validate: (reply) => parseReflection(reply, { entry: screening.transcript }),
       }, stats);
       outcome = result.kind;
       detail = `screening clear | ${describe(result)}`;

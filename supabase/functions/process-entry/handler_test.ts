@@ -8,6 +8,7 @@ import { buildSpeechScript } from "../_shared/tts/script.ts";
 import { assert, assertEquals } from "./testing/assert.ts";
 import {
   crisisOutput,
+  devotionalStartingWith,
   ENTRY_ID,
   FIXTURE_WAV,
   FIXTURE_WAV_MS,
@@ -1049,7 +1050,7 @@ Deno.test(
     assertEquals(line.tokensOut, 1308);
     assertEquals(line.tokensThought, 174);
     assertEquals(line.scripture, "verified");
-    assertEquals(line.promptVersion, "gen-v1.2");
+    assertEquals(line.promptVersion, "gen-v2.2");
     assert(Number.isInteger(line.bibleMs) && line.bibleMs >= 0);
     assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
     const everything = world.logs.join("\n");
@@ -1221,6 +1222,9 @@ Deno.test(
     assert(script !== null);
     const [call] = world.ttsCalls;
     assertEquals(spokenMarkup(call), script.markup);
+    // The devotional's first sentence, its hook, is the first thing heard: no fixed opening line and no title.
+    assert(script.markup.startsWith("Paragraph 1 holds a quiet thought. About rest"), script.markup);
+    assert(!script.markup.includes("Here is your devotional"));
     assert(script.markup.includes("A reading from Philippians chapter 4, verses 6 through 7."));
     assert(script.markup.includes("Be anxious for nothing"), "the Bible's own words are read");
     assert(script.markup.endsWith("Amen."));
@@ -1320,7 +1324,11 @@ Deno.test(
 
 Deno.test(
   "speech e) a half-set or malformed secret is logged by name and never fails the reflection; it is not a failed call",
-  speechFlow([geminiOk(readyOutput()), geminiOk(readyOutput()), geminiOk(readyOutput())], async (world) => {
+  speechFlow([
+    geminiOk(readyOutput()),
+    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Morning") })),
+    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Evening") })),
+  ], async (world) => {
     const cases: [string, () => void, string][] = [
       ["a voice is missing", () => Deno.env.delete("TTS_VOICE_NAME"), "bad_config:TTS_VOICE_NAME"],
       ["the key is not a service account", () => {
@@ -1596,7 +1604,11 @@ for (const tier of ["trial", "pro"] as const) {
       const response = await post(world, handle, textBody());
       assertEquals(response.status, 200);
       assertEquals((await ok(response)).entry.status, "ready");
-      assert(!world.requests.some((request) => request.url.searchParams.has("devotional_script")), "no count was made");
+      // The recent reflections' read (step 32) also filters on devotional_script; it asks for the newest rows, not a count.
+      const counted = world.requests.some((request) =>
+        request.url.searchParams.has("devotional_script") && !request.url.searchParams.has("order")
+      );
+      assert(!counted, "no count was made");
       const line = lastLog(world);
       assertEquals([line.limit, line.limitUsed], ["exempt", null]);
     }),
@@ -1884,16 +1896,19 @@ Deno.test(
 
 Deno.test(
   "billing d) no end date, or one still ahead: RevenueCat is not asked",
-  flow([geminiOk(readyOutput()), geminiOk(readyOutput())], async (world) => {
-    paidUntil(world, "pro", null);
-    seedWeek(world);
-    assertEquals((await post(world, handle, textBody())).status, 200);
-    assertEquals(lastLog(world).billing, null);
-    paidUntil(world, "pro", new Date(Date.now() + HOUR_MS).toISOString());
-    assertEquals((await post(world, handle, textBody({ clientEntryId: crypto.randomUUID() }))).status, 200);
-    assertEquals(world.revenuecatCalls.length, 0);
-    assertEquals([lastLog(world).billing, lastLog(world).billingMs], [null, 0]);
-  }),
+  flow(
+    [geminiOk(readyOutput()), geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Morning") }))],
+    async (world) => {
+      paidUntil(world, "pro", null);
+      seedWeek(world);
+      assertEquals((await post(world, handle, textBody())).status, 200);
+      assertEquals(lastLog(world).billing, null);
+      paidUntil(world, "pro", new Date(Date.now() + HOUR_MS).toISOString());
+      assertEquals((await post(world, handle, textBody({ clientEntryId: crypto.randomUUID() }))).status, 200);
+      assertEquals(world.revenuecatCalls.length, 0);
+      assertEquals([lastLog(world).billing, lastLog(world).billingMs], [null, 0]);
+    },
+  ),
 );
 
 Deno.test(
@@ -1921,4 +1936,200 @@ Deno.test(
     assertEquals(world.revenuecatCalls.length, 0);
     assertEquals(lastLog(world).billing, null);
   }, [flagged("crisis")]),
+);
+
+// ---- Step 32: recent reflections, the correction note and the safe texts, through the whole request -------------------
+
+const SECOND_ID = "9c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
+const reflectionInput = (world: World, index: number) => sentBody(world.geminiCalls[index]).input as string;
+
+// The made-up entry of finding 15: a name that is also a word of faith, and a place.
+const BLESSING_TEXT = "Please pray for my sister Blessing. She moved to Ibadan last month and I miss her.";
+const withHeadlines = (morning: string, over: Record<string, unknown> = {}) =>
+  readyOutput({
+    affirmations: [
+      { time_slot: "morning", headline: morning, text: "Begin the day knowing you are held." },
+      { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
+      { time_slot: "evening", headline: "It is enough", text: "You did what you could today." },
+    ],
+    ...over,
+  });
+
+Deno.test(
+  "recent reflections: the second entry's request holds the first one's title, opening and passage, never its words",
+  flow([geminiOk(readyOutput()), geminiOk(readyOutput({ reflection_title: "Rest for the Weary" }))], async (world) => {
+    assertEquals((await post(world, handle, textBody({ text: `${TEXT} FIRST-MARKER` }))).status, 200);
+    const second = await post(
+      world,
+      handle,
+      textBody({
+        clientEntryId: SECOND_ID,
+        text: "Another long day at work, and I still cannot switch off tonight.",
+      }),
+    );
+    assertEquals(second.status, 200);
+    const first = reflectionInput(world, 0);
+    assert(!first.includes("<recent_reflections>"), "the first entry has nothing before it");
+    assert(first.startsWith("<journal_entry>\n"));
+    const turn = reflectionInput(world, 1);
+    assert(turn.startsWith("<recent_reflections>\n- Title: Peace in the Waiting | Opening: Paragraph 1 holds"), turn);
+    assert(turn.includes("| Passage: Philippians 4:6–7\n</recent_reflections>\n\n<journal_entry>\n"), turn);
+    assert(!turn.includes("FIRST-MARKER"), "a transcript is never sent as a recent reflection");
+    assert(!turn.includes(TEXT), "a transcript is never sent as a recent reflection");
+    // The recent read is scoped to the person, like every query.
+    assertEquals(unscopedRequests(world, USER), []);
+  }),
+);
+
+Deno.test(
+  "recent reflections: a read that fails means no block, never a failed reflection",
+  flow([geminiOk(readyOutput())], async (world) => {
+    seedDevotional(world, USER, { scripture_reference: "Psalm 23:1" });
+    world.fail.recentRead = 1;
+    const response = await post(world, handle, textBody());
+    assertEquals(response.status, 200);
+    assertEquals((await ok(response)).entry.status, "ready");
+    assertEquals(world.fail.recentRead, 0, "the read was made, and refused");
+    assert(!reflectionInput(world, 0).includes("<recent_reflections>"));
+    assertEquals(lastLog(world).reason, null);
+  }),
+);
+
+Deno.test(
+  "the reflection request: gen-v2's instruction, and a schema whose books leave out the Song of Solomon",
+  flow([geminiOk(readyOutput())], async (world) => {
+    assertEquals((await post(world, handle, textBody())).status, 200);
+    const body = world.geminiCalls[0].json as {
+      system_instruction: string;
+      response_format: { schema: { properties: { scripture: { properties: { book_id: { enum: string[] } } } } } };
+    };
+    assert(body.system_instruction.includes("## How to care"));
+    const books = body.response_format.schema.properties.scripture.properties.book_id.enum;
+    assertEquals(books.length, 65);
+    assert(!books.includes("SNG"));
+    assertEquals(lastLog(world).promptVersion, "gen-v2.2");
+  }),
+);
+
+Deno.test(
+  "a name in a headline: asked for again with a note naming the word, and the clean second reply is saved",
+  flow([geminiOk(withHeadlines("You are a blessing")), geminiOk(readyOutput())], async (world) => {
+    const response = await post(world, handle, textBody({ text: BLESSING_TEXT }));
+    assertEquals(response.status, 200);
+    const body = await ok(response);
+    assertEquals(body.affirmations.map((item) => item.headline).sort(), [
+      "It is enough",
+      "Rest is allowed",
+      "You are held",
+    ]);
+    assertEquals(world.geminiCalls.length, 2);
+    assert(!reflectionInput(world, 0).includes("<correction>"));
+    const retry = reflectionInput(world, 1);
+    assert(retry.endsWith("in any headline: blessing, ibadan.\n</correction>"), retry);
+    const line = lastLog(world);
+    assertEquals([line.status, line.reason, line.attempts], [200, null, 3]);
+    // The note holds the person's words: it is never logged or stored.
+    assert(!world.logs.join("\n").includes("blessing"));
+    assert(!JSON.stringify(world.entries).includes("<correction>"));
+  }),
+);
+
+Deno.test(
+  "the hook guard: a devotional that opens like a recent one is asked for again, and the second reply is saved",
+  flow(
+    [geminiOk(readyOutput()), geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Morning") }))],
+    async (world) => {
+      seedDevotional(world, USER, { devotional_script: devotionalStartingWith("Paragraph") });
+      const response = await post(world, handle, textBody());
+      assertEquals(response.status, 200);
+      const body = await ok(response);
+      assert(body.entry.devotional?.script.startsWith("Morning 1 holds"), body.entry.devotional?.script);
+      assertEquals(world.geminiCalls.length, 2);
+      assert(!reflectionInput(world, 0).includes("<correction>"));
+      const retry = reflectionInput(world, 1);
+      assert(retry.includes("<correction>\nYour last reply began the devotional with “paragraph”"), retry);
+      const line = lastLog(world);
+      assertEquals([line.status, line.reason, line.attempts], [200, null, 3]);
+    },
+  ),
+);
+
+Deno.test(
+  "the hook guard never costs a reflection: when the second reply also opens with a stock word, it is kept as it was",
+  flow(
+    [
+      geminiOk(readyOutput({ devotional_text: devotionalStartingWith("The") })),
+      geminiOk(readyOutput({ devotional_text: devotionalStartingWith("It") })),
+    ],
+    async (world) => {
+      const response = await post(world, handle, textBody());
+      assertEquals(response.status, 200);
+      const body = await ok(response);
+      assertEquals(body.entry.status, "ready");
+      assert(body.entry.devotional?.script.startsWith("It 1 holds"), body.entry.devotional?.script);
+      assert(reflectionInput(world, 1).includes("Your last reply began the devotional with a stock opening."));
+      const line = lastLog(world);
+      assertEquals([line.status, line.code, line.reason, line.attempts], [200, null, "salvaged:hook_stock", 3]);
+      assertEquals(world.entries[0].devotional_title, "Peace in the Waiting");
+    },
+  ),
+);
+
+Deno.test(
+  "a name in a headline twice: the reflection is saved with the safe headline, and the log says salvaged",
+  flow([geminiOk(withHeadlines("You are a blessing")), geminiOk(withHeadlines("Ibadan is not far"))], async (world) => {
+    const response = await post(world, handle, textBody({ text: BLESSING_TEXT }));
+    assertEquals(response.status, 200);
+    const body = await ok(response);
+    assertEquals(body.entry.status, "ready");
+    assertEquals(body.entry.devotional?.title, "Peace in the Waiting");
+    const bySlot = Object.fromEntries(body.affirmations.map((item) => [item.slot, item.headline]));
+    assertEquals(bySlot, { morning: "You are not alone today", afternoon: "Rest is allowed", evening: "It is enough" });
+    const line = lastLog(world);
+    assertEquals([line.status, line.code, line.reason], [200, null, "salvaged:headline_private"]);
+    assertEquals(world.entries[0].processing_status, "ready");
+    assert(!JSON.stringify(world.affirmations).toLowerCase().includes("ibadan"));
+  }),
+);
+
+Deno.test(
+  "a name in the title twice: the safe title, and every other field as the model wrote it",
+  flow(
+    [
+      geminiOk(readyOutput({ reflection_title: "Missing Blessing" })),
+      geminiOk(readyOutput({ reflection_title: "Ibadan Prayers" })),
+    ],
+    async (world) => {
+      const response = await post(world, handle, textBody({ text: BLESSING_TEXT }));
+      assertEquals(response.status, 200);
+      const body = await ok(response);
+      assertEquals(body.entry.devotional?.title, "A Quiet Moment with God");
+      assertEquals(world.entries[0].devotional_title, "A Quiet Moment with God");
+      assertEquals(body.affirmations.map((item) => item.headline).sort(), [
+        "It is enough",
+        "Rest is allowed",
+        "You are held",
+      ]);
+      assertEquals(lastLog(world).reason, "salvaged:title_private");
+    },
+  ),
+);
+
+Deno.test(
+  "a never-say phrase twice still fails the reflection: what is said about God is never patched by code",
+  flow(
+    everyAttempt(
+      geminiOk(readyOutput({ closing_prayer: "Lord, we know everything will work out, and we rest in you tonight." })),
+    ),
+    async (world) => {
+      const response = await post(world, handle, textBody({ text: BLESSING_TEXT }));
+      assertEquals(response.status, 503);
+      assertError(await failure(response), "AI_UNAVAILABLE");
+      const line = lastLog(world);
+      assertEquals([line.code, line.reason], ["AI_UNAVAILABLE", "output_invalid:never_say:work_out"]);
+      assertEquals(world.geminiCalls.length, 2);
+      assert(reflectionInput(world, 1).includes("“everything will work out”"));
+      assertEquals(world.entries[0].processing_status, "failed");
+    },
+  ),
 );

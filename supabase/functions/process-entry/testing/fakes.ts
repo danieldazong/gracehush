@@ -187,7 +187,8 @@ export type World = {
   // Calls to fail on purpose (each counter is how many more calls of that kind will fail, one after another). Step 31 added
   // storageList (a folder listing in any bucket), storageSign (a signed link), exportUpload (a ZIP into the exports bucket),
   // profileDelete (deleting a users_profile row) and rowsRead (reading journal_entries or daily_affirmations); storageRemove
-  // covers every bucket since then.
+  // covers every bucket since then. Step 32 added recentRead: the read of a person's recent reflections (process-entry's only
+  // read of journal_entries that asks for the newest rows first, with a limit).
   fail: {
     storageRemove: number;
     recordDeleted: number;
@@ -198,6 +199,7 @@ export type World = {
     exportUpload: number;
     profileDelete: number;
     rowsRead: number;
+    recentRead: number;
   };
   // RevenueCat (step 30): GET /v1/subscribers/{id} with a secret key. A queued reply answers first; otherwise the customer
   // stored here for that app user id (200), or, as the real API does for an id it has never seen, a new empty customer (201).
@@ -394,6 +396,13 @@ function rest(world: World, table: string, request: Recorded): Response {
     ) {
       world.fail.rowsRead -= 1;
       throw new PgError(500, "XX000", "the rows could not be read");
+    }
+    if (
+      request.method === "GET" && world.fail.recentRead > 0 && table === "journal_entries" &&
+      request.url.searchParams.get("order") === "created_at.desc" && request.url.searchParams.has("limit")
+    ) {
+      world.fail.recentRead -= 1;
+      throw new PgError(500, "XX000", "the recent reflections could not be read");
     }
     for (const { column } of filters) {
       if (!columns.includes(column)) throw new PgError(400, "42703", `column ${table}.${column} does not exist`);
@@ -820,6 +829,7 @@ export function installWorld(): World {
       exportUpload: 0,
       profileDelete: 0,
       rowsRead: 0,
+      recentRead: 0,
     },
     revenuecat: new Map(),
     revenuecatQueue: [],
@@ -1001,13 +1011,20 @@ export function installWorld(): World {
 }
 
 // Words that make a valid devotional (about 120 words): enough for the 80 to 260 word rule.
+// Each paragraph opens with a short sentence: the hook guard (gen-v2.2) asks again for a first sentence over twenty words.
 const DEVOTIONAL = Array.from(
   { length: 6 },
   (_, index) =>
     `Paragraph ${
       index + 1
-    } holds a quiet thought about rest and trust that lasts for a good number of gentle words, spoken slowly and kindly so that the person who hears it can breathe again.`,
+    } holds a quiet thought. About rest and trust that lasts for a good number of gentle words, spoken slowly and kindly so that the person who hears it can breathe again.`,
 ).join("\n\n");
+
+// The sample devotional with another first word. The hook guard (gen-v2.2) asks again for a devotional that begins the way
+// one of the person's recent devotionals began, so a test that makes several for one person gives each its own first word.
+export function devotionalStartingWith(word: string): string {
+  return DEVOTIONAL.replace(/^Paragraph/, word);
+}
 
 export function readyOutput(overrides: Row = {}): Row {
   return {
@@ -1078,7 +1095,8 @@ export function seedDevotional(world: World, userId: string, over: Row = {}): En
     processing_status: "ready",
     dominant_emotion: "anxious",
     devotional_title: "Peace in the Waiting",
-    devotional_script: DEVOTIONAL,
+    // Not the reply's first word, so a seeded devotional never makes the hook guard ask again.
+    devotional_script: devotionalStartingWith("Earlier"),
     closing_prayer: "Lord, we bring you the weight of this week and ask for your peace. Amen.",
     ...over,
   });

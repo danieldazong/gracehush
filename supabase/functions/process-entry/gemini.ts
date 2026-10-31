@@ -269,16 +269,31 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// The input of a retry after a reply broke a tone rule (step 32): the same text with the note after a blank line, in a
+// <correction> block the instruction says comes from the app. Always built from the original input, so a newer note
+// replaces an older one instead of adding to it. A recording is never sent for the reflection, so audio is left as it is.
+export function withCorrection(input: GeminiInput, note: string): GeminiInput {
+  if (input.kind !== "text") return input;
+  return { kind: "text", text: `${input.text}\n\n<correction>\n${note}\n</correction>` };
+}
+
 // Calls Gemini until `validate` accepts a reply, at most MAX_ATTEMPTS times (or `maxAttempts`) and never past
 // `deadlineAt`. `stats` is filled in as it goes, so the log line has the attempt count and the tokens even when this
 // throws; a second call with the same `stats` adds to the first one's counts. A request a safety filter blocks throws
 // GeminiBlocked at once and is never retried, a request Google refuses (a 4xx that is not a block) is not retried, and
 // every failure ends as AI_UNAVAILABLE with the reason of the last attempt.
+//
+// Step 32: a reply refused with a note (a tone rule it broke) makes the following attempts carry that note, and a reply
+// refused with a salvage (its only fault was a word from the entry in its title or a headline) is kept. When no clean reply
+// comes in the attempts and the time there are, the most recent salvage is the answer instead of AI_UNAVAILABLE. Only
+// parseReflection sets a note or a salvage, so the crisis screening and a replacement passage behave as before.
 export async function generate<T>(args: GenerateArgs<T>, stats: GeminiStats): Promise<T> {
   const fallbackModel = args.fallbackModel || null;
-  const body = JSON.stringify(buildRequestBody(args));
+  let body = JSON.stringify(buildRequestBody(args));
   // Built only when an attempt needs it: a recording's body can be 16 MB.
   let fallbackBody: string | undefined;
+  let input = args.input;
+  let salvage: { value: T } | null = null;
   const started = Date.now();
   const maxAttempts = args.maxAttempts ?? MAX_ATTEMPTS;
   let last = new AppError("AI_UNAVAILABLE", "gemini_budget");
@@ -299,7 +314,7 @@ export async function generate<T>(args: GenerateArgs<T>, stats: GeminiStats): Pr
       try {
         const result = await callOnce(
           args.apiKey,
-          onFallback ? (fallbackBody ??= JSON.stringify(buildRequestBody({ ...args, model }))) : body,
+          onFallback ? (fallbackBody ??= JSON.stringify(buildRequestBody({ ...args, input, model }))) : body,
           Math.min(args.attemptTimeoutMs ?? timing.attemptTimeoutMs, remaining),
         );
         stats.usage.input += result.usage.input;
@@ -315,6 +330,13 @@ export async function generate<T>(args: GenerateArgs<T>, stats: GeminiStats): Pr
           pause = backoffMs(busyFailures, Math.random());
         } else if (error instanceof OutputInvalid) {
           last = new AppError("AI_UNAVAILABLE", `output_invalid:${error.reason}`);
+          // Only parseReflection's salvage reaches here, and it is the reflection T stands for.
+          if (error.salvage !== undefined) salvage = { value: error.salvage as T };
+          if (error.note && args.input.kind === "text") {
+            input = withCorrection(args.input, error.note);
+            body = JSON.stringify(buildRequestBody({ ...args, input }));
+            fallbackBody = undefined;
+          }
           invalidReplies += 1;
           if (invalidReplies >= MAX_INVALID_REPLIES) break;
         } else {
@@ -326,6 +348,7 @@ export async function generate<T>(args: GenerateArgs<T>, stats: GeminiStats): Pr
       if (args.deadlineAt - Date.now() - pause < timing.minAttemptMs) break;
       if (pause > 0) await sleep(pause);
     }
+    if (salvage !== null) return salvage.value;
     throw last;
   } finally {
     stats.ms += Date.now() - started;

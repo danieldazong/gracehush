@@ -1,8 +1,17 @@
 import { Buffer } from "node:buffer";
 
 import { USFM_BOOK_IDS } from "../_shared/bible/books.ts";
+import { REFLECTION_BOOK_IDS } from "./constants.ts";
 import { assert, assertEquals, expectAppError } from "./testing/assert.ts";
-import { geminiError, geminiOk, type GeminiReply, installWorld, readyOutput, type World } from "./testing/fakes.ts";
+import {
+  geminiError,
+  geminiOk,
+  type GeminiReply,
+  installWorld,
+  readyOutput,
+  type Recorded,
+  type World,
+} from "./testing/fakes.ts";
 import {
   backoffMs,
   buildRequestBody,
@@ -16,8 +25,9 @@ import {
   newStats,
   parseInteraction,
   timing,
+  withCorrection,
 } from "./gemini.ts";
-import { OutputInvalid, parseReflection } from "./output.ts";
+import { OutputInvalid, parseReflection, type Reflection } from "./output.ts";
 import { buildSchema, buildScriptureSchema } from "./schema.ts";
 import { buildSystemInstruction, wrapEntry } from "./prompt.ts";
 
@@ -32,7 +42,7 @@ function args(over: Partial<GenerateArgs<unknown>> = {}): GenerateArgs<unknown> 
     input: { kind: "text", text: wrapEntry("I am tired and I need rest.") },
     schema: buildSchema(),
     deadlineAt: Date.now() + 60_000,
-    validate: parseReflection,
+    validate: (text) => parseReflection(text, { entry: "I am tired and I need rest." }),
     ...over,
   };
 }
@@ -549,7 +559,141 @@ Deno.test("the passage in the schema is a USFM id from the one list, in the refl
   for (const passage of [inReflection, alone]) {
     assertEquals(Object.keys(passage.properties).sort(), ["book_id", "chapter", "verse_end", "verse_start"]);
     assertEquals([...passage.required].sort(), ["book_id", "chapter", "verse_end", "verse_start"]);
-    assertEquals(passage.properties.book_id.enum, [...USFM_BOOK_IDS]);
+    // Every book but the Song of Solomon (step 32): its verses carry speaker labels, and it rarely fits a prayer journal.
+    assertEquals(passage.properties.book_id.enum, [...REFLECTION_BOOK_IDS]);
+    assertEquals(passage.properties.book_id.enum, USFM_BOOK_IDS.filter((id) => id !== "SNG"));
   }
   assertEquals(USFM_BOOK_IDS.length, 66);
+  assertEquals(REFLECTION_BOOK_IDS.length, 65);
+});
+
+// ---- Step 32: the correction note on a retry, and the salvage --------------------------------------------------------
+
+// A validator that refuses some replies the way parseReflection's tone checks do: with a note for the retry and, for a
+// reply whose only fault is a private word, the reflection to fall back on. Any other reply is accepted as it is.
+function toneValidator(plan: Record<string, { reason?: string; note?: string; salvage?: string }>) {
+  return (text: string): string => {
+    const step = plan[text];
+    if (step) {
+      throw new OutputInvalid(step.reason ?? "headline_private", { note: step.note, salvage: step.salvage });
+    }
+    return text;
+  };
+}
+const inputOf = (call: Recorded) => (call.json as { input: string }).input;
+const modelOf = (call: Recorded) => (call.json as { model: string }).model;
+
+Deno.test("the first request has no correction block; the retry after a tone check ends with one holding the note", async () => {
+  await withWorld([geminiOk("leaky"), geminiOk("clean")], async (world) => {
+    const validate = toneValidator({ leaky: { note: "NOTE ONE" } });
+    const result = await generate(args({ validate, fallbackModel: "gemini-fallback-model" }), newStats());
+    assertEquals(result, "clean");
+    const [first, second] = world.geminiCalls.map(inputOf);
+    assert(!first.includes("<correction>"));
+    assertEquals(second, `${first}\n\n<correction>\nNOTE ONE\n</correction>`);
+    // The second attempt went to the fallback model, and its body carries the note too.
+    assertEquals(modelOf(world.geminiCalls[1]), "gemini-fallback-model");
+  });
+  // The main model's body is rebuilt as well: a busy failure, a noted reply on the fallback, then the main model again.
+  await withWorld([geminiError(503), geminiOk("leaky"), geminiOk("clean")], async (world) => {
+    const validate = toneValidator({ leaky: { note: "NOTE TWO" } });
+    assertEquals(await generate(args({ validate, fallbackModel: "gemini-fallback-model" }), newStats()), "clean");
+    const inputs = world.geminiCalls.map(inputOf);
+    assertEquals(world.geminiCalls.map(modelOf), ["gemini-test-model", "gemini-fallback-model", "gemini-test-model"]);
+    assertEquals(inputs[0], inputs[1]);
+    assertEquals(inputs[2], `${inputs[0]}\n\n<correction>\nNOTE TWO\n</correction>`);
+  });
+});
+
+Deno.test("withCorrection: a note goes after the entry, a newer note replaces an older one, audio is left alone", () => {
+  const input = { kind: "text" as const, text: "<journal_entry>\nhi\n</journal_entry>" };
+  assertEquals(withCorrection(input, "A"), { kind: "text", text: `${input.text}\n\n<correction>\nA\n</correction>` });
+  // Built from the original every time, so a second note never stacks on the first.
+  assertEquals(withCorrection(input, "B"), { kind: "text", text: `${input.text}\n\n<correction>\nB\n</correction>` });
+  const audio = { kind: "audio" as const, bytes: new Uint8Array([1]), instruction: "x" };
+  assertEquals(withCorrection(audio, "A"), audio);
+});
+
+Deno.test("a shape failure is asked for again with no note, and an audio request never gets one", async () => {
+  await withWorld([geminiOk("bad"), geminiOk("clean")], async (world) => {
+    const validate = toneValidator({ bad: { reason: "json" } });
+    await generate(args({ validate }), newStats());
+    assertEquals(inputOf(world.geminiCalls[1]), inputOf(world.geminiCalls[0]));
+  });
+  await withWorld([geminiOk("leaky"), geminiOk("clean")], async (world) => {
+    const validate = toneValidator({ leaky: { note: "NOTE" } });
+    const input = { kind: "audio" as const, bytes: new Uint8Array([1, 2, 3]), instruction: "Listen." };
+    await generate(args({ validate, input }), newStats());
+    assertEquals(world.geminiCalls[1].text, world.geminiCalls[0].text);
+  });
+});
+
+Deno.test("when no clean reply comes, the most recent salvage is returned instead of an error", async () => {
+  // Two salvageable replies: the second one's.
+  await withWorld([geminiOk("leakyA"), geminiOk("leakyB")], async () => {
+    const validate = toneValidator({ leakyA: { salvage: "A" }, leakyB: { salvage: "B" } });
+    assertEquals(await generate(args({ validate }), newStats()), "B");
+  });
+  // A salvage, then a reply that fails a check with no salvage (a never-say phrase): the salvage that was kept.
+  await withWorld([geminiOk("leakyA"), geminiOk("never")], async () => {
+    const validate = toneValidator({ leakyA: { salvage: "A" }, never: { reason: "never_say:reason", note: "N" } });
+    assertEquals(await generate(args({ validate }), newStats()), "A");
+  });
+  // A salvage, then a busy service until the attempts run out.
+  await withWorld([geminiOk("leakyA"), ...everyAttempt(geminiError(503))], async (world) => {
+    const validate = toneValidator({ leakyA: { salvage: "A" } });
+    const stats = newStats();
+    assertEquals(await generate(args({ validate }), stats), "A");
+    assertEquals(stats.attempts, 4);
+    assertEquals(world.geminiCalls.length, 4);
+  });
+});
+
+Deno.test("a clean reply always wins over an earlier salvage, and a block still throws", async () => {
+  await withWorld([geminiOk("leakyA"), geminiOk("clean")], async () => {
+    const validate = toneValidator({ leakyA: { salvage: "A" } });
+    assertEquals(await generate(args({ validate }), newStats()), "clean");
+  });
+  await withWorld(
+    [geminiOk("leakyA"), geminiError(400, { error: { code: "safety", message: "Input blocked: x" } })],
+    async () => {
+      const validate = toneValidator({ leakyA: { salvage: "A" } });
+      await expectBlocked(() => generate(args({ validate }), newStats()), "gemini_blocked_400");
+    },
+  );
+  // Replies that carry no salvage still end as AI_UNAVAILABLE, with the last reason.
+  await withWorld([geminiOk("never"), geminiOk("never")], async () => {
+    const validate = toneValidator({ never: { reason: "never_say:reason", note: "N" } });
+    await expectAppError(
+      () => generate(args({ validate }), newStats()),
+      "AI_UNAVAILABLE",
+      "output_invalid:never_say:reason",
+    );
+  });
+});
+
+Deno.test("with the real output rules: a name in a headline is asked for again, naming the word to avoid", async () => {
+  const entry = "Please pray for my sister Blessing. She moved away last month and I miss her.";
+  const leaky = readyOutput({
+    affirmations: [
+      { time_slot: "morning", headline: "You are a blessing", text: "Begin the day knowing you are held." },
+      { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
+      { time_slot: "evening", headline: "It is enough", text: "You did what you could today." },
+    ],
+  });
+  await withWorld([geminiOk(leaky), geminiOk(readyOutput())], async (world) => {
+    const result = await generate<Reflection>(
+      {
+        ...args(),
+        input: { kind: "text", text: wrapEntry(entry) },
+        validate: (text) => parseReflection(text, { entry }),
+      },
+      newStats(),
+    );
+    assert(result.kind === "ready");
+    assertEquals(result.salvaged, null);
+    assertEquals(result.affirmations[0].headline, "You are held");
+    const retry = inputOf(world.geminiCalls[1]);
+    assert(retry.endsWith("in any headline: blessing.\n</correction>"), retry);
+  });
 });

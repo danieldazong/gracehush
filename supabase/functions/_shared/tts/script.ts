@@ -6,15 +6,17 @@ import { parseReference, spokenReference } from "../bible/reference.ts";
 // field"). Nothing the model wrote reaches the voice as it was: every field is cleaned first, and a tag in it is removed
 // together with what is inside it, so the model cannot add a pause, a sound or an instruction.
 //
-// The order is: an opening line, the devotional (a pause between paragraphs), the passage with a spoken reference (only
-// when the caller says it is verified: the caller passes null otherwise), and the closing prayer ending in "Amen.". The
-// request may hold 5,000 bytes (the quotas page), so when the whole script is over MAX_SCRIPT_BYTES the passage is left
-// out first, then the prayer. The devotional is never cut. Where even it does not fit, there is no script (null).
+// The order is: the devotional (a pause between paragraphs), the passage with a spoken reference (only when the caller
+// says it is verified: the caller passes null otherwise), and the closing prayer ending in "Amen.". Nothing comes before
+// the devotional: its first sentence is its hook, the first thing heard (decided 2026-10-31: a fixed "Here is your
+// devotional." made every one sound the same, and a title read first delayed the hook and repeated across a person's
+// devotionals). The request may hold 5,000 bytes (the quotas page), so when the whole script is over MAX_SCRIPT_BYTES the
+// passage is left out first, then the prayer. The devotional is never cut. Where even it does not fit, there is no script
+// (null).
 
 // Cloud Text-to-Speech takes 5,000 bytes a request; this leaves a margin for what the count might include.
 export const MAX_SCRIPT_BYTES = 4_800;
 
-const OPENING = "Here is your devotional.";
 const PRAYER_INTRO = "Let's pray.";
 const AMEN = "Amen.";
 
@@ -116,7 +118,7 @@ export function buildSpeechScript(input: SpeechInput): SpeechScript | null {
     const key = `${attempt.reading}${attempt.prayer}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const parts = [OPENING, "[pause]", paragraphs.join(" [pause] ")];
+    const parts = [paragraphs.join(" [pause] ")];
     if (attempt.reading && reading !== null) parts.push(...reading);
     // A pause before the prayer, longer after a reading. Nothing follows the last words: no silence at the end.
     if (attempt.prayer && prayer !== null) parts.push(attempt.reading ? "[pause long]" : "[pause]", ...prayer);
