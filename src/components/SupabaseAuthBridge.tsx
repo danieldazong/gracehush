@@ -6,6 +6,7 @@ import { startAffirmationSchedule, stopAffirmationSchedule } from "@/services/af
 import { startConnectivity, stopConnectivity } from "@/services/connectivity";
 import { endOfflineSession, startOfflineSession } from "@/services/offlineSession";
 import { syncProfile, syncProfileOnForeground, watchReminderEdits } from "@/services/profileSync";
+import { startRealtime, stopRealtime } from "@/services/realtime";
 import { startRevenueCat } from "@/services/revenuecat";
 import { startPlanWatch } from "@/services/subscriptionSync";
 import { setSupabaseSession } from "@/services/supabaseClient";
@@ -20,7 +21,7 @@ export function SupabaseAuthBridge() {
   // A layout effect, so the session is set before any screen's own effect asks the repository for the profile.
   useLayoutEffect(() => {
     setSupabaseSession(
-      signedInUserId === null ? null : { userId: signedInUserId, getToken: () => getToken() },
+      signedInUserId === null ? null : { userId: signedInUserId, getToken: (options) => getToken(options) },
     );
     return () => setSupabaseSession(null);
   }, [signedInUserId, getToken]);
@@ -42,7 +43,7 @@ export function SupabaseAuthBridge() {
   }, [signedInUserId]);
 
   // The work that follows a sign-in, and again when the app returns to the foreground. A failure blocks nothing:
-  // the next foreground tries again. Later steps add their lines here (33 starts realtime).
+  // the next foreground tries again. Later steps add their lines here.
   useEffect(() => {
     if (signedInUserId === null) return;
     syncProfile();
@@ -54,6 +55,8 @@ export function SupabaseAuthBridge() {
     const stopPlanWatch = startPlanWatch(signedInUserId);
     // The daily affirmation notifications follow this account until the session ends (step 28).
     startAffirmationSchedule(signedInUserId);
+    // Realtime follows this account's entries while the app is in front (step 33): it waits for its own conditions.
+    startRealtime(signedInUserId);
     const subscription = AppState.addEventListener("change", (status) => {
       if (status === "active") syncProfileOnForeground();
     });
@@ -63,6 +66,7 @@ export function SupabaseAuthBridge() {
       stopWatchingPlan();
       stopPlanWatch();
       stopAffirmationSchedule();
+      void stopRealtime();
     };
   }, [signedInUserId]);
 

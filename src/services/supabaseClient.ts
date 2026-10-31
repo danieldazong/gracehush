@@ -6,11 +6,11 @@ import { readJwtPayload } from "@/utils/jwt";
 import { NoSessionError } from "@/utils/supabaseErrors";
 
 // The signed-in Clerk user, set by SupabaseAuthBridge. `getToken` is Clerk's own and is called without a JWT
-// template, because the session token itself is what Supabase verifies (Third-Party Auth). Nothing is cached or
-// shared here.
+// template, because the session token itself is what Supabase verifies (Third-Party Auth). `skipCache` asks Clerk's
+// server for a new token even while the cached one is valid. Nothing is cached or shared here.
 export type SupabaseSession = {
   userId: string;
-  getToken: () => Promise<string | null>;
+  getToken: (options?: { skipCache?: boolean }) => Promise<string | null>;
 };
 
 let session: SupabaseSession | null = null;
@@ -42,6 +42,24 @@ export function getSupabase(): SupabaseClient<Database> | null {
     db: { retry: false },
   });
   return client;
+}
+
+// Realtime's token check (step 33): Clerk mints the next session token 17 s before the cached one expires, as a background
+// fetch, and hands back the cached one until 5 s are left when that fetch fails or is late. When the cached token has `seconds`
+// or fewer left, this asks Clerk's server for a new one, which Clerk caches, so the next getToken() returns it. It answers
+// whether it renewed, and never returns or logs a token. Clerk shares one fetch between callers, so overlapping calls are safe.
+export async function renewSessionTokenIfExpiring(seconds: number): Promise<boolean> {
+  const current = session;
+  if (current === null) return false;
+  try {
+    const token = await current.getToken();
+    const exp = token ? readJwtPayload(token)?.exp : undefined;
+    if (typeof exp !== "number" || exp - Date.now() / 1000 > seconds) return false;
+    await current.getToken({ skipCache: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export type SessionTokenCheck = "no-session" | "ok" | "no-role-claim" | "unreadable";

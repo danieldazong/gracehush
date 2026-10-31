@@ -125,6 +125,23 @@ export async function selectAffirmations(entryId: string): Promise<RepoResult<Af
   return { ok: true, data };
 }
 
+// The run of reflection days for Journal Home's chip (step 33): reflection_streak_days counts the user's own entries in the
+// database (consecutive days in the zone `tz`, ending today or yesterday, each with a finished entry that is not a crisis entry),
+// so the number does not depend on how many entries the phone holds. A zone the database does not know is refused (22023).
+export async function selectReflectionStreak(tz: string): Promise<RepoResult<number>> {
+  const message = copy.journal.error.message;
+  const supabase = getSupabase();
+  if (supabase === null || getSupabaseUserId() === null) return unauthorized(message);
+  const { data, error, status } = await supabase.rpc("reflection_streak_days", { tz });
+  if (error !== null) return fail("reflection_streak_days", status, error, message);
+  if (typeof data !== "number" || !Number.isInteger(data) || data < 0) {
+    lastError = "reflection_streak_days: an answer that is not a count";
+    return { ok: false, code: "UNKNOWN", message };
+  }
+  lastError = null;
+  return { ok: true, data };
+}
+
 // The entries that are prayers, tracked or answered, newest first, at most PRAYERS_LIMIT (step 29). A crisis entry and an
 // unfinished one never are: the table's rules say so too.
 // TODO: paginate if a user passes 300 prayers.

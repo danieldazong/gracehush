@@ -11,6 +11,7 @@ import {
   setPrayerTracked,
 } from "@/data/journalRepository";
 import { getCurrentSlot } from "@/data/selectors";
+import { isRealtimeLive, subscribeRealtime } from "@/services/realtime";
 import { confirmScriptureIfNeeded } from "@/services/scriptureConfirm";
 import { subscribe, syncNow } from "@/services/syncEngine";
 import { useDevStore } from "@/store/devStore";
@@ -45,8 +46,11 @@ type LoadResult =
 
 // Reflection data for one entry. It loads when the screen takes focus (the first time too) and when the entry changes, and:
 // - it shows what the phone already has at once (the read cache), and then what the server says;
+// - while the screen is in front it follows Realtime (step 33): a change to this entry, or to its affirmations, is read again
+//   from the phone (the handler has just written it there), a delete shows "not found", and after a dropped channel came back
+//   the entry loads again;
 // - an entry that a server is still preparing (another phone made it, or this phone stopped waiting for it) is read again
-//   every REFLECTION_POLL_MS while the screen is in front, for up to REFLECTION_POLL_MAX_MS (TODO(33): realtime instead);
+//   every REFLECTION_POLL_MS while the screen is in front, for up to REFLECTION_POLL_MAX_MS, only while Realtime is not live;
 // - a passage that was kept as a reference only is asked for again (confirm-scripture), and the screen shows the answer.
 // A failed reload keeps the data that is already on screen.
 export function useReflection(entryId: string): ReflectionState {
@@ -113,6 +117,27 @@ export function useReflection(entryId: string): ReflectionState {
     );
   }, [entryId]);
 
+  // A Realtime message about this entry or its affirmations (step 33): the handler has read them into the phone. An entry that a
+  // server is still preparing is noted, so the polling below takes over if Realtime goes.
+  const followRealtime = useCallback(async () => {
+    const [entry, affirmations] = await Promise.all([readCachedEntry(entryId), readCachedAffirmations(entryId)]);
+    if (entry === null) return;
+    preparing.current = entry.status === "processing";
+    setResult((previous) =>
+      previous?.entryId === entryId && previous.status === "ready"
+        ? { ...previous, entry, affirmations: affirmations.length > 0 ? affirmations : previous.affirmations }
+        : previous,
+    );
+  }, [entryId]);
+
+  // Deleted elsewhere (step 33): a load still on its way must not bring it back. A delete made on this screen leaves the screen
+  // itself (step 29b), so the sync engine's own `deleted` event is not followed here.
+  const showDeleted = useCallback(() => {
+    latestRequest.current += 1;
+    preparing.current = false;
+    setResult({ entryId, status: "not-found" });
+  }, [entryId]);
+
   // The callback changes with the entry, so useFocusEffect reloads then if the screen is focused. Leaving the screen drops a
   // response that is still on its way and stops the reading.
   useFocusEffect(
@@ -122,19 +147,31 @@ export function useReflection(entryId: string): ReflectionState {
       const timer = setInterval(() => {
         if (Date.now() - startedAt > REFLECTION_POLL_MAX_MS) {
           clearInterval(timer);
-        } else if (preparing.current) {
+        } else if (preparing.current && !isRealtimeLive()) {
           load();
         }
       }, REFLECTION_POLL_MS);
       const stopFollowing = subscribe((event) => {
         if (event.type === "prayer" && event.entryId === entryId) void refreshFromPhone();
       });
+      const stopListening = subscribeRealtime((event) => {
+        if (event.type === "resync") {
+          load();
+        } else if (event.entryId !== entryId) {
+          return;
+        } else if (event.type === "entry" && event.op === "DELETE") {
+          showDeleted();
+        } else {
+          void followRealtime();
+        }
+      });
       return () => {
         clearInterval(timer);
         stopFollowing();
+        stopListening();
         latestRequest.current += 1;
       };
-    }, [load, refreshFromPhone, entryId]),
+    }, [load, refreshFromPhone, followRealtime, showDeleted, entryId]),
   );
 
   const setTracked = useCallback(

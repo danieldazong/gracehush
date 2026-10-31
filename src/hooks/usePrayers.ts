@@ -13,6 +13,7 @@ import {
 } from "@/data/journalRepository";
 import { getPrayerCounts, selectActivePrayers, selectAnsweredPrayers } from "@/data/selectors";
 import { startOfflineSession } from "@/services/offlineSession";
+import { subscribeRealtime } from "@/services/realtime";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { subscribe, syncNow } from "@/services/syncEngine";
 import { useDevStore } from "@/store/devStore";
@@ -52,8 +53,9 @@ type LoadResult =
 // the screen is in front it follows the sync engine: a change the engine settled (sent, or refused for good) is read again from
 // the phone. A change made here shows at once and waits on the phone until the engine has sent it (offline, until the phone is
 // back online); it replaces that prayer by id, so two changes that finish in any order cannot undo each other. A failed change
-// leaves the list as it was and returns the result.
-// TODO(33): Realtime updates across devices.
+// leaves the list as it was and returns the result. It follows Realtime too (step 33): a prayer changed on another phone or by the
+// server is read again from the phone (the handler has written it there), and after a dropped channel came back the list loads
+// again.
 export function usePrayers(): PrayersState {
   const scenario = useDevStore((state) => state.scenario);
   const dataSource = useDevStore((state) => state.dataSource);
@@ -139,9 +141,14 @@ export function usePrayers(): PrayersState {
         else if (event.type === "changed") void refreshPending();
         else if (event.type === "deleted") dropPrayer(event.entryId);
       });
+      const stopListening = subscribeRealtime((event) => {
+        if (event.type === "entry") void reloadFromPhone();
+        else if (event.type === "resync") load();
+      });
       return () => {
         subscription.remove();
         stopFollowing();
+        stopListening();
         latestRequest.current += 1;
       };
     }, [load, reloadFromPhone, refreshPending, dropPrayer]),

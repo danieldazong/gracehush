@@ -321,7 +321,28 @@ function makeServer() {
     makeEntry: readyResult,
     // The prayer updates the server took (step 29): the body and the rows it changed.
     prayerUpdates: [],
+    // Step 33: answers for /rest/v1/rpc/reflection_streak_days (a Response, or a function of the call). An empty queue counts the
+    // caller's run of days in the zone as the real function does (supabase/migrations/20261031120000_realtime_broadcast.sql).
+    streak: [],
+    streakCalls: [],
   };
+
+  // The run of consecutive local days in `tz`, ending today or yesterday, with a ready entry that is not a crisis entry.
+  function streakOf(sub, tz) {
+    const day = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new RealDate(ms));
+    const days = new Set(
+      state.entries
+        .filter((row) => row.user_id === sub && row.processing_status === "ready" && !row.is_crisis)
+        .map((row) => day(Date.parse(row.created_at))),
+    );
+    let offset = days.has(day(clock.now)) ? 0 : 1;
+    let count = 0;
+    while (days.has(day(clock.now - offset * 86_400_000))) {
+      count += 1;
+      offset += 1;
+    }
+    return count;
+  }
 
   function applyFilters(rows, params) {
     let out = rows;
@@ -485,6 +506,14 @@ function makeServer() {
       return json(200, { scripture: null });
     }
     if (!sub) return json(401, { code: "PGRST301", message: "JWT invalid", details: null, hint: null });
+    if (url.pathname === "/rest/v1/rpc/reflection_streak_days") {
+      const call = { method, body, sub };
+      state.streakCalls.push(call);
+      const scripted = state.streak.shift();
+      if (scripted !== undefined) return withAbort(init.signal, Promise.resolve(typeof scripted === "function" ? scripted(call) : scripted));
+      if (typeof body?.tz !== "string") return json(400, { code: "PGRST202", message: "no such function", details: null, hint: null });
+      return json(200, streakOf(sub, body.tz));
+    }
     for (const table of ["journal_entries", "daily_affirmations"]) {
       if (url.pathname === `/rest/v1/${table}`) {
         const scripted = state.rest[table].shift();
@@ -514,8 +543,26 @@ function makeUpload() {
   return upload;
 }
 
+// ------------------------------------------------------------------ Realtime (step 33)
+// A stand-in for src/services/realtime.ts that never connects. Every suite but supabase/tests/realtime uses it: the real service
+// would open a WebSocket to the fake project's address from inside a check. `calls` records starts and stops.
+function makeRealtimeFake() {
+  const calls = [];
+  return {
+    calls,
+    module: {
+      __esModule: true,
+      startRealtime: () => void calls.push("start"),
+      stopRealtime: async () => void calls.push("stop"),
+      subscribeRealtime: () => () => undefined,
+      isRealtimeLive: () => false,
+    },
+  };
+}
+
 // ------------------------------------------------------------------ one world per check
-function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes: extraFakes = {} } = {}) {
+// `realtime: "real"` loads the real Realtime service (supabase/tests/realtime fakes the channel on the real client instead).
+function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes: extraFakes = {}, realtime = "fake" } = {}) {
   const sqlite = offline.makeSqlite();
   const secure = offline.makeSecureStore();
   const net = offline.makeNetInfo();
@@ -554,6 +601,8 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
       affirmationRequests += 1;
     },
   };
+  const realtimeFake = makeRealtimeFake();
+  if (realtime === "fake") fakes["@/services/realtime"] = realtimeFake.module;
   // A suite can fake more modules that plain Node cannot load (step 29b: the player store and the devotional files).
   Object.assign(fakes, extraFakes);
   const env = makeEnv({ fakes });
@@ -571,6 +620,7 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
     server,
     upload,
     counts,
+    realtimeCalls: realtimeFake.calls,
     affirmationRequests: () => affirmationRequests,
     renderHook,
     logs,

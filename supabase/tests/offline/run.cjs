@@ -792,6 +792,8 @@ async function accountChecks() {
       // Step 30: the plan watch stops and RevenueCat logs out (react-native-purchases and expo cannot load in plain Node).
       "@/services/subscriptionSync": { __esModule: true, stopPlanWatch: () => void order.push("plan watch") },
       "@/services/revenuecat": { __esModule: true, endRevenueCatSession: async () => void order.push("revenuecat") },
+      // Step 33: Realtime stops first, before the database and the token go (the service needs react-native and a socket).
+      "@/services/realtime": { __esModule: true, stopRealtime: async () => void order.push("realtime stopped") },
     };
     const mod = makeWorld2(w, extra);
     const database = mod.use("@/db/database");
@@ -812,6 +814,7 @@ async function accountChecks() {
     };
     await mod.use("@/services/account").signOutCleanup();
     assert.ok(order.indexOf("engine stopped") < order.indexOf("database deleted"), order.join(" > "));
+    assert.equal(order[0], "realtime stopped", `Realtime stops before anything else: ${order.join(" > ")}`);
     assert.equal(engine.isSyncEngineStarted(), false);
     assert.equal(database.isDatabaseOpen(), false);
     assert.equal(w.sqlite.exists(`gracehush-${sha16("user_a")}.db`), false);

@@ -160,6 +160,19 @@ export async function markQueued(
   );
 }
 
+// A queued item that this phone gave up waiting for has finished on the server (Realtime said so, step 33): it is sent again now
+// instead of at its backoff time, and the server answers the finished row with no model call. Only a queued item moves (one
+// being sent, held by the free limit or waiting for the person stays as it is). True when it moved.
+export async function makeDue(clientEntryId: string, now: number): Promise<boolean> {
+  const result = await getDb().runAsync(
+    "UPDATE outbox SET next_attempt_at = ?, updated_at = ? WHERE client_entry_id = ? AND status = 'queued'",
+    now,
+    now,
+    clientEntryId,
+  );
+  return result.changes > 0;
+}
+
 export async function markNeedsAction(clientEntryId: string, code: string, now: number): Promise<void> {
   await getDb().runAsync(
     "UPDATE outbox SET status = 'needs_action', last_error_code = ?, updated_at = ? WHERE client_entry_id = ?",

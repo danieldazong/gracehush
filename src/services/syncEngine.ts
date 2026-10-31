@@ -28,7 +28,17 @@ import type { OutboxItem, OutboxStatus, ProcessingStage, ProcessOutcome } from "
 //   count or a delay. A crisis answer is logged like any other ("finished"): the app logs nothing about a crisis entry.
 // - Prayer changes (step 29, db/mutations.ts) go before the outbox, one at a time, in the same run: they are small, and the
 //   person is looking at them.
-export type SyncReason = "start" | "foreground" | "online" | "timer" | "submit" | "upgrade" | "manual" | "mutation";
+// "realtime" (step 33): a reflection this phone stopped waiting for has finished on the server, so its item is sent again now.
+export type SyncReason =
+  | "start"
+  | "foreground"
+  | "online"
+  | "timer"
+  | "submit"
+  | "upgrade"
+  | "manual"
+  | "mutation"
+  | "realtime";
 
 export type SyncEvent =
   | { type: "changed" }

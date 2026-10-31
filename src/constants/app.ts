@@ -51,6 +51,17 @@ export const SCRIPTURE_RETRY_MS = 60_000;
 // A reflection that a server is still preparing is read again this often, for at most REFLECTION_POLL_MAX_MS (step 25).
 export const REFLECTION_POLL_MS = 5_000;
 export const REFLECTION_POLL_MAX_MS = 120_000;
+// Realtime (step 33): a message about an entry, or about its affirmations, is acted on once this long has passed without another
+// one about it, so a burst of writes (a reflection being made) is read once.
+export const REALTIME_COALESCE_MS = 300;
+// While the channel is live the session token is checked this often (step 33). Realtime's own refresh runs only at its heartbeat,
+// every 25 s, and Clerk mints the next token 17 s before the old one expires, as a background fetch, and hands back the old one
+// until 5 s are left when that fetch fails or is late; either way a token could expire on the channel and the server would close
+// it (seen on the phone, twice). Each check reads Clerk's cached token (no network) and pushes it only when it changed.
+export const REALTIME_TOKEN_CHECK_MS = 5_000;
+// A cached token with this many seconds or fewer left means Clerk's own refresh has not landed, so the check asks Clerk's server
+// for a new one itself, at least 10 s before the old one expires.
+export const REALTIME_TOKEN_RENEW_S = 15;
 // How long a call to an Edge Function may take. process-entry stops itself at about 145 seconds (the platform stops a function at
 // 150, step 22), and the sync engine's own ceiling (200 seconds, step 24) is above this one.
 export const PROCESS_ENTRY_TIMEOUT_MS = 155_000;

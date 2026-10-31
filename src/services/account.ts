@@ -7,6 +7,7 @@ import { clearAffirmations } from "@/services/affirmationScheduler";
 import { deleteAllDevotionalAudio } from "@/services/devotionalAudio";
 import { endOfflineSession } from "@/services/offlineSession";
 import { cancelProfileSync, pauseProfileSync, resumeProfileSync } from "@/services/profileSync";
+import { startRealtime, stopRealtime } from "@/services/realtime";
 import { deleteAllRecordings } from "@/services/recordingFiles";
 import { endRevenueCatSession } from "@/services/revenuecat";
 import { startPlanWatch, stopPlanWatch } from "@/services/subscriptionSync";
@@ -53,15 +54,17 @@ export async function requestDataExport(): Promise<RepoResult<ExportLink>> {
 //
 // First this phone stops its own background work, so nothing it does can make the account's data again while the server
 // deletes it: the sync engine (a reflection being prepared makes the profile row), the plan watch (a sync re-reads RevenueCat,
-// which makes a customer) and the profile sync (it makes the profile row). A success, or UNAUTHORIZED (the account or its
-// session is already gone), runs the sign-out cleanup and forgets the account's settings kept on this phone: signing out is
-// always safe. A failure clears nothing and starts again what was stopped.
+// which makes a customer), Realtime (the deletion sends a message for every entry, step 33) and the profile sync (it makes the
+// profile row). A success, or UNAUTHORIZED (the account or its session is already gone), runs the sign-out cleanup and forgets
+// the account's settings kept on this phone: signing out is always safe. A failure clears nothing and starts again what was
+// stopped.
 export async function deleteAccount(): Promise<RepoResult<null>> {
   if (getDataSource() === "mock") return await deleteMockAccount();
   const userId = getSupabaseUserId();
   const engineWasRunning = isSyncEngineStarted();
   stopSyncEngine();
   stopPlanWatch();
+  await stopRealtime();
   if (userId !== null) pauseProfileSync(userId);
   const result = await deleteAccountOnServer();
   if (result.ok || result.code === "UNAUTHORIZED") {
@@ -71,7 +74,10 @@ export async function deleteAccount(): Promise<RepoResult<null>> {
   }
   resumeProfileSync();
   if (engineWasRunning) startSyncEngine();
-  if (userId !== null) startPlanWatch(userId);
+  if (userId !== null) {
+    startPlanWatch(userId);
+    startRealtime(userId);
+  }
   return { ok: false, code: failureCode(result.code), message: copy.profile.errors.delete };
 }
 
@@ -91,7 +97,9 @@ async function deleteMockAccount(): Promise<RepoResult<null>> {
 // device-level (AGENTS.md, Authentication Rules). Steps 17, 24, 26, 28, 30, 33 and 34 each add their line (step 27's is
 // inside the player store's stop()).
 export async function signOutCleanup(): Promise<void> {
-  // TODO(33): stopRealtime() first, before the database and the token go
+  // Realtime stops first (step 33), before the database and the token go: a message on its way, or a read it started, then
+  // writes nothing.
+  await stopRealtime();
   // A reminder edit that has not reached the server belongs to the account that made it: it must never be sent to
   // the next account that signs in on this phone. (The reminder times are device-wide. An unsent setting is kept
   // per user in the prefs store and is sent when that account signs in again.)

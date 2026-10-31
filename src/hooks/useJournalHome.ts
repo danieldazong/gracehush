@@ -1,20 +1,23 @@
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 
 import {
   getLatestAffirmations,
   getProfile,
+  getReflectionStreak,
   listPendingItems,
   loadEntriesPage,
   readCachedEntries,
+  readCachedEntry,
   readCachedLatestAffirmations,
   setAffirmationFavorite,
 } from "@/data/journalRepository";
 import { mergePending, toPendingEntry } from "@/data/pendingEntries";
-import { getCurrentSlot, getReflectionDays, mergeEntries } from "@/data/selectors";
+import { getCurrentSlot, getReflectionDays, isListedEntry, mergeEntries } from "@/data/selectors";
 import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
 import { startOfflineSession } from "@/services/offlineSession";
+import { subscribeRealtime } from "@/services/realtime";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { subscribe } from "@/services/syncEngine";
 import { useDevStore } from "@/store/devStore";
@@ -73,6 +76,30 @@ type LoadResult =
     }
   | { key: string; status: "error" };
 
+// Where an entry a Realtime message changed goes in the list on screen (step 33), with the known total. A listed entry takes its
+// place, or joins the list when it falls inside the loaded range (one more in all); a listed entry older than the loaded range is
+// left for its page. An entry that is no longer listed (a failed one) leaves the list (one fewer in all).
+function placeChangedEntry(
+  list: { entries: JournalEntry[]; nextCursor: string | null; total: number | null },
+  entryId: string,
+  entry: JournalEntry | null,
+  nowMs: number,
+): { entries: JournalEntry[]; total: number | null } {
+  const present = list.entries.some((item) => item.id === entryId);
+  if (entry !== null && isListedEntry(entry, nowMs)) {
+    if (present) return { entries: mergeEntries(list.entries, [entry]), total: list.total };
+    const oldest = list.entries[list.entries.length - 1];
+    const inRange = list.nextCursor === null || oldest === undefined || entry.createdAt >= oldest.createdAt;
+    if (!inRange) return { entries: list.entries, total: list.total };
+    return { entries: mergeEntries(list.entries, [entry]), total: list.total === null ? null : list.total + 1 };
+  }
+  if (!present) return { entries: list.entries, total: list.total };
+  return {
+    entries: list.entries.filter((item) => item.id !== entryId),
+    total: list.total === null ? null : Math.max(0, list.total - 1),
+  };
+}
+
 function withFavorite(result: LoadResult | null, key: string, id: string, value: boolean): LoadResult | null {
   if (result?.status !== "ready" || result.key !== key) return result;
   return {
@@ -86,7 +113,10 @@ function withFavorite(result: LoadResult | null, key: string, id: string, value:
 // database (the reflections saved on this phone, and the cache of the ones the server has, live in it). A load shows what the
 // phone already has at once, then replaces it with the first page from the server; older pages come with `loadMore`. While the
 // screen is in front it follows the sync engine: the list of unsent reflections refreshes after every change, and the whole
-// list after a reflection has been prepared.
+// list after a reflection has been prepared. It follows Realtime too (step 33): a change made elsewhere is read from the phone
+// (the handler has written it there) and merged into the list, and after a dropped channel came back the list loads again. The
+// "days of reflection" chip is the server's run of days (reflection_streak_days), asked for after the first page and when a
+// reflection finishes; until it answers, offline, with the mock data and on any error, the chip counts what the phone holds.
 export function useJournalHome(): HomeState {
   const scenario = useDevStore((state) => state.scenario);
   const dbReady = useOfflineStore((state) => state.dbReady);
@@ -108,6 +138,24 @@ export function useJournalHome(): HomeState {
   const pagesLoaded = useRef(0);
   const loadingMoreNow = useRef(false);
   const savingFavorite = useRef(false);
+  // The server's run of reflection days for the key it was asked for: null days when it gave no number.
+  const [streak, setStreak] = useState<{ key: string; days: number | null } | null>(null);
+  const latestStreak = useRef(0);
+  // What is on screen, for the Realtime callbacks (they compare with it and need the profile's time zone). Set in an effect.
+  const shown = useRef<LoadResult | null>(null);
+  useEffect(() => {
+    shown.current = result;
+  }, [result]);
+
+  const askStreak = useCallback(
+    async (timezone: string) => {
+      latestStreak.current += 1;
+      const request = latestStreak.current;
+      const days = await getReflectionStreak(timezone);
+      if (request === latestStreak.current) setStreak({ key, days });
+    },
+    [key],
+  );
 
   const refreshPending = useCallback(async () => {
     latestPending.current += 1;
@@ -159,6 +207,7 @@ export function useJournalHome(): HomeState {
         const page = await loadEntriesPage(null);
         if (request !== latestRequest.current) return;
         if (!page.ok) throw new Error(page.code);
+        void askStreak(profile.timezone);
         const affirmations = await getLatestAffirmations();
         // The newest reflection may be new to this phone (made on another phone, or a crisis entry): the affirmation
         // notifications are planned again from what the phone now holds (step 28), once its affirmations are here too.
@@ -186,8 +235,37 @@ export function useJournalHome(): HomeState {
         );
       }
     },
-    [key, dbReady],
+    [key, dbReady, askStreak],
   );
+
+  // A Realtime message about one entry (step 33). The newest reflection's affirmations are read again with it, and the run of
+  // days is asked for again when a reflection has just finished.
+  const mergeFromPhone = useCallback(
+    async (entryId: string) => {
+      const [entry, affirmations] = await Promise.all([readCachedEntry(entryId), readCachedLatestAffirmations()]);
+      const before = shown.current?.status === "ready" && shown.current.key === key ? shown.current : null;
+      if (before === null) return;
+      const wasReady = before.entries.some((item) => item.id === entryId && item.status === "ready");
+      const nowMs = Date.now();
+      setResult((previous) =>
+        previous?.status === "ready" && previous.key === key
+          ? { ...previous, ...placeChangedEntry(previous, entryId, entry, nowMs), affirmations }
+          : previous,
+      );
+      if (entry !== null && entry.status === "ready" && !entry.isCrisis && !wasReady) {
+        void askStreak(before.profile.timezone);
+      }
+    },
+    [key, askStreak],
+  );
+
+  // A Realtime message about an entry's affirmations: the card shows the newest reflection's, as the phone now holds them.
+  const refreshAffirmations = useCallback(async () => {
+    const affirmations = await readCachedLatestAffirmations();
+    setResult((previous) =>
+      previous?.status === "ready" && previous.key === key ? { ...previous, affirmations } : previous,
+    );
+  }, [key]);
 
   // The callback changes with the key and with the database, so useFocusEffect reloads then if the screen is focused, and
   // otherwise on the next focus. Leaving the screen drops a response that is still on its way.
@@ -219,12 +297,18 @@ export function useJournalHome(): HomeState {
           );
         }
       });
+      const stopListening = subscribeRealtime((event) => {
+        if (event.type === "entry") void mergeFromPhone(event.entryId);
+        else if (event.type === "affirmations") void refreshAffirmations();
+        else load();
+      });
       return () => {
         subscription.remove();
         stopFollowing();
+        stopListening();
         latestRequest.current += 1;
       };
-    }, [load, refreshPending, key]),
+    }, [load, refreshPending, key, mergeFromPhone, refreshAffirmations]),
   );
 
   const retry = useCallback(() => {
@@ -304,6 +388,7 @@ export function useJournalHome(): HomeState {
   const entries = mergePending(current.entries, pending.map(toPendingEntry));
   // The entries the server has that are not on screen yet, on top of the ones that are.
   const notLoaded = Math.max(0, (current.total ?? current.entries.length) - current.entries.length);
+  const serverDays = streak?.key === key ? streak.days : null;
   return {
     status: "ready",
     now,
@@ -311,8 +396,7 @@ export function useJournalHome(): HomeState {
     entries,
     entryCount: entries.length + notLoaded,
     affirmations: current.affirmations,
-    // TODO(33): the streak counts the entries loaded so far; a server-side count replaces it.
-    reflectionDays: getReflectionDays(entries, now),
+    reflectionDays: serverDays ?? getReflectionDays(entries, now),
     currentSlot: getCurrentSlot(now, current.profile.reminders),
     // The dev scenario still forces the offline look in development.
     isOffline: scenario === "offline" || online === false,

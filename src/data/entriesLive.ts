@@ -38,6 +38,9 @@ async function safely<T>(task: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
+// The default `keep` of fetchEntry and fetchAffirmations: the answer is always wanted.
+const always = () => true;
+
 function bySlot(a: Affirmation, b: Affirmation): number {
   return SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot);
 }
@@ -144,16 +147,17 @@ export async function loadEntriesPage(cursor: string | null, limit: number): Pro
 }
 
 // One entry of any status, or null when the server has none (it is then removed from the cache). With no answer from the server
-// it is the cached copy; with none of those it throws, so the screen shows its error state.
-export async function fetchEntry(id: string): Promise<JournalEntry | null> {
+// it is the cached copy; with none of those it throws, so the screen shows its error state. `keep` answers false once the caller
+// no longer wants the answer (step 33: Realtime has stopped since the read began): the cache is then left as it is.
+export async function fetchEntry(id: string, keep: () => boolean = always): Promise<JournalEntry | null> {
   const result = await selectEntry(id);
   if (result.ok) {
     if (result.data === null) {
-      await safely(() => cache.removeEntry(id), undefined);
+      if (keep()) await safely(() => cache.removeEntry(id), undefined);
       return null;
     }
     const [entry] = await withPendingChanges([toJournalEntry(result.data)]);
-    await safely(() => cache.upsertEntry(entry), undefined);
+    if (keep()) await safely(() => cache.upsertEntry(entry), undefined);
     return entry;
   }
   const cached = await readCachedEntry(id);
@@ -260,12 +264,12 @@ export async function forgetEntry(entryId: string): Promise<void> {
   await safely(() => mutations.dropMutation(entryId), undefined);
 }
 
-// The affirmations of an entry, with the same fallbacks as fetchEntry.
-export async function fetchAffirmations(entryId: string): Promise<Affirmation[]> {
+// The affirmations of an entry, with the same fallbacks and the same `keep` as fetchEntry.
+export async function fetchAffirmations(entryId: string, keep: () => boolean = always): Promise<Affirmation[]> {
   const result = await selectAffirmations(entryId);
   if (result.ok) {
     const list = result.data.map(toAffirmation).sort(bySlot);
-    await safely(() => cache.upsertAffirmations(entryId, list), undefined);
+    if (keep()) await safely(() => cache.upsertAffirmations(entryId, list), undefined);
     return list;
   }
   const cached = await readCachedAffirmations(entryId);

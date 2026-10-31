@@ -1,5 +1,6 @@
 // Reads the claims of a JWT without checking its signature. Only for telling the developer what a token carries
-// (the key check at start-up, the Supabase check in the dev panel): the server is what trusts a token, never the app.
+// (the key check at start-up, the Supabase check in the dev panel) and for timing a token's renewal (Realtime's token
+// check): the server is what trusts a token, never the app.
 export function readJwtPayload(token: string): Record<string, unknown> | null {
   const part = token.split(".")[1];
   if (part === undefined || part === "") return null;

@@ -12,6 +12,7 @@ import {
   getUsage,
   listEntries,
   listPrayers,
+  readCachedEntries,
   readCachedPrayers,
   setMockSubscriptionTier,
 } from "@/data/journalRepository";
@@ -61,6 +62,7 @@ import {
 import { useDevStore } from "@/store/devStore";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
+import { useRealtimeStore } from "@/store/realtimeStore";
 import type { JournalEntry, OutboxStatus, PermissionResult, SubscriptionTier } from "@/types";
 import {
   formatDuration,
@@ -354,6 +356,8 @@ function DevToolsContent() {
   const [affirmationBusy, setAffirmationBusy] = useState(false);
   const [outboxText, setOutboxText] = useState("outbox: …");
   const [pendingText, setPendingText] = useState("Pending changes: …");
+  const realtime = useRealtimeStore();
+  const [preparingNote, setPreparingNote] = useState<string | null>(null);
   // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
   const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
   const crisisEntryId = targets.find((target) => target.label === "Crisis")?.entryId ?? null;
@@ -405,6 +409,19 @@ function DevToolsContent() {
     setDataSource(next);
     setSupabaseLines([]);
     bumpMockProfileVersion();
+  }
+
+  // Opens Reflection on the newest entry this phone holds that a server is still preparing, read at the moment of the tap (step
+  // 33): a preparing card on Journal does not open, and the "Open reflection" row is read when the panel loads.
+  async function openNewestPreparing() {
+    const entries = await readCachedEntries();
+    const preparing = entries.find((entry) => entry.status === "processing");
+    if (preparing === undefined) {
+      setPreparingNote("No reflection is being prepared on this phone.");
+      return;
+    }
+    setPreparingNote(null);
+    navigation.navigate("Reflection", { entryId: preparing.id });
   }
 
   async function checkSupabase() {
@@ -662,6 +679,24 @@ function DevToolsContent() {
                 {line}
               </Text>
             ))}
+          </View>
+          {/* Step 33: the Realtime channel. Force polling keeps it stopped, so the step 25 polling can be watched. */}
+          <View className="items-center gap-2">
+            <Text className="text-center text-body-sm text-mauve">Realtime (dev)</Text>
+            <Text className="text-center text-body-sm text-ink">
+              {`realtime: ${realtime.status}${realtime.reason === null ? "" : ` (${realtime.reason})`} | events ${realtime.events} | reconnects ${realtime.reconnects}`}
+            </Text>
+            <View className="flex-row flex-wrap justify-center gap-2">
+              <DevButton
+                label="Force polling (dev)"
+                selected={realtime.forcePolling}
+                onPress={() => realtime.setForcePolling(!realtime.forcePolling)}
+              />
+              <DevButton label="Open newest preparing (dev)" onPress={() => void openNewestPreparing()} />
+            </View>
+            {preparingNote !== null ? (
+              <Text className="text-center text-body-sm text-mauve">{preparingNote}</Text>
+            ) : null}
           </View>
           <View className="items-center gap-2">
             <DevButton

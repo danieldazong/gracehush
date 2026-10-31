@@ -17,7 +17,7 @@ export async function deleteReflection(entryId: string): Promise<RepoResult<null
   return deleted;
 }
 
-// Also what a Realtime DELETE does on this phone. TODO(33): step 33 calls this from its DELETE handler.
+// Also what a Realtime DELETE does on this phone, after the cached copy is forgotten (step 33, services/realtimeHandlers.ts).
 export function forgetOnThisPhone(entryId: string): void {
   // The sound, the lock screen and the ambient bed stop when that devotional is the loaded one.
   try {

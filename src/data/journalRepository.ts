@@ -9,6 +9,7 @@ import {
 import { copy } from "@/constants/copy";
 import type { PrayerPatch } from "@/data/columns";
 import * as live from "@/data/entriesLive";
+import { selectReflectionStreak } from "@/data/entriesRemote";
 import { getDeviceTimezone, toAffirmation, toJournalEntry, toUserProfile } from "@/data/mappers";
 import { addMockEntry, getMockDb, removeMockEntry } from "@/data/mock/db";
 import {
@@ -51,6 +52,7 @@ import type {
 } from "@/types";
 import { answeredDateToTimestamp, isValidAnsweredDate } from "@/utils/prayerDates";
 import { weekWindow } from "@/utils/week";
+import { calendarDayIn, isTimeZone } from "@/utils/zonedTime";
 
 const SLOT_ORDER: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 
@@ -178,6 +180,26 @@ export async function getUsage(): Promise<PlanUsage> {
   // A person who was paying earlier in the week and lapsed can have made more than the limit: the card shows the limit.
   const made = await live.countDevotionalsSince(week.start);
   return { tier, used: Math.min(made, FREE_DEVOTIONALS_PER_WEEK), limit: FREE_DEVOTIONALS_PER_WEEK, resetsAt };
+}
+
+// The run of reflection days for Journal Home's chip (step 33), counted by the server from every entry the account has, in the
+// time zone `tz` (the profile's). The last answer is kept in memory for the account and the day it was counted, so a failed call
+// later that day answers it. null for the mock data, and when the server has not answered today: Journal then counts what the
+// phone holds (getReflectionDays).
+let keptStreak: { key: string; days: number } | null = null;
+
+export async function getReflectionStreak(tz: string): Promise<number | null> {
+  if (getDataSource() === "mock") return null;
+  const userId = getSupabaseUserId();
+  if (userId === null) return null;
+  const day = calendarDayIn(new Date(), isTimeZone(tz) ? tz : "UTC");
+  const key = `${userId}|${tz}|${day.year}-${day.month}-${day.day}`;
+  const result = await selectReflectionStreak(tz);
+  if (result.ok) {
+    keptStreak = { key, days: result.data };
+    return result.data;
+  }
+  return keptStreak?.key === key ? keptStreak.days : null;
 }
 
 // What this phone has, newest first: Profile counts it and the developer panel reads it. The mock data: every entry, every

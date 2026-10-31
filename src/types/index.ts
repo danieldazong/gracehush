@@ -388,3 +388,16 @@ export type CrisisResource = {
 };
 
 export type CrisisAction = Pick<CrisisResource, "kind" | "value" | "body">;
+
+// Realtime (step 33): the two messages the database sends to its owner's private channel, user:{userId}. They hold ids, an
+// operation, a status and a time, and nothing a person wrote. The guards in services/realtime.ts read only these keys (the
+// affirmations message also carries the affirmation's own id, which the app does not need).
+export type EntryChangedMessage = {
+  id: string;
+  op: "INSERT" | "UPDATE" | "DELETE";
+  status: ProcessingStatus | null;
+  updated_at: string | null;
+};
+export type AffirmationsChangedMessage = { entry_id: string };
+// offline: stopped, or waiting to try again; connecting: asking for the token or waiting for the join; live: joined.
+export type RealtimeStatus = "connecting" | "live" | "offline";

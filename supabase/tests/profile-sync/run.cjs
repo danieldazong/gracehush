@@ -402,6 +402,8 @@ const row = ({
     // Step 31: account.ts stops and starts the sync engine around an account deletion; react-native behind it cannot load in
     // Node. These checks run the mock deletion, which never touches it.
     fakes["@/services/syncEngine"] = { isSyncEngineStarted: () => false, startSyncEngine: () => undefined, stopSyncEngine: () => undefined };
+    // Step 33: account.ts stops Realtime first at sign-out and around a deletion; the service needs react-native and a socket.
+    fakes["@/services/realtime"] = { startRealtime: () => undefined, stopRealtime: async () => undefined };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
     env.use("@/store/devStore").useDevStore.getState().setDataSource(source);
@@ -1004,6 +1006,7 @@ const row = ({
         "@/db/mutations": {},
         "@/services/offlineSession": { endOfflineSession: async () => undefined },
         "@/services/syncEngine": { isSyncEngineStarted: () => false, startSyncEngine: () => undefined, stopSyncEngine: () => undefined },
+        "@/services/realtime": { startRealtime: () => undefined, stopRealtime: async () => undefined },
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();
