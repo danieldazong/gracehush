@@ -60,6 +60,19 @@ from (
         coalesce((select case when public then 'PUBLIC' else 'private' end
                          || ', ' || coalesce((file_size_limit / 1048576)::text || ' MB', 'no size limit')
                          || ', ' || coalesce(array_to_string(allowed_mime_types, ' '), 'any file type')
-                  from storage.buckets where id = 'exports'), 'absent'))
+                  from storage.buckets where id = 'exports'), 'absent')),
+    (15, 'Realtime messages and the run of reflection days (step 33)',
+        'triggers: '
+        || coalesce(nullif((select string_agg(t.tgname::text, ', ' order by t.tgname)
+                            from pg_trigger t
+                            where t.tgname in ('journal_entries_broadcast', 'daily_affirmations_broadcast')
+                              and t.tgrelid in (to_regclass('public.journal_entries')::oid,
+                                                to_regclass('public.daily_affirmations')::oid)), ''), 'none')
+        || '; policy: '
+        || case when exists (select 1 from pg_policies
+                             where schemaname = 'realtime' and tablename = 'messages'
+                               and policyname = 'user_broadcast_select_own') then 'exists' else 'absent' end
+        || '; streak function: '
+        || case when to_regprocedure('public.reflection_streak_days(text)') is null then 'absent' else 'exists' end)
 ) as checks (position, item, found)
 order by position;

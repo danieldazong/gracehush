@@ -37,6 +37,7 @@ const WAV = migrations.find((name) => name.includes("journal_media_accepts_wav")
 const DELETED = migrations.find((name) => name.includes("deleted_devotionals"));
 const SUBSCRIPTION = migrations.find((name) => name.includes("subscription_sync"));
 const EXPORTS = migrations.find((name) => name.includes("exports_bucket"));
+const REALTIME = migrations.find((name) => name.includes("realtime_broadcast"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -86,6 +87,60 @@ const STUB = `
     for each statement execute function storage.protect_delete();
   grant usage on schema storage to anon, authenticated, service_role;
   grant all on all tables in schema storage to anon, authenticated, service_role;
+
+  -- Realtime (step 33): realtime.messages, realtime.topic() and realtime.send() as Supabase defines them (github.com/supabase/realtime,
+  -- lib/realtime/tenants/repo/migrations, read 2026-10-31), with the same grants on the table. send adds an id to a payload that has
+  -- none, sets realtime.topic, writes a broadcast row and turns any error into a warning. Two differences for the tests: the table
+  -- is not partitioned by day (so a message can always be written), and while test.realtime_send_fails is on, send raises instead,
+  -- so that a trigger's own net can be proven.
+  create schema realtime;
+  create table realtime.messages (
+    id uuid not null default gen_random_uuid(),
+    topic text not null,
+    extension text not null,
+    event text,
+    payload jsonb,
+    private boolean default false,
+    inserted_at timestamp not null default timezone('utc', clock_timestamp()),
+    updated_at timestamp not null default timezone('utc', clock_timestamp()),
+    primary key (id, inserted_at));
+  alter table realtime.messages enable row level security;
+  create function realtime.topic() returns text language sql stable as $$
+    select nullif(current_setting('realtime.topic', true), '')::text
+  $$;
+  create function realtime.send(payload jsonb, event text, topic text, private boolean default true) returns void
+  language plpgsql as $$
+  declare
+    generated_id uuid := gen_random_uuid();
+  begin
+    if current_setting('test.realtime_send_fails', true) = 'on' then
+      raise exception 'realtime.send fails on purpose (test)' using errcode = '55000';
+    end if;
+    begin
+      perform set_config('realtime.topic', topic, true);
+      insert into realtime.messages (id, payload, event, topic, private, extension)
+      values (generated_id,
+              case when payload ? 'id' then payload else jsonb_set(payload, '{id}', to_jsonb(generated_id)) end,
+              event, topic, private, 'broadcast');
+    exception when others then
+      raise warning 'WarnSendingBroadcastMessage: %', sqlerrm;
+    end;
+  end
+  $$;
+  grant usage on schema realtime to anon, authenticated, service_role;
+  grant select, insert, update on realtime.messages to anon, authenticated, service_role;
+`;
+
+// A hosted project on a day no client has connected to Realtime yet: there is no message table for the day, so writing a message
+// fails as a missing partition does (23514).
+const NO_MESSAGE_TABLE_TODAY = `
+  create function realtime.no_table_today() returns trigger language plpgsql as $$
+  begin
+    raise exception 'no partition of relation "messages" found for row' using errcode = '23514';
+  end
+  $$;
+  create trigger no_table_today before insert on realtime.messages
+    for each row execute function realtime.no_table_today();
 `;
 
 // "Automatically expose new tables" ON: every table, function and sequence made later is granted to the API roles.
@@ -100,9 +155,11 @@ const MODELS = [
   { id: "on", label: 'Automatically expose new tables: ON (the older default)', setup: EXPOSE_NEW_OBJECTS },
 ];
 
-async function freshDatabase(model) {
+// `extraStub` changes what the project has before our SQL runs (a broken variant of the project, not of a migration).
+async function freshDatabase(model, extraStub = "") {
   const db = new PGlite();
   await db.exec(STUB);
+  if (extraStub) await db.exec(extraStub);
   if (model.setup) await db.exec(model.setup);
   return db;
 }
@@ -122,8 +179,13 @@ async function runSqlFile(db, file) {
   return results[results.length - 1].rows;
 }
 
+// A check says passed = null when it could not run (step 33: no message table today). Offline that never happens, so it counts as
+// a problem here like a failure.
 function printRows(rows) {
-  for (const row of rows) console.log(`  ${String(row.position).padStart(2)} ${row.passed ? "PASS" : "FAIL"}  ${row.check_name}`);
+  for (const row of rows) {
+    const verdict = row.passed === true ? "PASS" : row.passed === null ? "SKIP" : "FAIL";
+    console.log(`  ${String(row.position).padStart(2)} ${verdict}  ${row.check_name}`);
+  }
 }
 
 let failures = 0;
@@ -141,7 +203,7 @@ for (const model of MODELS) {
   ]) {
     for (let run = 1; run <= 2; run++) {
       const rows = await runSqlFile(db, file);
-      const failed = rows.filter((row) => !row.passed);
+      const failed = rows.filter((row) => row.passed !== true);
       console.log(`${label}, run ${run}: ${rows.length - failed.length} of ${rows.length} passed`);
       if (failed.length > 0) printRows(failed);
       failures += failed.length;
@@ -153,7 +215,8 @@ for (const model of MODELS) {
             (select count(*) from public.journal_entries)::int as entries,
             (select count(*) from public.daily_affirmations)::int as affirmations,
             (select count(*) from public.deleted_devotionals)::int as deleted_devotionals,
-            (select count(*) from storage.objects)::int as objects`,
+            (select count(*) from storage.objects)::int as objects,
+            (select count(*) from realtime.messages)::int as messages`,
   );
   console.log("rows left behind by the tests:", JSON.stringify(left.rows[0]));
   if (Object.values(left.rows[0]).some((count) => count !== 0)) failures += 1;
@@ -230,25 +293,55 @@ if (process.argv.includes("--negative")) {
     ["the app may read and list the exports bucket", "off", (sql) => sql + "\ncreate policy exports_select_own on storage.objects for select to authenticated using (bucket_id = 'exports' and (storage.foldername(name))[1] = (select public.requesting_user_id()));", [55], EXPORTS],
     ["the app may upload into the exports bucket", "off", (sql) => sql + "\ncreate policy exports_insert_own on storage.objects for insert to authenticated with check (bucket_id = 'exports' and (storage.foldername(name))[1] = (select public.requesting_user_id()));", [55], EXPORTS],
     ["visitors may read the exports bucket", "off", (sql) => sql + "\ncreate policy exports_select_anyone on storage.objects for select to anon using (bucket_id = 'exports');", [56], EXPORTS],
+    // Realtime messages and the run of reflection days (step 33, its own migration).
+    ["the entry trigger without its own net for a failed send", "off", (sql) => sql.replace(/ {2}begin\s+(perform realtime\.send\(\s+payload => jsonb_build_object\(\s+'id', r\.id[\s\S]*?private => true\);)\s+exception when others then\s+--[^\n]*\n\s+raise warning 'broadcast_entry_change: not sent';\s+end;/, "  $1"), [59], REALTIME],
+    ["a broadcast function runs as the caller", "off", (sql) => sql.replace("security definer", "security invoker"), [58], REALTIME],
+    ["a broadcast function without its empty search path", "off", (sql) => sql.replace(/(function public\.broadcast_affirmations_change\(\)\s+returns trigger\s+language plpgsql\s+security definer\s+)set search_path = ''\s+/, "$1"), [58], REALTIME],
+    ["the app may call a broadcast function", "off", (sql) => sql + "\ngrant execute on function public.broadcast_entry_change() to authenticated;", [58], REALTIME],
+    ["the entry message carries the transcript", "off", (sql) => sql.replace("'updated_at', r.updated_at)", "'updated_at', r.updated_at, 'transcript', r.transcript)"), [60], REALTIME],
+    ["the entry message goes to a shared topic", "off", (sql) => sql.replace("topic => 'user:' || r.user_id,", "topic => 'entries',"), [60], REALTIME],
+    ["the entry message is public", "off", (sql) => sql.replace(/(event => 'entry_changed',\s+topic => 'user:' \|\| r\.user_id,\s+)private => true/, "$1private => false"), [60], REALTIME],
+    ["the affirmations message carries the headline", "off", (sql) => sql.replace("jsonb_build_object('id', new.id, 'entry_id', new.entry_id)", "jsonb_build_object('id', new.id, 'entry_id', new.entry_id, 'headline', new.headline)"), [61], REALTIME],
+    ["anyone signed in may join any topic", "off", (sql) => sql.replace(/using \(\s+\(select realtime\.topic\(\)\) = 'user:' \|\| \(select public\.requesting_user_id\(\)\)\s+and realtime\.messages\.extension = 'broadcast'\s+\);/, "using (true);"), [62], REALTIME],
+    ["the app may send on its own topic", "off", (sql) => sql + "\ncreate policy user_broadcast_insert_own on realtime.messages for insert to authenticated with check ((select realtime.topic()) = 'user:' || (select public.requesting_user_id()));", [63], REALTIME],
+    ["the run counts every day with a reflection", "off", (sql) => sql.replace("(select count(*)::int from ranked where local_day = start_day - (n - 1))", "(select count(*)::int from days)"), [64], REALTIME],
+    ["the run counts crisis entries", "off", (sql) => sql.replace(/\s+and not e\.is_crisis/, ""), [64], REALTIME],
+    ["visitors may ask for the run of reflection days", "off", (sql) => sql + "\ngrant execute on function public.reflection_streak_days(text) to anon;", [64], REALTIME],
+    ["the entry trigger misses deletes", "off", (sql) => sql.replace("after insert or update or delete on public.journal_entries", "after insert or update on public.journal_entries"), [57, 60], REALTIME],
+    // Not a broken migration: the hosted project before the day's first Realtime connection. Nothing may fail, the checks that need
+    // a message table say skipped, and a change is still saved (59).
+    ["no message table today (nobody has connected yet)", "off", null, { skipped: [60, 61, 62], passed: [59, 63, 64] }, REALTIME, { stub: NO_MESSAGE_TABLE_TODAY }],
   ];
   console.log("\n===== broken variants (every one must be caught) =====");
-  for (const [label, modelId, transform, expected, file = V1] of variants) {
+  for (const [label, modelId, transform, expected, file = V1, options = {}] of variants) {
     const model = MODELS.find((item) => item.id === modelId);
     const original = read(`migrations/${file}`);
-    if (transform(original) === original) {
+    if (transform !== null && transform(original) === original) {
       console.log(`  ${label.padEnd(66)} RUNNER BUG: the variant changed nothing`);
       failures += 1;
       continue;
     }
-    const db = await freshDatabase(model);
+    const db = await freshDatabase(model, options.stub);
     let outcome;
     try {
-      await applyMigrations(db, { transforms: { [file]: transform } });
+      await applyMigrations(db, { transforms: transform === null ? {} : { [file]: transform } });
       const rows = await runSqlFile(db, "tests/rls_selftest.sql");
-      const failed = rows.filter((row) => !row.passed).map((row) => row.position);
-      const caught = expected.every((position) => failed.includes(position));
-      outcome = `${caught ? "CAUGHT" : "MISSED"}  failing: [${failed.join(", ")}], expected at least [${expected.join(", ")}]`;
-      if (!caught) failures += 1;
+      const failed = rows.filter((row) => row.passed === false).map((row) => row.position);
+      const skipped = rows.filter((row) => row.passed === null).map((row) => row.position);
+      const skippedText = skipped.length > 0 ? `, skipped: [${skipped.join(", ")}]` : "";
+      if (Array.isArray(expected)) {
+        const caught = expected.every((position) => failed.includes(position));
+        outcome = `${caught ? "CAUGHT" : "MISSED"}  failing: [${failed.join(", ")}]${skippedText}, expected at least [${expected.join(", ")}]`;
+        if (!caught) failures += 1;
+      } else {
+        const passed = rows.filter((row) => row.passed === true).map((row) => row.position);
+        const right =
+          failed.length === 0 &&
+          skipped.join() === expected.skipped.join() &&
+          expected.passed.every((position) => passed.includes(position));
+        outcome = `${right ? "AS EXPECTED" : "WRONG"}  failing: [${failed.join(", ")}]${skippedText}, expected none failing and [${expected.skipped.join(", ")}] skipped`;
+        if (!right) failures += 1;
+      }
     } catch (error) {
       outcome = `CAUGHT  (the SQL itself raised: ${String(error.message).split("\n")[0].slice(0, 90)})`;
     }

@@ -276,6 +276,7 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      reflection_streak_days: { Args: { tz: string }; Returns: number };
       requesting_user_id: { Args: never; Returns: string };
     };
     Enums: {

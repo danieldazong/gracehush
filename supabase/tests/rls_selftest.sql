@@ -5,6 +5,12 @@
 -- what must work and what must be refused, and it undoes each attempt, so nothing is left behind except its own test
 -- fixtures, which it deletes at the end. Every row of the result must say passed = true.
 -- It is safe to run again, also when the tables hold real accounts: it touches only ids that start with "selftest_".
+--
+-- Step 33: checks 60 to 62 write Realtime messages (and roll them back). Supabase makes the day's message table when a client
+-- connects to Realtime, so on a day no client has connected yet they cannot run: they say passed = null (skipped), with the
+-- reason in their name. Run the file again once the app has connected that day, and nothing is skipped. The test rows the file
+-- makes and deletes fire the broadcast triggers too: their messages go to self-test topics that no account can join, and the
+-- file deletes them at the end where the editor's role may (a hosted project keeps them until it drops the day's table).
 
 drop table if exists pg_temp.rls_results;
 create temp table rls_results (position integer, check_name text, passed boolean);
@@ -37,6 +43,156 @@ begin
 end
 $$;
 
+-- ---- Step 33: Realtime messages and the run of reflection days -------------------------------------------------------------
+
+-- Whether a Realtime message can be written today: 'ok', or why not. It writes nothing.
+create or replace function pg_temp.message_probe()
+returns text
+language plpgsql
+as $$
+begin
+  begin
+    insert into realtime.messages (id, topic, extension, event, payload, private)
+      values (gen_random_uuid(), 'selftest:probe', 'broadcast', 'selftest', '{}'::jsonb, true);
+    raise exception 'rollback' using errcode = 'P0001';
+  exception when others then
+    if sqlstate = 'P0001' and sqlerrm = 'rollback' then
+      return 'ok';
+    elsif sqlstate = '23514' then
+      return 'no message table today, run it again once the app has connected';
+    elsif sqlstate = '42501' then
+      return 'this role may not write realtime.messages';
+    end if;
+    return 'no probe message could be written, ' || sqlstate;
+  end;
+end
+$$;
+
+-- Runs one statement as a role, with the Clerk claims of a user, and answers the Realtime messages it wrote to the self-test
+-- topics, as JSON (topic, event, private flag, extension, the payload's keys and the payload), or the SQLSTATE of the error. It
+-- always rolls back, so no message is ever sent.
+create or replace function pg_temp.broadcasts_of(who text, claims text, stmt text)
+returns text
+language plpgsql
+as $$
+declare
+  seen uuid[];
+  made jsonb;
+begin
+  begin
+    select coalesce(array_agg(m.id), '{}') into seen from realtime.messages m where m.topic like 'user:selftest\_%';
+    execute format('set local role %I', who);
+    perform set_config('request.jwt.claims', claims, true);
+    execute stmt;
+    reset role;
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'topic', m.topic, 'event', m.event, 'private', m.private, 'extension', m.extension,
+             'keys', (select jsonb_agg(k order by k) from jsonb_object_keys(m.payload) as k),
+             'payload', m.payload)), '[]'::jsonb)
+      into made
+      from realtime.messages m
+     where m.topic like 'user:selftest\_%' and not (m.id = any (seen));
+    raise exception 'rollback:%', made using errcode = 'P0001';
+  exception when others then
+    if sqlstate = 'P0001' and sqlerrm like 'rollback:%' then
+      return substr(sqlerrm, 10);
+    end if;
+    return sqlstate;
+  end;
+end
+$$;
+
+-- True when `outcome` (from broadcasts_of) is exactly one private broadcast message on that topic, with that event, exactly
+-- those payload keys, and a payload that holds `expected`.
+create or replace function pg_temp.one_message(outcome text, topic_name text, event_name text, keys jsonb, expected jsonb)
+returns boolean
+language plpgsql
+as $$
+declare
+  made jsonb;
+begin
+  if outcome is null or left(outcome, 1) <> '[' then
+    return false;
+  end if;
+  made := outcome::jsonb;
+  return coalesce(
+    jsonb_array_length(made) = 1
+    and made -> 0 ->> 'topic' = topic_name
+    and made -> 0 ->> 'event' = event_name
+    and made -> 0 ->> 'extension' = 'broadcast'
+    and (made -> 0 ->> 'private')::boolean
+    and made -> 0 -> 'keys' = keys
+    and made -> 0 -> 'payload' @> expected, false);
+end
+$$;
+
+-- Realtime decides whether a user may join a private channel the way this does: it writes a broadcast and a presence message on
+-- the channel's topic, then reads them back as the user, with realtime.topic set to that topic. Answers the extensions the role
+-- could read ('broadcast', 'presence', both or none), or the SQLSTATE of the error. It always rolls back.
+create or replace function pg_temp.reads_as(who text, claims text, topic_name text)
+returns text
+language plpgsql
+as $$
+declare
+  b uuid := gen_random_uuid();
+  p uuid := gen_random_uuid();
+  seen text;
+begin
+  begin
+    insert into realtime.messages (id, topic, extension, event, payload, private)
+      values (b, topic_name, 'broadcast', 'selftest', '{}'::jsonb, true),
+             (p, topic_name, 'presence', 'selftest', '{}'::jsonb, true);
+    execute format('set local role %I', who);
+    perform set_config('request.jwt.claims', claims, true);
+    perform set_config('realtime.topic', topic_name, true);
+    select coalesce(string_agg(m.extension, ',' order by m.extension), '') into seen
+      from realtime.messages m where m.id in (b, p);
+    raise exception 'rollback:%', seen using errcode = 'P0001';
+  exception when others then
+    if sqlstate = 'P0001' and sqlerrm like 'rollback:%' then
+      return substr(sqlerrm, 10);
+    end if;
+    return sqlstate;
+  end;
+end
+$$;
+
+-- Runs the setup statements as the table owner, then one query as a role with a user's claims, and answers 'ok:<its value>'
+-- or the SQLSTATE of the error. It always rolls back.
+create or replace function pg_temp.value_as(who text, claims text, setup text[], query text)
+returns text
+language plpgsql
+as $$
+declare
+  stmt text;
+  v text;
+begin
+  begin
+    foreach stmt in array coalesce(setup, '{}'::text[]) loop
+      execute stmt;
+    end loop;
+    execute format('set local role %I', who);
+    perform set_config('request.jwt.claims', claims, true);
+    execute query into v;
+    raise exception 'rollback:%', coalesce(v, 'null') using errcode = 'P0001';
+  exception when others then
+    if sqlstate = 'P0001' and sqlerrm like 'rollback:%' then
+      return 'ok:' || substr(sqlerrm, 10);
+    end if;
+    return sqlstate;
+  end;
+end
+$$;
+
+-- Noon on a day, `days_ago` days before today in the zone.
+create or replace function pg_temp.noon(tz text, days_ago integer)
+returns timestamptz
+language sql
+stable
+as $$
+  select (((now() at time zone tz)::date - days_ago) + time '12:00') at time zone tz
+$$;
+
 do $$
 declare
   claims_a constant text := '{"sub":"selftest_a","role":"authenticated"}';
@@ -50,6 +206,20 @@ declare
   moved boolean;
   cascade_ok boolean := false;
   record_ok boolean := false;
+  -- Step 33.
+  claims_s constant text := '{"sub":"selftest_s","role":"authenticated"}';
+  streak_zone constant text := 'Pacific/Kiritimati';
+  streak constant text := $q$select public.reflection_streak_days('Pacific/Kiritimati')$q$;
+  new_s constant text := $q$insert into public.users_profile (id) values ('selftest_s')$q$;
+  entries_s constant text :=
+    'insert into public.journal_entries (user_id, input_type, processing_status, is_crisis, created_at) values ';
+  probe text;
+  m1 text;
+  m2 text;
+  m3 text;
+  static_ok boolean;
+  live boolean;
+  note text;
 begin
   -- Fixtures, made as the table owner (which bypasses the app's grants and row level security): two users, one entry
   -- and one affirmation each.
@@ -492,8 +662,168 @@ begin
     and pg_temp.try_as('anon', no_claims, null,
       $q$insert into storage.objects (bucket_id, name) values ('exports', 'selftest_a/one.zip')$q$) = '42501');
 
+  -- ===== Realtime messages (step 33) =====
+  -- A change to an entry or an affirmation sends a short message to its owner's private topic, user:{userId}. Only the owner may
+  -- receive it, and nobody may send on these topics from the app.
+  insert into rls_results values (57, 'the broadcast triggers fire after each row: entries on insert, update and delete, affirmations on insert and update',
+    exists (select 1 from pg_trigger t
+             where t.tgrelid = 'public.journal_entries'::regclass and t.tgname = 'journal_entries_broadcast'
+               and not t.tgisinternal and t.tgenabled <> 'D'
+               and t.tgfoid = to_regprocedure('public.broadcast_entry_change()')
+               and t.tgtype::int & 1 = 1 and t.tgtype::int & 2 = 0 and t.tgtype::int & 64 = 0
+               and t.tgtype::int & 4 = 4 and t.tgtype::int & 16 = 16 and t.tgtype::int & 8 = 8)
+    and exists (select 1 from pg_trigger t
+             where t.tgrelid = 'public.daily_affirmations'::regclass and t.tgname = 'daily_affirmations_broadcast'
+               and not t.tgisinternal and t.tgenabled <> 'D'
+               and t.tgfoid = to_regprocedure('public.broadcast_affirmations_change()')
+               and t.tgtype::int & 1 = 1 and t.tgtype::int & 2 = 0 and t.tgtype::int & 64 = 0
+               and t.tgtype::int & 4 = 4 and t.tgtype::int & 16 = 16 and t.tgtype::int & 8 = 0));
+
+  insert into rls_results values (58, 'the broadcast functions run as their owner with an empty search path, and the app cannot call them',
+    (select count(*) = 2
+            and bool_and(p.prosecdef and coalesce(p.proconfig, '{}') @> array['search_path=""']
+                         and not has_function_privilege('public', p.oid, 'execute')
+                         and not has_function_privilege('anon', p.oid, 'execute')
+                         and not has_function_privilege('authenticated', p.oid, 'execute'))
+       from pg_proc p
+      where p.oid in (to_regprocedure('public.broadcast_entry_change()'),
+                      to_regprocedure('public.broadcast_affirmations_change()'))));
+
+  -- Offline the stand-in realtime.send fails on purpose while test.realtime_send_fails is on (a hosted one ignores the setting).
+  insert into rls_results values (59, 'a change is saved even when its Realtime message cannot be sent',
+    pg_temp.try_as('authenticated', claims_a,
+      $q$select set_config('test.realtime_send_fails', 'on', true)$q$,
+      $q$update public.journal_entries set is_active_prayer = true
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$) = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a,
+      $q$select set_config('test.realtime_send_fails', 'on', true)$q$,
+      $q$update public.daily_affirmations set is_favorite = true
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = 'ok:1');
+
+  probe := pg_temp.message_probe();
+  note := case when probe = 'ok' then '' else ' (skipped: ' || probe || ')' end;
+
+  -- An insert, an update by the owner and a delete each send one message, with the entry's id, the operation, its status and its
+  -- time, and nothing else. The delete removes the entry's affirmation too, which sends nothing.
+  if probe = 'ok' then
+    m1 := pg_temp.broadcasts_of('service_role', no_claims,
+      $q$insert into public.journal_entries (id, user_id, input_type, processing_status)
+         values ('a0000000-0000-4000-8000-0000000000e1', 'selftest_a', 'text', 'processing')$q$);
+    m2 := pg_temp.broadcasts_of('authenticated', claims_a,
+      $q$update public.journal_entries set is_active_prayer = true
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$);
+    m3 := pg_temp.broadcasts_of('service_role', no_claims,
+      $q$delete from public.journal_entries where id = 'a0000000-0000-4000-8000-000000000001'$q$);
+    all_ok := pg_temp.one_message(m1, 'user:selftest_a', 'entry_changed', '["id", "op", "status", "updated_at"]',
+                '{"id": "a0000000-0000-4000-8000-0000000000e1", "op": "INSERT", "status": "processing"}')
+      and pg_temp.one_message(m2, 'user:selftest_a', 'entry_changed', '["id", "op", "status", "updated_at"]',
+                '{"id": "a0000000-0000-4000-8000-000000000001", "op": "UPDATE", "status": "ready"}')
+      and pg_temp.one_message(m3, 'user:selftest_a', 'entry_changed', '["id", "op", "status", "updated_at"]',
+                '{"id": "a0000000-0000-4000-8000-000000000001", "op": "DELETE", "status": "ready"}');
+  end if;
+  insert into rls_results values (60, 'a changed entry sends its owner one private message with ids, the operation, a status and a time only' || note,
+    case when probe = 'ok' then all_ok end);
+
+  -- A new affirmation and a changed one each send one message with the affirmation's id and its entry's id, and nothing else.
+  if probe = 'ok' then
+    m1 := pg_temp.broadcasts_of('authenticated', claims_a,
+      $q$update public.daily_affirmations set is_favorite = true
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$);
+    m2 := pg_temp.broadcasts_of('service_role', no_claims,
+      $q$insert into public.daily_affirmations (id, user_id, entry_id, time_slot, headline, affirmation_text)
+         values ('a0000000-0000-4000-8000-0000000000f2', 'selftest_a', 'a0000000-0000-4000-8000-000000000001',
+                 'evening', 'h', 't')$q$);
+    all_ok := pg_temp.one_message(m1, 'user:selftest_a', 'affirmations_changed', '["entry_id", "id"]',
+                '{"id": "a0000000-0000-4000-8000-0000000000f1", "entry_id": "a0000000-0000-4000-8000-000000000001"}')
+      and pg_temp.one_message(m2, 'user:selftest_a', 'affirmations_changed', '["entry_id", "id"]',
+                '{"id": "a0000000-0000-4000-8000-0000000000f2", "entry_id": "a0000000-0000-4000-8000-000000000001"}');
+  end if;
+  insert into rls_results values (61, 'a new or changed affirmation sends its owner one private message with ids only' || note,
+    case when probe = 'ok' then all_ok end);
+
+  -- One select policy for signed-in users on realtime.messages, and it lets a user join only their own topic, for broadcast
+  -- messages only. The live part reads as Realtime does when a private channel is joined.
+  select count(*) into n1 from pg_policies
+   where schemaname = 'realtime' and tablename = 'messages' and cmd = 'SELECT' and 'authenticated' = any (roles);
+  static_ok := n1 = 1 and exists (
+    select 1 from pg_policies
+     where schemaname = 'realtime' and tablename = 'messages' and policyname = 'user_broadcast_select_own'
+       and cmd = 'SELECT' and roles = array['authenticated']::name[]
+       and qual like '%realtime.topic()%' and qual like '%requesting_user_id()%' and qual like '%extension%');
+  if not static_ok then
+    live := false;
+    note := '';
+  elsif probe <> 'ok' then
+    live := null;
+    note := ' (live part skipped: ' || probe || ')';
+  elsif not has_table_privilege('authenticated', 'realtime.messages', 'select') then
+    live := null;
+    note := ' (live part skipped: signed-in users may not read realtime.messages)';
+  else
+    live := pg_temp.reads_as('authenticated', claims_a, 'user:selftest_a') = 'broadcast'
+      and pg_temp.reads_as('authenticated', claims_a, 'user:selftest_b') = ''
+      and pg_temp.reads_as('anon', no_claims, 'user:selftest_a') in ('', '42501');
+    note := '';
+  end if;
+  insert into rls_results values (62, 'only the owner may join their own topic, and only for broadcast messages' || note, live);
+
+  insert into rls_results values (63, 'no policy lets the app or a visitor send, change or delete a Realtime message',
+    not exists (select 1 from pg_policies
+                 where schemaname = 'realtime' and tablename = 'messages'
+                   and cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+                   and roles && array['authenticated', 'anon', 'public']::name[])
+    and (probe <> 'ok' or pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into realtime.messages (id, topic, extension, event, payload, private)
+         values (gen_random_uuid(), 'user:selftest_a', 'broadcast', 'selftest', '{}'::jsonb, true)$q$) = '42501'));
+
+  -- ===== the run of reflection days (step 33) =====
+  -- A user of their own (selftest_s) with entries at noon on given days in a fixed zone, made as the table owner; then the
+  -- function as that user. Kiritimati is UTC+14, so a count made in UTC would often land on another day.
+  insert into rls_results values (64, 'the run of reflection days counts the caller''s own finished, non-crisis days up to today or yesterday',
+    -- today, yesterday and three days ago: 2 (another user's entry two days ago changes nothing)
+    pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
+      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 1)),
+         ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 3)), ('selftest_b', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      streak_zone)], streak) = 'ok:2'
+    -- a day with only a crisis entry breaks the run; a crisis entry next to a reflection does not
+    and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
+      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'ready', true, pg_temp.noon(%1$L, 0)),
+         ('selftest_s', 'text', 'ready', true, pg_temp.noon(%1$L, 1)), ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      streak_zone)], streak) = 'ok:1'
+    -- a day with only a failed, or only a processing, entry breaks the run
+    and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
+      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'failed', false, pg_temp.noon(%1$L, 1)),
+         ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      streak_zone)], streak) = 'ok:1'
+    and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
+      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'processing', false, pg_temp.noon(%1$L, 1)),
+         ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      streak_zone)], streak) = 'ok:1'
+    -- the run may end yesterday; with nothing today or yesterday it is 0
+    and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
+      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 1)), ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      streak_zone)], streak) = 'ok:2'
+    and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
+      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2)), ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 3))$q$,
+      streak_zone)], streak) = 'ok:0'
+    -- an unknown zone is refused (22023), also with no entries
+    and pg_temp.value_as('authenticated', claims_s, array[new_s],
+      $q$select public.reflection_streak_days('Not/AZone')$q$) = '22023'
+    -- only a signed-in user may call it (a visitor's call would be refused by the table too, so the grant itself is read)
+    and has_function_privilege('authenticated', 'public.reflection_streak_days(text)', 'execute')
+    and not has_function_privilege('anon', 'public.reflection_streak_days(text)', 'execute')
+    and not has_function_privilege('public', 'public.reflection_streak_days(text)', 'execute')
+    and pg_temp.value_as('anon', no_claims, null, $q$select public.reflection_streak_days('UTC')$q$) = '42501');
+
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
   delete from public.users_profile where id like 'selftest\_%';
+  -- The fixtures fired the broadcast triggers (step 33). Their messages went to self-test topics that no account can join; they go
+  -- too where this role may delete them (a hosted project's editor may not: they stay until Supabase drops the day's table).
+  begin
+    delete from realtime.messages where topic like 'user:selftest\_%';
+  exception when others then
+    null;
+  end;
 end $$;
 
 select position, check_name, passed from rls_results order by position;
