@@ -70,7 +70,10 @@ export const copy = {
       `${name}, tab, ${position} of ${total}`,
   },
   header: {
-    eyebrow: "Gracehush",
+    // The wordmark is two spans, so the header colours Grace and Hush apart; a screen reader hears one name
+    // and the screen it is on ("GraceHush, Journal"). The screen name itself is no longer drawn.
+    wordmark: { grace: "Grace", hush: "Hush" },
+    a11y: (screen: string) => `GraceHush, ${screen}`,
     openProfile: "Open profile",
   },
   dock: {
