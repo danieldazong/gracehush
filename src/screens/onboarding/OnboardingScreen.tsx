@@ -215,7 +215,7 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
                   style={styles.hero}
                 >
                   <View className="size-20 items-center justify-center rounded-card border border-white/20 bg-white/15 p-4">
-                    <Image source={images.logoMark} contentFit="contain" style={styles.logo} />
+                    <Image source={images.logoMarkLight} contentFit="contain" style={styles.logo} />
                   </View>
                   <Text className="mt-4 font-fraunces text-[30px] leading-[36px] text-white">
                     {welcome.wordmark}

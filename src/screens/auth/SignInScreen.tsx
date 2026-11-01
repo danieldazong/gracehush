@@ -127,7 +127,6 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
               <Image
                 source={images.logoMark}
                 contentFit="contain"
-                tintColor={colors.rosewood}
                 style={styles.logoMark}
               />
             </View>

@@ -99,7 +99,7 @@ function Artwork() {
         style={styles.artworkFill}
       >
         <View className="size-24 items-center justify-center rounded-card border border-white/20 bg-white/15">
-          <Image source={images.logoMark} contentFit="contain" style={styles.logo} />
+          <Image source={images.logoMarkLight} contentFit="contain" style={styles.logo} />
         </View>
       </LinearGradient>
     </View>

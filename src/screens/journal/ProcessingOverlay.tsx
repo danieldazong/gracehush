@@ -186,9 +186,8 @@ export function ProcessingOverlay({ entryKind, stage, failure, onClose }: Proces
                 style={[styles.mark, shadows.orb]}
               >
                 <Image
-                  source={images.logoMark}
+                  source={images.logoMarkLight}
                   contentFit="contain"
-                  tintColor="white"
                   style={styles.logo}
                 />
               </View>

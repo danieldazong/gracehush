@@ -177,7 +177,6 @@ function PaywallReady({
               <Image
                 source={images.logoMark}
                 contentFit="contain"
-                tintColor={colors.plum}
                 style={styles.logo}
               />
             </View>

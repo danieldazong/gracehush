@@ -126,7 +126,6 @@ function EmptyState({ onRecord, style, onLayout }: ListEmptyProps & { onRecord: 
         <Image
           source={images.logoMark}
           contentFit="contain"
-          tintColor={colors.rosewood}
           style={styles.emptyMark}
         />
       </View>

@@ -6,7 +6,6 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Icon } from "@/components/Icon";
 import { copy } from "@/constants/copy";
 import { images } from "@/constants/images";
-import { colors } from "@/constants/theme";
 import type { MainTabScreenProps } from "@/navigation/types";
 
 const icons = {
@@ -37,7 +36,6 @@ export function ScreenHeader({ title, avatar = "link" }: ScreenHeaderProps) {
           <Image
             source={images.logoMark}
             contentFit="contain"
-            tintColor={colors.plum}
             style={styles.emblem}
           />
           <View>
