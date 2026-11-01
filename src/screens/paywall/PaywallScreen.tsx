@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import type { SymbolViewProps } from "expo-symbols";
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import {
   Platform,
   Pressable,
@@ -25,6 +25,7 @@ import { useAnnounce } from "@/hooks/useAnnounce";
 import { usePaywall, type PaywallNotice, type PaywallState } from "@/hooks/usePaywall";
 import type { RootStackScreenProps } from "@/navigation/types";
 import { MessageView } from "@/screens/journal/ReflectionStateViews";
+import { track } from "@/services/analytics";
 import { openLegalPage, openManageSubscription } from "@/services/externalLinks";
 import { formatWeekday } from "@/utils/format";
 import { activeIntroOffer, annualSavingsPercent, pricePerMonthLabel } from "@/utils/pricing";
@@ -254,7 +255,14 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
   const { height, fontScale } = useWindowDimensions();
   const [linkNotice, setLinkNotice] = useState<LinkNotice | null>(null);
   useAnnounce(state.status === "done" ? paywall.done.title : null);
-  // TODO(34): paywall_viewed { source }
+  // Sent once per screen, when the plans (or "Plans aren’t available") first show: never for the crisis redirect, which
+  // draws nothing of the paywall, nor for a member (step 34).
+  const viewed = useRef(false);
+  useEffect(() => {
+    if (viewed.current || (state.status !== "ready" && state.status !== "unavailable")) return;
+    viewed.current = true;
+    track("paywall_viewed", { source });
+  }, [state.status, source]);
 
   // The one way out: the X, "Maybe later", Continue and Close. The Paywall opened from the limit replaced New Entry,
   // so it lands on Journal. popTo, never navigate("MainTabs"): that would push a second copy of the tabs.
@@ -340,7 +348,7 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
       break;
     case "done":
       // A reflection the free limit held back goes by itself: services/purchases.ts calls resumeAfterUpgrade() (step 24)
-      // TODO(34): purchase_completed { plan, trial } or restore_completed { found: true }
+      // The purchase or the restore was sent to analytics by usePaywall (step 34).
       body = (
         <MessageView
           title={paywall.done.title}

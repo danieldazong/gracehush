@@ -20,17 +20,21 @@ import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { openAndroidTimeDialog, ReminderTimePicker } from "@/components/ReminderTimePicker";
 import { copy } from "@/constants/copy";
+import { analyticsEnv } from "@/constants/env";
 import { images } from "@/constants/images";
 import { colors, gradients, radii, shadows } from "@/constants/theme";
 import type { RootStackParamList } from "@/navigation/types";
+import { track } from "@/services/analytics";
 import { getNotificationPermission, requestNotificationPermission } from "@/services/notifications";
 import { getMicPermission, requestMicPermission } from "@/services/recorder";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { formatTime12 } from "@/utils/format";
 
-const { stepCounter, stepLabel, welcome, rhythm, permissions } = copy.onboarding;
+const { stepCounter, stepLabel, welcome, rhythm, permissions, analytics: consent } = copy.onboarding;
 
-const STEP_COUNT = 3;
+// The consent step (step 34) exists only when a PostHog token is set: without one there is nothing to agree to.
+const STEP_COUNT = analyticsEnv.status === "ok" ? 4 : 3;
+const CONSENT_STEP = 3;
 // Fade out, swap the step, fade in: about 200ms in total.
 const FADE_MS = 100;
 
@@ -44,6 +48,7 @@ const icons = {
   microphone: { android: "mic", ios: "mic" },
   notifications: { android: "notifications", ios: "bell" },
   privacy: { android: "lock", ios: "lock" },
+  analytics: { android: "bar_chart", ios: "chart.bar" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 const slots = [
@@ -54,10 +59,46 @@ const slots = [
 
 type SlotKey = (typeof slots)[number]["key"];
 
-const permissionCards = [
+type StepCard = { icon: SymbolViewProps["name"]; title: string; body: string };
+
+const permissionCards: readonly StepCard[] = [
   { icon: icons.microphone, ...permissions.microphone },
   { icon: icons.notifications, ...permissions.notifications },
 ];
+
+const consentCards: readonly StepCard[] = [
+  { icon: icons.analytics, title: consent.sharedTitle, body: consent.sharedBody },
+  { icon: icons.privacy, title: consent.neverTitle, body: consent.neverBody },
+];
+
+// The Permissions and consent steps' cards: an icon in a blush circle, a title and a line under it.
+function StepCards({ cards }: { cards: readonly StepCard[] }) {
+  return (
+    <View className="mt-6 gap-3.5">
+      {cards.map(({ icon, title, body }) => (
+        <View key={title} className="card flex-row items-start gap-4 p-5" style={shadows.card}>
+          <View className="size-12 items-center justify-center rounded-full bg-blush">
+            <Icon name={icon} size={24} color={colors.plum} />
+          </View>
+          <View className="flex-1">
+            <Text className="text-label-lg text-ink">{title}</Text>
+            <Text className="mt-1 text-body text-mauve">{body}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// The blush line with a lock under those cards.
+function PrivacyLine({ text }: { text: string }) {
+  return (
+    <View className="mt-5 flex-row items-center justify-center gap-2 rounded-input bg-blush px-3 py-2">
+      <Icon name={icons.privacy} size={14} color={colors.plum} />
+      <Text className="shrink text-center text-body-sm text-ink">{text}</Text>
+    </View>
+  );
+}
 
 type OnboardingScreenProps = NativeStackScreenProps<RootStackParamList, "Onboarding">;
 
@@ -67,6 +108,7 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
   const setReminder = useOnboardingStore((state) => state.setReminder);
   const markPermissionsPrompted = useOnboardingStore((state) => state.markPermissionsPrompted);
   const completeOnboarding = useOnboardingStore((state) => state.completeOnboarding);
+  const setAnalyticsConsent = useOnboardingStore((state) => state.setAnalyticsConsent);
   // The ref ignores a second tap before the re-render that disables the buttons.
   const [isRequesting, setIsRequesting] = useState(false);
   const isRequestingRef = useRef(false);
@@ -133,13 +175,30 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
       isRequestingRef.current = false;
       setIsRequesting(false);
     }
-    // The navigator removes this screen as soon as onboarding is complete, so nothing touches state after it.
-    completeOnboarding();
+    afterPermissions();
   }
 
   function maybeLater() {
     if (isRequestingRef.current) {
       return;
+    }
+    afterPermissions();
+  }
+
+  // Permissions is the last step unless the consent step follows it. The navigator removes this screen as soon as
+  // onboarding is complete, so nothing touches state after completeOnboarding().
+  function afterPermissions() {
+    if (STEP_COUNT > CONSENT_STEP) goToStep(CONSENT_STEP);
+    else completeOnboarding();
+  }
+
+  // The consent step's two equal choices. Either one finishes onboarding; only a yes sends the first event.
+  function chooseAnalytics(choice: "granted" | "declined") {
+    setAnalyticsConsent(choice);
+    if (choice === "granted") {
+      track("onboarding_completed", {
+        permissions_prompted: useOnboardingStore.getState().permissionsPromptedAt !== null,
+      });
     }
     completeOnboarding();
   }
@@ -176,7 +235,8 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
       },
     },
   ];
-  const footer = footers[step];
+  // The consent step has its own footer (two buttons that look the same); the other steps take theirs from the list.
+  const footer = footers[Math.min(step, CONSENT_STEP - 1)];
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -278,48 +338,48 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
                   <Text className="text-headline-lg text-ink">{permissions.title}</Text>
                   <Text className="text-body text-mauve">{permissions.subtitle}</Text>
                 </View>
-                <View className="mt-6 gap-3.5">
-                  {permissionCards.map(({ icon, title, body }) => (
-                    <View
-                      key={title}
-                      className="card flex-row items-start gap-4 p-5"
-                      style={shadows.card}
-                    >
-                      <View className="size-12 items-center justify-center rounded-full bg-blush">
-                        <Icon name={icon} size={24} color={colors.plum} />
-                      </View>
-                      <View className="flex-1">
-                        <Text className="text-label-lg text-ink">{title}</Text>
-                        <Text className="mt-1 text-body text-mauve">{body}</Text>
-                      </View>
-                    </View>
-                  ))}
+                <StepCards cards={permissionCards} />
+                <PrivacyLine text={permissions.privacy} />
+              </>
+            )}
+
+            {step === CONSENT_STEP && (
+              <>
+                <View className="gap-2">
+                  <Text className="eyebrow">{consent.eyebrow}</Text>
+                  <Text className="text-headline-lg text-ink">{consent.title}</Text>
+                  <Text className="text-body text-mauve">{consent.subtitle}</Text>
                 </View>
-                <View className="mt-5 flex-row items-center justify-center gap-2 rounded-input bg-blush px-3 py-2">
-                  <Icon name={icons.privacy} size={14} color={colors.plum} />
-                  <Text className="shrink text-center text-body-sm text-ink">{permissions.privacy}</Text>
-                </View>
+                <StepCards cards={consentCards} />
+                <PrivacyLine text={consent.note} />
               </>
             )}
           </ScrollView>
 
-          <View className={step === 0 ? "pb-2 pt-8" : "pb-2 pt-6"}>
-            <PrimaryButton
-              label={footer.label}
-              iconRight={footer.icon}
-              onPress={footer.onPress}
-              loading={isRequesting}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={footer.link.label}
-              className="mt-3 min-h-11 items-center justify-center"
-              disabled={isRequesting}
-              onPress={footer.link.onPress}
-            >
-              <Text className={footer.link.className}>{footer.link.label}</Text>
-            </Pressable>
-          </View>
+          {step === CONSENT_STEP ? (
+            <View className="gap-3 pb-2 pt-6">
+              <PrimaryButton label={consent.share} tone="ghost" onPress={() => chooseAnalytics("granted")} />
+              <PrimaryButton label={consent.notNow} tone="ghost" onPress={() => chooseAnalytics("declined")} />
+            </View>
+          ) : (
+            <View className={step === 0 ? "pb-2 pt-8" : "pb-2 pt-6"}>
+              <PrimaryButton
+                label={footer.label}
+                iconRight={footer.icon}
+                onPress={footer.onPress}
+                loading={isRequesting}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={footer.link.label}
+                className="mt-3 min-h-11 items-center justify-center"
+                disabled={isRequesting}
+                onPress={footer.link.onPress}
+              >
+                <Text className={footer.link.className}>{footer.link.label}</Text>
+              </Pressable>
+            </View>
+          )}
         </Animated.View>
       </View>
 

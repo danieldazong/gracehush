@@ -45,6 +45,7 @@ import { isDatabaseOpen } from "@/db/database";
 import * as outbox from "@/db/outbox";
 import type { MainTabScreenProps, RootStackParamList } from "@/navigation/types";
 import { signOutCleanup } from "@/services/account";
+import { flushAnalytics, getAnalyticsSummary, type AnalyticsSummary } from "@/services/analytics";
 import {
   getAffirmationScheduleSummary,
   rescheduleAffirmationsNow,
@@ -280,6 +281,13 @@ type DevButtonProps = {
   disabled?: boolean;
 };
 
+// Step 34: the analytics line of the developer panel. Words, counts and the id's last 8 characters, never a value.
+function analyticsLine(summary: AnalyticsSummary): string {
+  const optedOut = summary.optedOut === null ? "-" : summary.optedOut ? "yes" : "no";
+  const id = summary.idTail === null ? "-" : `…${summary.idTail}`;
+  return `analytics: env ${summary.env} | consent ${summary.consent} | client ${summary.client ? "yes" : "no"} | opted out ${optedOut} | queued ${summary.queued} | id ${id}`;
+}
+
 function DevButton({
   label,
   accessibilityLabel = label,
@@ -357,6 +365,8 @@ function DevToolsContent() {
   const [outboxText, setOutboxText] = useState("outbox: …");
   const [pendingText, setPendingText] = useState("Pending changes: …");
   const realtime = useRealtimeStore();
+  // Read when the panel loads and after each of its buttons: no live subscription.
+  const [analytics, setAnalytics] = useState<AnalyticsSummary>(() => getAnalyticsSummary());
   const [preparingNote, setPreparingNote] = useState<string | null>(null);
   // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
   const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
@@ -697,6 +707,31 @@ function DevToolsContent() {
             {preparingNote !== null ? (
               <Text className="text-center text-body-sm text-mauve">{preparingNote}</Text>
             ) : null}
+          </View>
+          {/* Step 34: product analytics. Event names and property keys only. */}
+          <View className="items-center gap-2">
+            <Text className="text-center text-body-sm text-mauve">Analytics (dev)</Text>
+            <Text className="text-center text-body-sm text-ink">{analyticsLine(analytics)}</Text>
+            {analytics.recent.map((line, index) => (
+              <Text key={`${index}-${line}`} className="text-center text-body-sm text-mauve">
+                {line}
+              </Text>
+            ))}
+            <View className="flex-row flex-wrap justify-center gap-2">
+              <DevButton
+                label="Flush (dev)"
+                onPress={() => {
+                  void flushAnalytics().finally(() => setAnalytics(getAnalyticsSummary()));
+                }}
+              />
+              <DevButton
+                label="Reset consent (dev)"
+                onPress={() => {
+                  useOnboardingStore.setState({ analyticsConsent: "unset" });
+                  setAnalytics(getAnalyticsSummary());
+                }}
+              />
+            </View>
           </View>
           <View className="items-center gap-2">
             <DevButton

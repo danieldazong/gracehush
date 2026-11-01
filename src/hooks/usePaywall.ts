@@ -2,6 +2,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getEntry, getUsage } from "@/data/journalRepository";
+import { track } from "@/services/analytics";
 import { haptics } from "@/services/haptics";
 import {
   getCurrentOffering,
@@ -87,14 +88,12 @@ async function loadPaywall(entryId: string | undefined): Promise<Loaded> {
 function noticeForPurchase(code: PurchaseErrorCode): PaywallNotice | null {
   switch (code) {
     case "CANCELLED":
-      // TODO(34): purchase_failed { code: 'CANCELLED' }
       return null;
     case "PENDING":
       return "pending";
     case "NOT_ALLOWED":
       return "notAllowed";
     default:
-      // TODO(34): purchase_failed { code }
       return "error";
   }
 }
@@ -158,6 +157,7 @@ export function usePaywall(entryId: string | undefined): PaywallState {
       ? null
       : (offering.packages.find((pkg) => pkg.id === picked) ?? defaultPackage(offering.packages));
   const selectedId = selected?.id ?? null;
+  const selectedKind = selected?.kind;
 
   const select = useCallback(
     (packageId: string) => {
@@ -174,6 +174,10 @@ export function usePaywall(entryId: string | undefined): PaywallState {
     setPurchasing(true);
     try {
       const result = await purchasePackage(selectedId);
+      // Sent before the screen check: a purchase that finishes after the screen closed still happened (step 34). A cancel
+      // is CANCELLED: behaviour, not an error.
+      if (!result.ok) track("purchase_failed", { code: result.code });
+      else if (selectedKind !== undefined) track("purchase_completed", { plan: selectedKind, trial: result.tier === "trial" });
       if (!mounted.current) return;
       if (result.ok) {
         setDone(result.tier);
@@ -181,7 +185,9 @@ export function usePaywall(entryId: string | undefined): PaywallState {
         // The store says this account already has it: restore it instead of buying twice.
         setPurchasing(false);
         setRestoring(true);
-        const restored = restoreOutcome(await restorePurchases());
+        const answer = await restorePurchases();
+        if (answer.ok) track("restore_completed", { found: answer.restored });
+        const restored = restoreOutcome(answer);
         if (!mounted.current) return;
         if ("tier" in restored) setDone(restored.tier);
         else setNotice(restored.notice);
@@ -189,6 +195,7 @@ export function usePaywall(entryId: string | undefined): PaywallState {
         setNotice(noticeForPurchase(result.code));
       }
     } catch {
+      track("purchase_failed", { code: "UNKNOWN" });
       if (mounted.current) setNotice("error");
     } finally {
       running.current = false;
@@ -197,7 +204,7 @@ export function usePaywall(entryId: string | undefined): PaywallState {
         setRestoring(false);
       }
     }
-  }, [selectedId]);
+  }, [selectedId, selectedKind]);
 
   const restore = useCallback(async () => {
     if (running.current) return;
@@ -205,7 +212,9 @@ export function usePaywall(entryId: string | undefined): PaywallState {
     setNotice(null);
     setRestoring(true);
     try {
-      const restored = restoreOutcome(await restorePurchases());
+      const answer = await restorePurchases();
+      if (answer.ok) track("restore_completed", { found: answer.restored });
+      const restored = restoreOutcome(answer);
       if (!mounted.current) return;
       if ("tier" in restored) setDone(restored.tier);
       else setNotice(restored.notice);

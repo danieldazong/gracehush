@@ -1505,6 +1505,66 @@ async function journalChecks() {
     handle.unmount();
   });
 
+  await test("analytics: the heart sends affirmation_favorited with its new state only after a save that succeeded", async (w) => {
+    seedServer(w, 2);
+    const handle = await render(w);
+    let state = await until(handle, (s) => s.status === "ready" && s.affirmations.length === 3, "the affirmations");
+    const target = state.affirmations[0];
+    assert.deepEqual(w.analyticsCalls, [], "loading Journal sends nothing");
+    state.toggleFavorite(target);
+    await until(handle, (s) => s.status === "ready" && s.affirmations.find((a) => a.id === target.id).isFavorite, "the heart");
+    await settle(20);
+    assert.deepEqual(w.analyticsCalls, [["affirmation_favorited", { favorited: true }]]);
+    w.server.state.rest.daily_affirmations.push(json(500, { code: "XX000", message: "boom" }));
+    handle.result.current.toggleFavorite(handle.result.current.affirmations.find((a) => a.id === target.id));
+    await until(handle, (s) => s.status === "ready" && s.favoriteFailed, "the failure flag");
+    await settle(20);
+    assert.equal(w.analyticsCalls.length, 1, "a save that failed sends nothing");
+    handle.result.current.toggleFavorite(handle.result.current.affirmations.find((a) => a.id === target.id));
+    await until(handle, (s) => s.status === "ready" && !s.favoriteFailed && !s.affirmations.find((a) => a.id === target.id).isFavorite, "the next try");
+    await settle(20);
+    assert.deepEqual(w.analyticsCalls[1], ["affirmation_favorited", { favorited: false }]);
+    assert.equal(w.analyticsCalls.length, 2);
+    handle.unmount();
+  });
+
+  // The real tap routing, with the notifications service and the navigation ref faked (plain Node cannot load either).
+  const tapRig = { listener: null, navigations: [] };
+  const tapFakes = {
+    "@/services/notifications": {
+      __esModule: true,
+      showNotificationsQuietly: () => undefined,
+      takeLastTap: () => null,
+      addTapListener: (listener) => {
+        tapRig.listener = listener;
+        return () => undefined;
+      },
+    },
+    "@/navigation/navigationRef": {
+      __esModule: true,
+      navigationRef: {
+        isReady: () => true,
+        getRootState: () => ({ routeNames: ["MainTabs", "Reflection"] }),
+        navigate: (name, params) => void tapRig.navigations.push({ name, params }),
+      },
+    },
+  };
+  await test("analytics: a tapped notification sends its slot and nothing else: no entry, account or words", async (w) => {
+    const routing = w.use("@/services/notificationRouting");
+    routing.startNotificationRouting();
+    const hash = "0123456789abcdef";
+    routing.setTapUser(hash);
+    tapRig.listener({ key: "aff-afternoon-1", data: { kind: "affirmation", entryId: "entry-secret", slot: "afternoon", userHash: hash } });
+    assert.deepEqual(tapRig.navigations, [{ name: "Reflection", params: { entryId: "entry-secret", tab: "affirmations" } }]);
+    assert.deepEqual(w.analyticsCalls, [["affirmation_notification_opened", { slot: "afternoon" }]]);
+    assert.ok(!JSON.stringify(w.analyticsCalls).includes("entry-secret"));
+    assert.ok(!JSON.stringify(w.analyticsCalls).includes(hash));
+    // Another account's notification opens nothing and sends nothing.
+    tapRig.listener({ key: "aff-morning-2", data: { kind: "affirmation", entryId: "entry-x", slot: "morning", userHash: "fedcba9876543210" } });
+    assert.equal(w.analyticsCalls.length, 1);
+    assert.equal(tapRig.navigations.length, 1);
+  }, { fakes: tapFakes });
+
   await test("journal: switching the data source in the dev panel loads the other source and shows no data of the first one meanwhile", async (w) => {
     seedServer(w, 3);
     const dev = w.use("@/store/devStore").useDevStore;

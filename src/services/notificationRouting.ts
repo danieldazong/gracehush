@@ -1,5 +1,6 @@
 import { navigationRef } from "@/navigation/navigationRef";
 import { readTapData, type AffirmationTapData } from "@/services/affirmationPlanner";
+import { track } from "@/services/analytics";
 import { addTapListener, showNotificationsQuietly, takeLastTap, type NotificationTap } from "@/services/notifications";
 
 // A tapped affirmation notification opens its reflection on the Affirmations tab (step 28), and never starts the devotional or
@@ -42,6 +43,7 @@ export function openPendingTap(): void {
   const tap = pending;
   pending = null;
   if (tap.userHash !== tapUser) return;
-  // TODO(34): affirmation_notification_opened { slot }
+  // The slot only: never the entry, the account or the words (step 34). A crisis entry never has a notification.
+  track("affirmation_notification_opened", { slot: tap.slot });
   navigationRef.navigate("Reflection", { entryId: tap.entryId, tab: "affirmations" });
 }

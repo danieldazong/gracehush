@@ -809,9 +809,17 @@ async function contractChecks() {
     }
   });
 
-  await test("contract: no TODO(28) is left, and the tap routing carries step 34's event", async () => {
+  await test("contract: no TODO(28) is left, and an opened notification sends step 34's event with its slot and nothing else", async () => {
     for (const rel of [...walk("src"), ...walk("supabase/functions")]) assert.ok(!read(rel).includes("TODO(28)"), rel);
-    assert.ok(read("src/services/notificationRouting.ts").includes("TODO(34): affirmation_notification_opened { slot }"));
+    const w = await signedIn();
+    w.navigation.signedIn();
+    const stop = w.routing().startNotificationRouting();
+    w.notifications.tap("aff-evening-q", { data: { kind: "affirmation", entryId: "entry-1", slot: "evening", userHash: HASH_A } });
+    assert.deepEqual(w.analyticsCalls, [["affirmation_notification_opened", { slot: "evening" }]]);
+    // Another account's notification opens nothing and sends nothing.
+    w.notifications.tap("aff-morning-q", { data: { kind: "affirmation", entryId: "entry-1", slot: "morning", userHash: "0000000000000000" } });
+    assert.equal(w.analyticsCalls.length, 1);
+    stop();
   });
 
   await test("contract: the config plugin is local only, with the white icon and the plum colour", async () => {

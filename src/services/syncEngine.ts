@@ -13,7 +13,7 @@ import { markReachable, markUnreachable } from "@/services/connectivity";
 import { classify, classifyPrayerFailure, retryDelayMs } from "@/services/syncPolicy";
 import { useNoticeStore } from "@/store/noticeStore";
 import { selectCanSend, useOfflineStore } from "@/store/offlineStore";
-import type { OutboxItem, OutboxStatus, ProcessingStage, ProcessOutcome } from "@/types";
+import type { InputType, OutboxItem, OutboxStatus, ProcessingStage, ProcessOutcome } from "@/types";
 
 // The sync engine (step 24): it sends what is in the outbox, one reflection at a time, oldest first, whenever the app is in
 // front, the phone can send and the database is open. It never runs in the background and it uses no background task.
@@ -48,7 +48,16 @@ export type SyncEvent =
   // A reflection was deleted for good (step 29b): the lists that are on screen drop it at once.
   | { type: "deleted"; entryId: string }
   | { type: "stage"; clientEntryId: string; stage: ProcessingStage }
-  | { type: "finished"; clientEntryId: string; entryId: string; isCrisis: boolean }
+  // Step 34: three facts analytics may send about a reflection that is not a crisis (services/analytics.ts).
+  | {
+      type: "finished";
+      clientEntryId: string;
+      entryId: string;
+      isCrisis: boolean;
+      inputType: InputType;
+      scriptureVerified: boolean;
+      hasAudio: boolean;
+    }
   | {
       type: "settled";
       clientEntryId: string;
@@ -198,7 +207,15 @@ async function applySuccess(item: OutboxItem, outcome: Extract<ProcessOutcome, {
   if (item.inputType === "audio") await deleteRecording(id);
   markReachable();
   log("finished");
-  emit({ type: "finished", clientEntryId: id, entryId: outcome.entry.id, isCrisis: outcome.entry.isCrisis });
+  emit({
+    type: "finished",
+    clientEntryId: id,
+    entryId: outcome.entry.id,
+    isCrisis: outcome.entry.isCrisis,
+    inputType: outcome.entry.inputType,
+    scriptureVerified: outcome.entry.scripture?.verified === true,
+    hasAudio: outcome.entry.devotional?.audioPath != null,
+  });
   emit({ type: "changed" });
 }
 

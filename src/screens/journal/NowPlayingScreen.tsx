@@ -28,6 +28,7 @@ import { getPlaybackTrack } from "@/data/selectors";
 import { usePlayback } from "@/hooks/usePlayback";
 import { useReflection } from "@/hooks/useReflection";
 import type { RootStackScreenProps } from "@/navigation/types";
+import { track } from "@/services/analytics";
 import type { PlaybackStatus } from "@/types";
 import { formatDuration, formatDurationSpoken } from "@/utils/format";
 
@@ -299,11 +300,11 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
               accessibilityLabel={nowPlaying.ambientChip(copy.ambient.labels[sound])}
               selected={sound === ambientSound}
               onPress={() => {
+                if (sound !== ambientSound) track("ambient_changed", { sound, source: "now_playing" });
                 playback.setAmbient(sound);
                 // What is chosen here is also the sound the next devotional starts with (step 27). A save that fails
                 // changes nothing on this screen: the next change saves again.
                 void updateProfile({ ambientSound: sound });
-                // TODO(34): ambient_changed { sound, source: 'now_playing' }
               }}
             />
           ))}

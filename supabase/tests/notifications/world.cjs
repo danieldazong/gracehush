@@ -249,6 +249,15 @@ function world({ platform = "ios", expoGo = false, zone = "America/New_York", ex
   const repository = makeRepository(() => env.use("@/store/profilePrefsStore").useProfilePrefsStore.getState());
   const appState = makeAppState();
   const device = { zone };
+  // The analytics service imports PostHog, which plain Node cannot load: a stand-in records what the app would send.
+  const analyticsCalls = [];
+  const analytics = {
+    __esModule: true,
+    track: (...args) => analyticsCalls.push(args),
+    trackCurrentScreen: () => {},
+    startAnalytics: () => {},
+    resetAnalytics: async () => {},
+  };
   const reactNative = { ...appState.module, Platform: { OS: platform, select: (choices) => choices[platform] ?? choices.default } };
   env = makeEnv({
     fakes: {
@@ -263,6 +272,7 @@ function world({ platform = "ios", expoGo = false, zone = "America/New_York", ex
       "@/data/journalRepository": repository.module,
       "@/data/mappers": { getDeviceTimezone: () => device.zone },
       "@/db/database": { userHash: async (id) => sha16(id) },
+      "@/services/analytics": analytics,
     },
   });
   const use = (spec) => env.use(spec);
@@ -275,6 +285,7 @@ function world({ platform = "ios", expoGo = false, zone = "America/New_York", ex
     repository,
     appState,
     device,
+    analyticsCalls,
     scheduler: () => use("@/services/affirmationScheduler"),
     routing: () => use("@/services/notificationRouting"),
     stores: () => ({

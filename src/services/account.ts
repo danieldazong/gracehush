@@ -4,6 +4,7 @@ import { simulateWrite } from "@/data/journalRepository";
 import { getDataSource, takeMockPrayerMutationFailure } from "@/data/mock/scenario";
 import { deleteUserDatabase } from "@/db/database";
 import { clearAffirmations } from "@/services/affirmationScheduler";
+import { resetAnalytics } from "@/services/analytics";
 import { deleteAllDevotionalAudio } from "@/services/devotionalAudio";
 import { endOfflineSession } from "@/services/offlineSession";
 import { cancelProfileSync, pauseProfileSync, resumeProfileSync } from "@/services/profileSync";
@@ -127,5 +128,6 @@ export async function signOutCleanup(): Promise<void> {
   // out of it and the entitlement it reported is forgotten.
   stopPlanWatch();
   await endRevenueCatSession();
-  // TODO(34): resetAnalytics()
+  // Analytics (step 34): a new anonymous id for the next account on this phone; the device's consent is applied again.
+  await resetAnalytics();
 }

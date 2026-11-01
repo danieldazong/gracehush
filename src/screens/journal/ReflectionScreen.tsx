@@ -29,6 +29,7 @@ import { useAnnounce } from "@/hooks/useAnnounce";
 import { useDeleteReflection } from "@/hooks/useDeleteReflection";
 import { useReflection } from "@/hooks/useReflection";
 import type { RootStackScreenProps } from "@/navigation/types";
+import { track } from "@/services/analytics";
 import { haptics } from "@/services/haptics";
 import { useNoticeStore } from "@/store/noticeStore";
 import type {
@@ -127,10 +128,10 @@ function PrayerRequestRow({ entryId, prayer, onSetTracked }: PrayerRequestRowPro
     setFailed(false);
     useNoticeStore.getState().clearPrayerChangeFailed();
     haptics.selection();
-    // TODO(34): prayer_tracked_changed { tracked }
     const result = await onSetTracked(tracked);
     changing.current = false;
-    if (!result.ok) setFailed(true);
+    if (result.ok) track("prayer_tracked_changed", { tracked });
+    else setFailed(true);
   }
 
   function press() {
@@ -346,7 +347,10 @@ function ReadyView({
 export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Reflection">) {
   const state = useReflection(route.params.entryId);
   // Delete reflection (step 29b): the dialog is shared with Prayers. A delete takes the person back to where they came from.
-  const deletion = useDeleteReflection(() => goBack());
+  const deletion = useDeleteReflection(() => {
+    track("reflection_deleted", { source: "reflection" });
+    goBack();
+  });
   const [deleteOffline, setDeleteOffline] = useState(false);
   useAnnounce(deleteOffline ? deleteText.offline : null);
 
@@ -405,7 +409,6 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
         onReturn={returnToJournal}
         onSetTracked={state.setTracked}
         onDelete={() => {
-          // TODO(34): reflection_deleted { source: "reflection", had_audio: boolean }
           const opened = deletion.ask({
             entryId: state.entry.id,
             answered: state.entry.prayer?.isAnswered === true,

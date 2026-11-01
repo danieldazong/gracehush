@@ -18,11 +18,12 @@ import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { SupabaseAuthBridge } from "@/components/SupabaseAuthBridge";
-import { supabaseEnv } from "@/constants/env";
+import { analyticsEnv, supabaseEnv } from "@/constants/env";
 import { fonts } from "@/constants/theme";
 import { useStoreHydrated } from "@/hooks/useStoreHydrated";
 import { RootNavigator } from "@/navigation/RootNavigator";
 import { navigationRef } from "@/navigation/navigationRef";
+import { startAnalytics, trackCurrentScreen } from "@/services/analytics";
 import { openPendingTap, startNotificationRouting } from "@/services/notificationRouting";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
@@ -30,6 +31,13 @@ import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 SplashScreen.preventAutoHideAsync();
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+// The navigator, ready or changed: a tapped notification waiting for the signed-in screens opens (step 28), and the screen is
+// counted when the person shares usage data (step 34).
+function onNavigationChange() {
+  openPendingTap();
+  trackCurrentScreen();
+}
 
 function AppShell() {
   const { isLoaded } = useAuth();
@@ -56,6 +64,10 @@ function AppShell() {
   // signed-in screens are up (step 28).
   useEffect(() => startNotificationRouting(), []);
 
+  // Analytics follow the saved answer once the onboarding store has loaded it (step 34). Nothing reaches PostHog before the
+  // person says yes.
+  useEffect(() => startAnalytics(), []);
+
   // The fonts, Clerk and the two saved stores load in parallel. Waiting for all of them means the
   // navigator first renders with everything known: a signed-in user never sees Onboarding flash by, a
   // finished onboarding never shows Welcome, and the profile sync never writes to a store that is
@@ -74,7 +86,7 @@ function AppShell() {
   return (
     <SafeAreaProvider>
       <SupabaseAuthBridge />
-      <NavigationContainer ref={navigationRef} onReady={openPendingTap} onStateChange={openPendingTap}>
+      <NavigationContainer ref={navigationRef} onReady={onNavigationChange} onStateChange={onNavigationChange}>
         <RootNavigator />
       </NavigationContainer>
       <StatusBar style="dark" />
@@ -94,6 +106,11 @@ export default function App() {
   // before the Supabase project exists (getProfileSource).
   if (supabaseEnv.status === "invalid" || (supabaseEnv.status === "missing" && !__DEV__)) {
     throw new Error(supabaseEnv.message);
+  }
+  // A personal PostHog key, a token that is not a project token or a wrong host stops the app in development; a release
+  // build keeps analytics off instead (step 34).
+  if (__DEV__ && analyticsEnv.status === "invalid") {
+    throw new Error(analyticsEnv.message);
   }
   if (__DEV__ && supabaseEnv.status === "missing") {
     console.info(`[supabase] ${supabaseEnv.message} Until then the profile uses the mock.`);

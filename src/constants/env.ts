@@ -81,3 +81,43 @@ export function chooseRevenueCatKey(input: {
   if (input.isDev && hasTestKey) return { kind: "test_store", apiKey: testKey };
   return { kind: "none", reason: hasTestKey ? "test_key_in_release" : "missing" };
 }
+
+// PostHog (step 34): the project token (phc_) is made to ship in an app, like the Supabase publishable key, and still lives
+// only in .env.local. A personal API key (phx_) can read and change the whole PostHog account and is never used. The host is
+// the region's ingestion address, with the i.
+export const POSTHOG_PROJECT_TOKEN = process.env.EXPO_PUBLIC_POSTHOG_PROJECT_TOKEN ?? "";
+export const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST ?? "";
+export const POSTHOG_HOSTS = ["https://eu.i.posthog.com", "https://us.i.posthog.com"] as const;
+
+export type AnalyticsEnvCheck =
+  | { status: "ok"; token: string; host: string }
+  | { status: "missing" }
+  | { status: "invalid"; message: string };
+
+// Pure, so it can be tried with any value. Both missing is "missing": analytics stay off and the app works as before.
+export function checkAnalyticsEnv(token: string, host: string): AnalyticsEnvCheck {
+  const projectToken = token.trim();
+  const ingestHost = host.trim().replace(/\/+$/, "");
+  if (projectToken === "" && ingestHost === "") return { status: "missing" };
+  if (projectToken.startsWith("phx_")) {
+    return {
+      status: "invalid",
+      message: `EXPO_PUBLIC_POSTHOG_PROJECT_TOKEN holds a personal API key (phx_...). Never put one in the app: use the project token (phc_...) from PostHog, Settings, Project, General. ${FIX}`,
+    };
+  }
+  if (!/^phc_[A-Za-z0-9]{20,}$/.test(projectToken)) {
+    return {
+      status: "invalid",
+      message: `EXPO_PUBLIC_POSTHOG_PROJECT_TOKEN does not look like a PostHog project token (phc_...). ${FIX}`,
+    };
+  }
+  if (!(POSTHOG_HOSTS as readonly string[]).includes(ingestHost)) {
+    return {
+      status: "invalid",
+      message: `EXPO_PUBLIC_POSTHOG_HOST must be https://eu.i.posthog.com or https://us.i.posthog.com, the region of the PostHog project. ${FIX}`,
+    };
+  }
+  return { status: "ok", token: projectToken, host: ingestHost };
+}
+
+export const analyticsEnv = checkAnalyticsEnv(POSTHOG_PROJECT_TOKEN, POSTHOG_HOST);

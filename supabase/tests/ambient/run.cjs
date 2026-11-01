@@ -732,10 +732,13 @@ const view = (store) => {
       for (const [sound, name] of entries) assert.equal(imports.get(name), sound, `${sound} plays ${imports.get(name)}.m4a`);
     });
 
-    await test("contract: the old markers are gone", () => {
+    await test("contract: the old markers are gone, and both places that change the sound send step 34's event", () => {
       assert.deepEqual(mentioning(/TODO\(27\)/), []);
-      assert.ok(mentioning(/TODO\(34\): ambient_changed \{ sound, source: 'now_playing' \}/).includes("src/screens/journal/NowPlayingScreen.tsx"));
-      assert.ok(mentioning(/TODO\(34\): ambient_changed \{ sound, source: 'profile' \}/).includes("src/screens/profile/ProfileScreen.tsx"));
+      assert.deepEqual(mentioning(/TODO\(34\)/), []);
+      // Only a changed sound is sent, with where it was changed: never the volume, the entry or anything else.
+      assert.deepEqual(mentioning(/track\("ambient_changed", \{ sound, source: "now_playing" \}\)/), ["src/screens/journal/NowPlayingScreen.tsx"]);
+      assert.deepEqual(mentioning(/track\("ambient_changed", \{ sound: patch\.ambientSound, source: "profile" \}\)/), ["src/screens/profile/ProfileScreen.tsx"]);
+      assert.ok(read("src/screens/journal/NowPlayingScreen.tsx").includes('if (sound !== ambientSound) track("ambient_changed"'));
     });
 
     // The shipped loops (made in step 27 from the user's sources): an AAC .m4a each, 60 to 90 seconds, under 1.5 MB.

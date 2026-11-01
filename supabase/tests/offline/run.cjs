@@ -794,6 +794,8 @@ async function accountChecks() {
       "@/services/revenuecat": { __esModule: true, endRevenueCatSession: async () => void order.push("revenuecat") },
       // Step 33: Realtime stops first, before the database and the token go (the service needs react-native and a socket).
       "@/services/realtime": { __esModule: true, stopRealtime: async () => void order.push("realtime stopped") },
+      // Step 34: analytics resets last, with nothing queued for the account that left (PostHog cannot load in plain Node).
+      "@/services/analytics": { __esModule: true, resetAnalytics: async () => void order.push("analytics reset"), track: () => undefined },
     };
     const mod = makeWorld2(w, extra);
     const database = mod.use("@/db/database");
@@ -824,6 +826,7 @@ async function accountChecks() {
     assert.ok(order.indexOf("player") < order.indexOf("devotional audio"), `the player stops before its files go: ${order.join(" > ")}`);
     assert.equal(order.filter((step) => step === "affirmations").length, 1, "the affirmation notifications are cleared once");
     assert.ok(order.indexOf("plan watch") >= 0 && order.indexOf("plan watch") < order.indexOf("revenuecat"), `the plan watch stops before RevenueCat logs out: ${order.join(" > ")}`);
+    assert.equal(order[order.length - 1], "analytics reset", `analytics resets last: ${order.join(" > ")}`);
     await mod.use("@/services/account").signOutCleanup();
   });
 }

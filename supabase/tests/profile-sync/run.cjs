@@ -201,12 +201,13 @@ const row = ({
     assert.equal(s().remindersSyncedAt, syncedAt);
     assert.equal(s().reminders.morning, "05:00"); // the time itself stays
   });
-  await test("onboarding: what is saved is version 2 and includes remindersDirty", async () => {
+  await test("onboarding: what is saved is version 3 and includes remindersDirty and the analytics choice", async () => {
     const { env, store } = await onboarding(undefined);
     store.getState().setReminder("afternoon", "14:00");
     await sleep(30);
     const saved = JSON.parse(env.storage.get("gracehush.onboarding"));
-    assert.equal(saved.version, 2);
+    assert.equal(saved.version, 3);
+    assert.equal(saved.state.analyticsConsent, "unset");
     assert.equal(saved.state.remindersDirty, true);
     assert.equal(saved.state.reminders.afternoon, "14:00");
     assert.equal(typeof saved.state.setReminder, "undefined");
@@ -345,6 +346,7 @@ const row = ({
       affirmationsCleared: 0,
       planWatchStopped: 0,
       revenueCatEnded: 0,
+      analyticsReset: 0,
     };
     const remote = { server, fetchFails: null, pushFails: [], onPush: null, onFetch: null };
     const session = { userId: "user_a" };
@@ -404,6 +406,8 @@ const row = ({
     fakes["@/services/syncEngine"] = { isSyncEngineStarted: () => false, startSyncEngine: () => undefined, stopSyncEngine: () => undefined };
     // Step 33: account.ts stops Realtime first at sign-out and around a deletion; the service needs react-native and a socket.
     fakes["@/services/realtime"] = { startRealtime: () => undefined, stopRealtime: async () => undefined };
+    // Step 34: signOutCleanup ends with the analytics reset; the service imports PostHog and expo-constants.
+    fakes["@/services/analytics"] = { resetAnalytics: async () => void calls.analyticsReset++, track: () => undefined };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
     env.use("@/store/devStore").useDevStore.getState().setDataSource(source);
@@ -875,6 +879,7 @@ const row = ({
     assert.equal(ctx.calls.affirmationsCleared, 1, "and clears the affirmation notifications");
     assert.equal(ctx.calls.planWatchStopped, 1, "and stops the plan watch");
     assert.equal(ctx.calls.revenueCatEnded, 1, "and logs out of RevenueCat");
+    assert.equal(ctx.calls.analyticsReset, 1, "and resets analytics");
     assert.equal(ob.getState().remindersDirty, false);
     assert.deepEqual(unsentOf(ctx), { ambientSound: "soft-rain" }, "sign out keeps the user's unsent setting");
     await sleep(1000);
@@ -885,6 +890,7 @@ const row = ({
     assert.equal(ctx.calls.devotionalsDeleted, 2, "and the downloaded devotionals");
     assert.equal(ctx.calls.affirmationsCleared, 2, "and the affirmation notifications");
     assert.equal(ctx.calls.revenueCatEnded, 2, "and logs out of RevenueCat");
+    assert.equal(ctx.calls.analyticsReset, 2, "and resets analytics");
     assert.equal(prefsOf(ctx).getState().byUser.user_a, undefined, "delete forgets them");
   });
 
@@ -1007,6 +1013,7 @@ const row = ({
         "@/services/offlineSession": { endOfflineSession: async () => undefined },
         "@/services/syncEngine": { isSyncEngineStarted: () => false, startSyncEngine: () => undefined, stopSyncEngine: () => undefined },
         "@/services/realtime": { startRealtime: () => undefined, stopRealtime: async () => undefined },
+        "@/services/analytics": { resetAnalytics: async () => undefined, track: () => undefined },
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();

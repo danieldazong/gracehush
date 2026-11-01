@@ -34,6 +34,7 @@ import { useDeleteReflection } from "@/hooks/useDeleteReflection";
 import { usePrayers } from "@/hooks/usePrayers";
 import { useTabBarClearance, useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
+import { track } from "@/services/analytics";
 import { useNoticeStore } from "@/store/noticeStore";
 import type { Prayer, RepoResult } from "@/types";
 import { calendarDaysBetween, getPrayerTitle } from "@/utils/format";
@@ -259,7 +260,10 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
   const [removeTarget, setRemoveTarget] = useState<Prayer | null>(null);
   const [removing, setRemoving] = useState(false);
   // Delete reflection… (step 29b). The dialog is shared with Reflection. With no connection nothing opens and the banner says why.
-  const deletion = useDeleteReflection(() => setNotice("deleted"));
+  const deletion = useDeleteReflection(() => {
+    track("reflection_deleted", { source: "prayers" });
+    setNotice("deleted");
+  });
 
   const ready = state.status === "ready" ? state : null;
   // A change the server refused for good (step 29) says the same as one that failed here.
@@ -312,8 +316,10 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
       answeredDate: values.answeredDate,
       note: values.note,
     });
-    // TODO(34): prayer_marked_answered { has_note: boolean }
-    if (result.ok) setNotice("marked");
+    if (result.ok) {
+      track("prayer_marked_answered", { has_note: (values.note ?? "").trim() !== "" });
+      setNotice("marked");
+    }
     return result;
   }
 
@@ -356,7 +362,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
   async function removeNow(prayer: Prayer) {
     if (ready === null) return;
     const result = await ready.removeFromPrayers(prayer.id);
-    // TODO(34): prayer_removed { was_answered: boolean }
+    if (result.ok) track("prayer_removed", { was_answered: prayer.isAnswered });
     setNotice(result.ok ? "removed" : "failed");
   }
 
@@ -370,7 +376,6 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
 
   // Delete reflection…: permanent, so it always asks, and only while there is a connection.
   function askDelete(prayer: Prayer) {
-    // TODO(34): reflection_deleted { source: "prayers", had_audio: boolean }
     const opened = deletion.ask({ entryId: prayer.id, answered: prayer.isAnswered });
     if (!opened) setNotice("offline");
   }

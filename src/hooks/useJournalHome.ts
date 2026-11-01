@@ -16,6 +16,7 @@ import {
 import { mergePending, toPendingEntry } from "@/data/pendingEntries";
 import { getCurrentSlot, getReflectionDays, isListedEntry, mergeEntries } from "@/data/selectors";
 import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
+import { track } from "@/services/analytics";
 import { startOfflineSession } from "@/services/offlineSession";
 import { subscribeRealtime } from "@/services/realtime";
 import { getSupabaseUserId } from "@/services/supabaseClient";
@@ -365,7 +366,9 @@ export function useJournalHome(): HomeState {
       setResult((previous) => withFavorite(previous, key, affirmation.id, next));
       try {
         const saved = await setAffirmationFavorite(affirmation.id, next);
-        if (!saved.ok) {
+        if (saved.ok) {
+          track("affirmation_favorited", { favorited: next });
+        } else {
           setResult((previous) => withFavorite(previous, key, affirmation.id, !next));
           setFavoriteFailed(true);
         }

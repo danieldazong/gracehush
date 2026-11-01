@@ -33,6 +33,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { UserAvatar } from "@/components/UserAvatar";
 import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, TERMS_URL } from "@/constants/app";
 import { copy } from "@/constants/copy";
+import { analyticsEnv } from "@/constants/env";
 import { colors } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useEntitlement } from "@/hooks/useEntitlement";
@@ -43,6 +44,7 @@ import type { MainTabScreenProps } from "@/navigation/types";
 import { countPendingPrayerChanges, countUnsentItems } from "@/data/journalRepository";
 import { deleteAccount, requestDataExport, signOutCleanup } from "@/services/account";
 import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
+import { track } from "@/services/analytics";
 import { isPreviewing, previewAmbient, stopPreview, subscribePreview } from "@/services/ambientPlayer";
 import {
   openExportDownload,
@@ -68,6 +70,7 @@ const icons = {
   reminders: { android: "schedule", ios: "clock" },
   ambient: { android: "graphic_eq", ios: "waveform" },
   affirmations: { android: "notifications", ios: "bell" },
+  analytics: { android: "bar_chart", ios: "chart.bar" },
   // The row's tile is a plain cloud: the trailing icon carries the state, so a "done" cloud would contradict "pending".
   cloud: { android: "cloud", ios: "icloud" },
   synced: { android: "check_circle", ios: "checkmark.circle.fill" },
@@ -342,6 +345,9 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const barClearance = useTabBarClearance();
   const reminders = useOnboardingStore((store) => store.reminders);
   const setReminder = useOnboardingStore((store) => store.setReminder);
+  // Share Usage Data (step 34): the device's answer, kept on the phone only, so it never fails.
+  const sharing = useOnboardingStore((store) => store.analyticsConsent === "granted");
+  const setAnalyticsConsent = useOnboardingStore((store) => store.setAnalyticsConsent);
 
   // Screen state, reset when the screen unmounts. Both accordion rows start closed.
   const [remindersOpen, setRemindersOpen] = useState(false);
@@ -423,12 +429,17 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
 
   async function changeAmbient(patch: ProfilePatch) {
     if (state.status !== "ready") return;
+    // Read before the save, which shows the change at once.
+    const previousSound = state.profile.ambientSound;
     const result = await state.save(patch);
     if (result.ok) {
       hideNotice("saveAffirmations", "saveAmbient");
       // The saved choice is what the next devotional starts with. What is playing keeps its sound and volume.
       usePlayerStore.getState().reseedAmbient();
-      // TODO(34): ambient_changed { sound, source: 'profile' }
+      // A different sound is an analytics event; a volume change is not.
+      if (patch.ambientSound !== undefined && patch.ambientSound !== previousSound) {
+        track("ambient_changed", { sound: patch.ambientSound, source: "profile" });
+      }
     } else {
       showNotice("saveAmbient");
     }
@@ -459,7 +470,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
       const result = await restorePurchases();
       if (!result.ok) showNotice("restoreError");
       else showNotice(result.restored ? "restored" : "restoreNone");
-      // TODO(34): restore_completed { found: boolean }
+      if (result.ok) track("restore_completed", { found: result.restored });
     } catch {
       showNotice("restoreError");
     } finally {
@@ -546,7 +557,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
         setDialogOpen(false);
         hideNotice("download");
         setExportLink({ url: result.data.url, expiresAt: result.data.expiresAt, partial: result.data.partial });
-        // TODO(34): data_export_requested {}
+        track("data_export_requested", {});
       } else {
         setDialogError(result.message);
       }
@@ -789,6 +800,29 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
 
               <View className="gap-2">
                 <SettingsGroup title={text.groups.privacy}>
+                  {analyticsEnv.status === "ok" ? (
+                    <SettingsRow
+                      icon={icons.analytics}
+                      title={text.analytics.title}
+                      subtitle={text.analytics.subtitle}
+                      trailing={
+                        <Switch
+                          value={sharing}
+                          trackColor={{ false: colors.petal, true: colors.plum }}
+                          thumbColor={colors.card}
+                          ios_backgroundColor={colors.petal}
+                        />
+                      }
+                      onPress={() => {
+                        haptics.selection();
+                        setAnalyticsConsent(sharing ? "declined" : "granted");
+                      }}
+                      accessibilityRole="switch"
+                      accessibilityLabel={text.analytics.title}
+                      accessibilityHint={text.analytics.subtitle}
+                      accessibilityState={{ checked: sharing }}
+                    />
+                  ) : null}
                   {exportLink ? (
                     <SettingsRow
                       icon={icons.export}

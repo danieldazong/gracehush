@@ -6,6 +6,10 @@ import type { TimeSlot } from "@/types";
 
 import { safeStorage } from "./safeStorage";
 
+// Whether the person chose to share anonymous usage data (step 34). It belongs to the device, like the reminder times, so
+// sign-out keeps it. "unset" counts as no.
+export type AnalyticsConsent = "unset" | "granted" | "declined";
+
 interface OnboardingState {
   hasCompletedOnboarding: boolean;
   completedAt: string | null; // ISO
@@ -13,12 +17,14 @@ interface OnboardingState {
   permissionsPromptedAt: string | null; // ISO, set once the permission prompts were shown
   remindersSyncedAt: string | null; // ISO, set when the times last matched users_profile (step 17)
   remindersDirty: boolean; // an edit the server has not seen yet (step 17)
+  analyticsConsent: AnalyticsConsent; // step 34
   setReminder: (slot: TimeSlot, hhmm: string) => void;
   markRemindersSynced: () => void; // the server has these times
   applyServerReminders: (times: Record<TimeSlot, string>) => void; // the server's times replace this device's
   discardUnsyncedReminders: () => void; // sign out: an unsent edit belongs to the account that made it
   completeOnboarding: () => void; // idempotent
   markPermissionsPrompted: () => void;
+  setAnalyticsConsent: (consent: "granted" | "declined") => void;
   resetOnboarding: () => void; // dev only
 }
 
@@ -31,6 +37,7 @@ type OnboardingPersisted = Pick<
   | "permissionsPromptedAt"
   | "remindersSyncedAt"
   | "remindersDirty"
+  | "analyticsConsent"
 >;
 
 const HHMM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -61,6 +68,7 @@ function getInitialData(): OnboardingPersisted {
     permissionsPromptedAt: null,
     remindersSyncedAt: null,
     remindersDirty: false,
+    analyticsConsent: "unset",
   };
 }
 
@@ -110,11 +118,12 @@ export const useOnboardingStore = create<OnboardingState>()(
         }
         set({ permissionsPromptedAt: new Date().toISOString() });
       },
+      setAnalyticsConsent: (consent) => set({ analyticsConsent: consent }),
       resetOnboarding: () => set(getInitialData()),
     }),
     {
       name: "gracehush.onboarding",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => safeStorage),
       partialize: (state): OnboardingPersisted => ({
         hasCompletedOnboarding: state.hasCompletedOnboarding,
@@ -123,17 +132,24 @@ export const useOnboardingStore = create<OnboardingState>()(
         permissionsPromptedAt: state.permissionsPromptedAt,
         remindersSyncedAt: state.remindersSyncedAt,
         remindersDirty: state.remindersDirty,
+        analyticsConsent: state.analyticsConsent,
       }),
       // `merge` validates every field. Version 2 (step 17) added remindersDirty. Before it nothing synced the times, so
-      // a time that differs from the default was changed on this device and the server has not seen it. Step 34 extends this.
+      // a time that differs from the default was changed on this device and the server has not seen it. Version 3 (step 34)
+      // added analyticsConsent: a save from before it has never been asked, so it is unset.
       migrate: (persisted: unknown, version: number) => {
         const saved: Record<string, unknown> = isRecord(persisted) ? persisted : {};
-        if (version >= 2) return saved as OnboardingPersisted;
+        if (version >= 3) return saved as OnboardingPersisted;
+        if (version === 2) return { ...saved, analyticsConsent: "unset" } as OnboardingPersisted;
         const savedReminders: Record<string, unknown> = isRecord(saved.reminders) ? saved.reminders : {};
         const changed = (Object.keys(DEFAULT_REMINDERS) as TimeSlot[]).some(
           (slot) => isHHmm(savedReminders[slot]) && savedReminders[slot] !== DEFAULT_REMINDERS[slot],
         );
-        return { ...saved, remindersDirty: changed && saved.remindersSyncedAt == null } as OnboardingPersisted;
+        return {
+          ...saved,
+          remindersDirty: changed && saved.remindersSyncedAt == null,
+          analyticsConsent: "unset",
+        } as OnboardingPersisted;
       },
       // zustand's default merge is shallow: one bad reminder slot would replace the whole object.
       merge: (persisted: unknown, current: OnboardingState): OnboardingState => {
@@ -153,6 +169,8 @@ export const useOnboardingStore = create<OnboardingState>()(
           permissionsPromptedAt: toTimestamp(saved.permissionsPromptedAt),
           remindersSyncedAt: toTimestamp(saved.remindersSyncedAt),
           remindersDirty: saved.remindersDirty === true,
+          analyticsConsent:
+            saved.analyticsConsent === "granted" || saved.analyticsConsent === "declined" ? saved.analyticsConsent : "unset",
         };
       },
       // With safeStorage this should never fire: it is the last line of defence.

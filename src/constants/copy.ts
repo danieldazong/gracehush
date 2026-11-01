@@ -53,6 +53,19 @@ export const copy = {
       primary: "Allow & Continue",
       later: "Maybe later",
     },
+    // The consent step (step 34), shown only when a PostHog token is set. Its two choices look the same.
+    analytics: {
+      eyebrow: "Your choice",
+      title: "Help improve Gracehush?",
+      subtitle: "Share anonymous usage data, like which features you use. The app works the same either way.",
+      sharedTitle: "What’s shared",
+      sharedBody: "Which features you use, your plan and the app version. Not tied to your name or email.",
+      neverTitle: "Never shared",
+      neverBody: "Your words, prayers, recordings, name or email.",
+      note: "You can change this anytime in Profile.",
+      share: "Share usage data",
+      notNow: "Not now",
+    },
   },
   common: {
     close: "Close",
@@ -793,6 +806,10 @@ export const copy = {
       status: (synced: number, pending: number) => `${synced} synced, ${pending} pending`,
       label: (synced: number, pending: number) =>
         `Offline Reflections, ${synced} synced, ${pending} pending`,
+    },
+    analytics: {
+      title: "Share Usage Data",
+      subtitle: "Anonymous. Never your words, prayers or recordings.",
     },
     privacy: {
       exportTitle: "Export Journal",

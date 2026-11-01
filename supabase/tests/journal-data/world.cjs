@@ -601,6 +601,17 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
       affirmationRequests += 1;
     },
   };
+  // Step 34: the analytics service imports PostHog and expo-constants, which plain Node cannot load. A stand-in records
+  // every event the app would send (supabase/tests/analytics checks the real service).
+  const analyticsCalls = [];
+  fakes["@/services/analytics"] = {
+    __esModule: true,
+    track: (...args) => void analyticsCalls.push(args),
+    trackCurrentScreen: () => undefined,
+    startAnalytics: () => undefined,
+    resetAnalytics: async () => undefined,
+    flushAnalytics: async () => undefined,
+  };
   const realtimeFake = makeRealtimeFake();
   if (realtime === "fake") fakes["@/services/realtime"] = realtimeFake.module;
   // A suite can fake more modules that plain Node cannot load (step 29b: the player store and the devotional files).
@@ -621,6 +632,7 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
     upload,
     counts,
     realtimeCalls: realtimeFake.calls,
+    analyticsCalls,
     affirmationRequests: () => affirmationRequests,
     renderHook,
     logs,
