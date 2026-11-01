@@ -25,7 +25,7 @@ What the app needs from this: two pages at real addresses (`PRIVACY_POLICY_URL`,
 | Reminder times, time zone, affirmations on or off, ambient sound and volume | the user | Supabase Postgres, and the device | none | reminders and playback defaults |
 | Plan (free, trial, pro) and when it ends | the store, through RevenueCat | RevenueCat; the tier and its end date are mirrored to Postgres by a webhook (step 30) | RevenueCat, Apple, Google | the free limit and Pro |
 | A short "this reflection changed" message (step 33): the reflection's id, whether it was added, changed or deleted, its status and the time of the change (for affirmations, their ids) | the database, when a reflection or an affirmation changes | Supabase Realtime (`realtime.messages`, kept by Supabase for 3 to 4 days) | Supabase | to show a change on the person's open screen at once; only the person's own private channel receives it, and it holds nothing the person wrote |
-| Anonymous usage events (**planned, step 34, off until the user opts in**) | the app | PostHog (**TODO:** EU or US region, step 34 asks) | PostHog | to see which features are used |
+| Anonymous usage events (built in step 34; off until the user opts in, at the end of setup or with Profile's Share Usage Data switch; only the fixed list of the privacy policy's section 1.4) | the app | PostHog, US region (kept 12 months; the IP address is discarded and location lookup is off) | PostHog | to see which features are used |
 | Reflections not prepared yet (the words of a written one, and a voice recording as an audio file) and a copy of the entries the app has seen (step 24), the sign-in token, onboarding flags | the app | SQLite (the words sealed with AES-256-GCM, the key in the phone's secure storage, this device only and not in backups), the app's document folder (recordings, **not encrypted by the app**), SecureStore, AsyncStorage | none | offline use |
 | Affirmation notifications | the device schedules them | the device | none | reminders. No push server in V1. A notification shows the slot ("Morning affirmation") and the affirmation's one-line headline, never its longer text, the transcript, the emotion or the verse; after a crisis entry none is sent until a newer reflection is ready (step 28) |
 
@@ -61,14 +61,14 @@ As built (the Paywall, step 16): a yearly and a monthly plan. The prices on scre
 
 - **Apple:** the Privacy Policy URL, the App Privacy answers (contact info, user content, identifiers, purchases, usage data if analytics is on, and whether prayers count as sensitive info), and the review note for account deletion (Profile, Privacy & Data, Delete account).
 - **Google Play:** the Privacy Policy URL, the Data safety form, the account deletion web URL (`ACCOUNT_DELETION_URL`, added in step 31), and whether the health-apps declaration applies. **TODO:** ask, because the app is not medical but handles mental-health-adjacent entries.
-- Step 34 lists the exact analytics answers for both forms. Step 35 checks the privacy manifest.
+- The exact analytics answers for both forms are in AGENTS.md, "Before a store build" (step 34). Step 35 checks the privacy manifest.
 
 ## 8. Questions only the owner can answer
 
 1. The legal entity, its address and country, and the governing law.
 2. The domain for the pages, the support mailbox, and the address of the account deletion page.
 3. The minimum age.
-4. The Supabase region and backup retention, and the PostHog region.
+4. The Supabase region and backup retention (the PostHog region is decided: US, step 34).
 5. A billed Google Cloud account (one account pays for Gemini and for Text-to-Speech), and whether Google's statement about Text-to-Speech data is enough.
 6. The on-device copy (decided in the step 24 review): the words are encrypted, ids, statuses and times are not, and a recording waiting to be sent is an audio file the app does not encrypt (it is deleted once the reflection is prepared, at sign-out, and after 7 days if nothing refers to it). The database and the recordings are in the phone's own backups (iCloud or a computer backup); a restored phone cannot read the encrypted words. Is that fine to say as written?
 7. Whether onboarding takes explicit consent for sensitive data.
