@@ -165,11 +165,13 @@ type GreetingBlockProps = {
 function GreetingBlock({ now, name, reflectionDays }: GreetingBlockProps) {
   return (
     <View className="pt-1">
-      <Text accessibilityRole="header" className="text-title tracking-[-0.7px] text-plum-deep">
+      {/* A welcome, not the screen's headline: it takes the content's heading size ("Your Reflections", the affirmation's
+          headline), under the 22-px wordmark, so the affirmation and the reflections lead. */}
+      <Text accessibilityRole="header" className="text-section tracking-[-0.5px] text-plum-deep">
         {copy.journal.greeting(getGreeting(now), name)}
       </Text>
       {/* The date and the streak share a line, so the greeting keeps the full width. They wrap under each other when they do not fit. */}
-      <View className="mt-1.5 flex-row flex-wrap items-center gap-x-3 gap-y-2">
+      <View className="mt-1 flex-row flex-wrap items-center gap-x-3 gap-y-2">
         <Text className="text-body-sm text-mauve">{formatLongDate(now)}</Text>
         {reflectionDays > 0 ? (
           <View className="chip chip--terracotta shrink-0 gap-1.5 border border-terracotta/25">
