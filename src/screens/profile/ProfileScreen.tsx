@@ -1,7 +1,6 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
 import Constants from "expo-constants";
-import { Image } from "expo-image";
 import type { SymbolViewProps } from "expo-symbols";
 import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
@@ -31,6 +30,7 @@ import { SettingsRow } from "@/components/profile/SettingsRow";
 import { openAndroidTimeDialog, ReminderTimePicker } from "@/components/ReminderTimePicker";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { Skeleton } from "@/components/Skeleton";
+import { UserAvatar } from "@/components/UserAvatar";
 import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, TERMS_URL } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors } from "@/constants/theme";
@@ -57,7 +57,7 @@ import { restorePurchases } from "@/services/purchases";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
 import type { PermissionResult, ProfilePatch, TimeSlot } from "@/types";
-import { formatMonthYear, formatTime12, getFullName, getInitials } from "@/utils/format";
+import { formatMonthYear, formatTime12, getFullName } from "@/utils/format";
 
 const { profile: text } = copy;
 const { rhythm } = copy.onboarding;
@@ -86,7 +86,6 @@ const icons = {
   chevronDown: { android: "keyboard_arrow_down", ios: "chevron.down" },
   blessing: { android: "volunteer_activism", ios: "hands.sparkles" },
   arrow: { android: "arrow_forward", ios: "arrow.right" },
-  person: { android: "person", ios: "person" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 // The trailing pictures of the rows: a chevron for a row that opens something, and the external-link mark for a
@@ -171,38 +170,17 @@ function Notice({
   );
 }
 
-// The name, email and photo come from Clerk and need no profile data, so they show in every state. The photo is
-// used only when Clerk has an uploaded one and it loads; otherwise the initials, otherwise a person icon.
+// The name, email and picture come from Clerk and need no profile data, so they show in every state. The picture is
+// UserAvatar, the same one the tab header shows: the photo, otherwise the initials, otherwise a person icon.
 function AccountHeader({ memberSince }: { memberSince: ReactNode }) {
   const { user } = useUser();
-  const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   const names = { firstName: user?.firstName, lastName: user?.lastName, email };
-  const initials = getInitials(names);
-  const photoUrl = user?.hasImage ? user.imageUrl : null;
-  const photo = photoUrl !== null && photoUrl !== failedPhoto ? photoUrl : null;
 
   return (
     <View className="flex-row items-center gap-4">
       {/* The name beside it says who this is, so the avatar is hidden from screen readers. */}
-      <View
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        className="size-16 items-center justify-center overflow-hidden rounded-full border border-petal bg-blush"
-      >
-        {photo ? (
-          <Image
-            source={{ uri: photo }}
-            contentFit="cover"
-            onError={() => setFailedPhoto(photo)}
-            style={styles.photo}
-          />
-        ) : initials ? (
-          <Text className="text-headline text-plum-deep">{initials}</Text>
-        ) : (
-          <Icon name={icons.person} size={28} color={colors.plum} />
-        )}
-      </View>
+      <UserAvatar size={64} />
       <View className="flex-1">
         <Text className="text-headline text-plum-deep">{getFullName(names) ?? text.account.friend}</Text>
         {email ? <Text className="text-body-sm text-mauve">{email}</Text> : null}
@@ -950,7 +928,6 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.linen },
-  photo: { width: 64, height: 64 },
   pressed: { opacity: 0.7 },
   disabled: { opacity: 0.5 },
 });

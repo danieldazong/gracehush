@@ -1,16 +1,11 @@
 import { useNavigation } from "@react-navigation/native";
 import { Image } from "expo-image";
-import type { SymbolViewProps } from "expo-symbols";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Icon } from "@/components/Icon";
+import { UserAvatar } from "@/components/UserAvatar";
 import { copy } from "@/constants/copy";
 import { images } from "@/constants/images";
 import type { MainTabScreenProps } from "@/navigation/types";
-
-const icons = {
-  person: { android: "person", ios: "person" },
-} satisfies Record<string, SymbolViewProps["name"]>;
 
 type ScreenHeaderProps = {
   title: string;
@@ -23,11 +18,8 @@ type ScreenHeaderProps = {
 export function ScreenHeader({ title, avatar = "link" }: ScreenHeaderProps) {
   const navigation = useNavigation<MainTabScreenProps<"Journal">["navigation"]>();
 
-  const avatarCircle = (
-    <View className="size-8 items-center justify-center rounded-full bg-plum-deep">
-      <Icon name={icons.person} size={18} color="white" />
-    </View>
-  );
+  // The same picture as Profile's account header, so the person sees themselves on every tab.
+  const avatarCircle = <UserAvatar size={32} />;
 
   return (
     <View className="border-b border-petal bg-linen">
