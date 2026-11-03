@@ -10,7 +10,7 @@ import {
   formatDuration,
   formatDurationSpoken,
   formatEntryTimestamp,
-  formatWeekday,
+  formatResetDay,
 } from "@/utils/format";
 
 const icons = {
@@ -42,8 +42,8 @@ function getKind(entry: JournalEntry): CardKind {
 function getPendingLine(entry: HomeEntry, online: boolean | null): string | null {
   const { pending } = entry;
   if (!pending) return null;
-  const weekday = pending.resetsAt === null ? null : formatWeekday(pending.resetsAt);
-  return copy.journal.card.pendingLine(pending.status, online, weekday);
+  const resetDay = pending.resetsAt === null ? null : formatResetDay(pending.resetsAt);
+  return copy.journal.card.pendingLine(pending.status, online, resetDay);
 }
 
 // One summary for a screen reader, built from the parts the card shows. The transcript is not part of it.

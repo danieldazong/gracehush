@@ -27,7 +27,7 @@ import type { RootStackScreenProps } from "@/navigation/types";
 import { MessageView } from "@/screens/journal/ReflectionStateViews";
 import { track } from "@/services/analytics";
 import { openLegalPage, openManageSubscription } from "@/services/externalLinks";
-import { formatWeekday } from "@/utils/format";
+import { formatResetDay } from "@/utils/format";
 import { activeIntroOffer, annualSavingsPercent, pricePerMonthLabel } from "@/utils/pricing";
 
 const { paywall } = copy;
@@ -162,7 +162,7 @@ function PaywallReady({
             <View className="card card--blush mb-4 gap-1">
               <Text className="text-label-lg text-ink">{paywall.limit.used(usage.limit)}</Text>
               <Text className="text-body-sm text-mauve">
-                {paywall.limit.resets(formatWeekday(usage.resetsAt))}
+                {paywall.limit.resets(formatResetDay(usage.resetsAt))}
               </Text>
               {hasEntry ? <Text className="text-body-sm text-mauve">{paywall.limit.saved}</Text> : null}
             </View>

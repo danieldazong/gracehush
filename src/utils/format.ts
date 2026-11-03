@@ -150,9 +150,11 @@ export function formatMonthYear(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-// "Monday". The usage reset is a local midnight, so it prints the same weekday in every time zone.
-export function formatWeekday(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { weekday: "long" });
+// "Monday, Nov 9": the day the free week resets, as a date, because a weekday alone ("Resets Monday") reads as today on
+// that weekday (seen on a Monday, 2026-11-02). The reset is a local midnight, printed in the phone's zone like every other
+// date the app formats.
+export function formatResetDay(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
 }
 
 interface NameParts {

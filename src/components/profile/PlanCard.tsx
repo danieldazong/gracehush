@@ -6,7 +6,7 @@ import { PrimaryButton } from "@/components/PrimaryButton";
 import { copy } from "@/constants/copy";
 import { colors, shadows } from "@/constants/theme";
 import type { PlanUsage } from "@/types";
-import { formatWeekday } from "@/utils/format";
+import { formatResetDay } from "@/utils/format";
 
 const { plan } = copy.profile;
 
@@ -108,7 +108,7 @@ export function PlanCard({ usage, trialEligible, onStartTrial, onManage }: PlanC
       {isFree ? (
         <>
           {limit === null ? null : <UsageMeter used={used} limit={limit} />}
-          <Text className="mt-2 text-body-sm text-mauve">{plan.resets(formatWeekday(resetsAt))}</Text>
+          <Text className="mt-2 text-body-sm text-mauve">{plan.resets(formatResetDay(resetsAt))}</Text>
           <ProOffer trialEligible={trialEligible} onStartTrial={onStartTrial} />
         </>
       ) : (

@@ -243,8 +243,8 @@ export const copy = {
       // element, and this is an action on it.
       playAction: "Play devotional",
       // The status line of a reflection that is saved on this phone and has not been prepared yet (step 24). The card shows
-      // it and a screen reader speaks it. `weekday` is when the free limit's week ends.
-      pendingLine: (status: OutboxStatus, online: boolean | null, weekday: string | null) => {
+      // it and a screen reader speaks it. `resetDay` is the day the free limit's week ends, as a date ("Monday, Nov 9").
+      pendingLine: (status: OutboxStatus, online: boolean | null, resetDay: string | null) => {
         switch (status) {
           case "queued":
             return online === false
@@ -255,7 +255,7 @@ export const copy = {
           case "needs_action":
             return "We couldn’t finish this one.";
           case "limit_reached":
-            return weekday ? `Saved · Unlocks with Pro or on ${weekday}` : "Saved · Unlocks with Pro";
+            return resetDay ? `Saved · Unlocks with Pro or on ${resetDay}` : "Saved · Unlocks with Pro";
           case "paused_auth":
             return "Saved · Sign in to continue";
         }
@@ -784,7 +784,7 @@ export const copy = {
       badgeActive: "Active plan",
       badgeTrial: "Free trial",
       usage: (used: number, limit: number) => `${used} of ${limit} audio devotionals used this week`,
-      resets: (weekday: string) => `Resets ${weekday}`,
+      resets: (resetDay: string) => `Resets ${resetDay}`,
       unlimited: "Unlimited audio devotionals.",
       upsell: {
         chip: "Premium",
@@ -974,7 +974,7 @@ export const copy = {
         limit === 1
           ? "You’ve used your free devotional this week."
           : `You’ve used your ${limit} free devotionals this week.`,
-      resets: (weekday: string) => `They reset ${weekday}.`,
+      resets: (resetDay: string) => `They reset ${resetDay}.`,
       saved: "Your reflection is saved.",
     },
     plan: {

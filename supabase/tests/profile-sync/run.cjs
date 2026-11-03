@@ -254,6 +254,26 @@ const row = ({
     assert.equal(copy.auth.fresh.gets, undefined, "no rows on the Sign In any more");
     assert.equal(copy.auth.fresh.freePlan, undefined, "and no free-plan line");
   });
+  await test("copy: the reset of the free week is a date, in the same words on Profile, the Paywall and a held card", async () =>{
+    const { env } = await onboarding(undefined);
+    const { copy } = env.use("@/constants/copy");
+    const { formatResetDay } = env.use("@/utils/format");
+    const before = process.env.TZ;
+    process.env.TZ = "Africa/Lagos";
+    try {
+      // Monday 2026-11-09 00:00 in Lagos: the week end the phone computed on Monday 2026-11-02, when "Resets Monday" read as
+      // today beside two reflections made the night before (last week), so the reset is a date now.
+      const day = formatResetDay("2026-11-08T23:00:00.000Z");
+      assert.equal(day, "Monday, Nov 9", "the weekday with its date, never the weekday alone");
+      assert.equal(copy.profile.plan.resets(day), "Resets Monday, Nov 9");
+      assert.equal(copy.paywall.limit.resets(day), "They reset Monday, Nov 9.");
+      assert.equal(copy.journal.card.pendingLine("limit_reached", true, day), "Saved · Unlocks with Pro or on Monday, Nov 9");
+      assert.equal(copy.journal.card.pendingLine("limit_reached", true, null), "Saved · Unlocks with Pro");
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
   await test("onboarding: resetOnboarding clears dirty", async () => {
     const { store } = await onboarding(undefined);
     store.getState().setReminder("morning", "07:00");
