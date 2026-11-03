@@ -110,16 +110,29 @@ export const copy = {
   },
   auth: {
     back: "Go back",
-    stepLabel: "Step 1 of 1",
+    // The sign-in that ends onboarding on a phone that has never signed in carries the flow's last step (step 34b); every
+    // other sign-in (after a sign-out, or "I already have an account") is a return.
+    finalStep: "Final step",
+    welcomeBack: "Welcome back",
     title: "Your sanctuary is waiting.",
     subtitle: "Sign in to keep your reflections safe and synced across your devices.",
+    fresh: {
+      title: "Save your rhythm and sanctuary.",
+      // One line under the title (2026-11-01, the Sign In cover; the hook is the user's request the same day): a pain most
+      // people feel at once, the one small thing asked of them, and the payoff the app really gives, with no promised
+      // outcome (the app's own voice keeps the Pastoral Tone Rules too). The three benefit rows that stood here from
+      // round 3 went with the cover, and the free-plan line that followed them went with the hook.
+      hook: "Tired of carrying it alone? Say it once. A devotional written for you is minutes away.",
+    },
     apple: "Continue with Apple",
     google: "Continue with Google",
     email: "Continue with email",
     or: "or",
     privacy: {
-      title: "Your entries are private",
-      body: "AI helps write and organize your reflections; you can export or permanently delete everything at any time.",
+      title: "Private prayers, real Scripture",
+      // Two lines at 375 and 390 wide (round 8 of 2026-11-01); the export line is the Permissions step's, and the
+      // translation's name is on the Welcome's rows and the Reflection's card.
+      body: "AI writes your devotional from your words. Scripture is never AI-generated.",
     },
     sheet: {
       emailTitle: "Continue with email",

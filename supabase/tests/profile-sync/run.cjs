@@ -236,6 +236,24 @@ const row = ({
     const bad = await onboarding({ state: { ...v1().state, hasSignedIn: "yes" }, version: 4 });
     assert.equal(bad.store.getState().hasSignedIn, false, "a value that is not true reads as false");
   });
+  await test("copy: the Permissions card names the three times with no-break spaces and curly punctuation, and the Sign In's one line says the free plan whole", async () => {
+    const { env } = await onboarding(undefined);
+    const { copy } = env.use("@/constants/copy");
+    const nb = String.fromCharCode(160);
+    const text = copy.onboarding.permissions.notifications.body("8:00 AM", "1:00 PM", "8:00 PM");
+    assert.equal(text.split(nb).length - 1, 3, "each clock time is joined by a no-break space");
+    assert.ok(!/[0-9] [AP]M/.test(text), "no clock time can break before its AM or PM");
+    assert.ok(!text.includes(String.fromCharCode(39)), "curly punctuation only");
+    assert.ok(text.includes("8:00" + nb + "AM") && text.includes("8:00" + nb + "PM"));
+    // The Sign In's benefit rows went with its cover, and its free-plan line with the hook (2026-11-01): one line stays,
+    // a pain, one small ask and the real payoff, promising no outcome and written in the house punctuation.
+    const hook = copy.auth.fresh.hook;
+    assert.equal(hook, "Tired of carrying it alone? Say it once. A devotional written for you is minutes away.");
+    assert.ok(!/will |solve|fix|better|guarantee|never again/i.test(hook), "the hook promises no outcome");
+    assert.ok(!hook.includes(String.fromCharCode(39)), "curly punctuation only");
+    assert.equal(copy.auth.fresh.gets, undefined, "no rows on the Sign In any more");
+    assert.equal(copy.auth.fresh.freePlan, undefined, "and no free-plan line");
+  });
   await test("onboarding: resetOnboarding clears dirty", async () => {
     const { store } = await onboarding(undefined);
     store.getState().setReminder("morning", "07:00");

@@ -1,3 +1,4 @@
+import { useIsFocused } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Image } from "expo-image";
 import { useState, type ReactNode } from "react";
@@ -10,25 +11,52 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Icon } from "@/components/Icon";
 import { PrivacyNoteCard } from "@/components/PrivacyNoteCard";
+import { StepProgress, TOTAL_STEPS } from "@/components/StepProgress";
+import { WelcomeScenes } from "@/components/WelcomeScenes";
+import { Wordmark } from "@/components/Wordmark";
 import { copy } from "@/constants/copy";
-import { images } from "@/constants/images";
-import { colors, shadows } from "@/constants/theme";
+import { images, signInScenes } from "@/constants/images";
+import { colors } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useAuthActions } from "@/hooks/useAuthActions";
 import type { RootStackParamList } from "@/navigation/types";
+import { useOnboardingStore } from "@/store/onboardingStore";
 
 import { EmailSheet } from "./EmailSheet";
 
-const { back, stepLabel, title, subtitle, apple, google, email, or, privacy } = copy.auth;
+const { back, finalStep, welcomeBack, title, subtitle, fresh: freshCopy, apple, google, email, or, privacy } = copy.auth;
+const { stepLabel } = copy.onboarding;
 
 const icons = {
   back: { android: "chevron_left", ios: "chevron.left" },
   mail: { android: "mail", ios: "envelope" },
 } as const;
+
+// The cover of the sign-in that ends onboarding (2026-11-01): the scene takes what the lockup, the title, the three
+// buttons and the privacy card leave (about 260 dp on an 812-tall phone), never less than SCENE_MIN; its fades are shorter
+// than the Welcome's because the scene is, so a face sits in the clear band between them.
+const SCENE_MIN = 240;
+const SCENE_FADE_TOP = 90;
+const SCENE_FADE_BOTTOM = 100;
+// The lockup overlaps the scene's bottom fade by this much, as on the Welcome.
+const LOCKUP_OVERLAP = 48;
+
+// The scenes' order is drawn once per launch, so a person who comes back to this screen meets a different face first:
+// four moments, two men and two women, none of them the Welcome's. The draw happens here, at import, and not in render,
+// which must stay pure.
+function shuffled<T>(items: readonly T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+const scenes = shuffled(signInScenes);
 
 type AuthButtonProps = {
   label: string;
@@ -77,6 +105,13 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
   const [pending, setPending] = useState<"apple" | "google" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emailOpen, setEmailOpen] = useState(false);
+  const hasSignedIn = useOnboardingStore((state) => state.hasSignedIn);
+  const insets = useSafeAreaInsets();
+  // The scenes' motion runs only while this screen is in front.
+  const focused = useIsFocused();
+  // The sign-in that ends onboarding on a phone that has never signed in is the flow's last step, with its progress
+  // carried over. Anyone else (after a sign-out, or "I already have an account") is welcomed back (step 34b).
+  const fresh = !hasSignedIn && !navigation.canGoBack();
 
   useAnnounce(error);
 
@@ -97,44 +132,65 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
   const busy = pending !== null;
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View className="screen__content">
-          <View className="h-14 flex-row items-center justify-between">
-            {navigation.canGoBack() ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={back}
-                onPress={() => navigation.goBack()}
-                style={({ pressed }) => pressed && styles.pressed}
-              >
-                <View className="size-11 items-center justify-center">
-                  <Icon name={icons.back} size={24} color={colors.ink} />
-                </View>
-              </Pressable>
-            ) : (
+    // The cover runs under the status bar (the progress row applies the top inset itself); the returning variant keeps the
+    // safe area on every side, as before.
+    <SafeAreaView edges={fresh ? ["bottom"] : ["top", "bottom"]} style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={fresh ? styles.coverContent : styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* The cover (2026-11-01): the last page of the story the Welcome began. The scene is full width and under the
+            status bar, the progress row sits over its top fade (below), and the lockup overlaps its bottom fade. */}
+        {fresh ? (
+          <WelcomeScenes
+            sources={scenes}
+            minHeight={SCENE_MIN}
+            active={focused}
+            fadeTop={SCENE_FADE_TOP}
+            fadeBottom={SCENE_FADE_BOTTOM}
+          />
+        ) : null}
+        <View className="screen__content" style={fresh ? styles.coverBody : undefined}>
+          {fresh ? null : (
+            <View className="h-14 flex-row items-center justify-between">
+              {navigation.canGoBack() ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={back}
+                  onPress={() => navigation.goBack()}
+                  style={({ pressed }) => pressed && styles.pressed}
+                >
+                  <View className="size-11 items-center justify-center">
+                    <Icon name={icons.back} size={24} color={colors.ink} />
+                  </View>
+                </Pressable>
+              ) : (
+                <View className="size-11" />
+              )}
+              <Text className="text-label-md tracking-[0.3px] text-mauve">{welcomeBack}</Text>
               <View className="size-11" />
-            )}
-            <Text className="text-label-md tracking-[0.3px] text-mauve">{stepLabel}</Text>
-            <View className="size-11" />
-          </View>
+            </View>
+          )}
 
           <View className="items-center">
-            <View
-              className="icon-tile mt-2 size-16 border border-petal/60"
-              style={shadows.card}
-            >
-              <Image
-                source={images.logoMark}
-                contentFit="contain"
-                style={styles.logoMark}
-              />
+            {/* The same lockup as the Welcome step and the tab header (2026-11-01), in place of the blush tile. */}
+            <View className={fresh ? undefined : "mt-2"}>
+              <Wordmark />
             </View>
-            <Text className="mt-5 text-center text-title tracking-[-0.7px] text-ink">{title}</Text>
-            <Text className="mt-2 max-w-[290px] text-center text-body text-mauve">{subtitle}</Text>
+            <Text className="mt-5 text-center text-title tracking-[-0.7px] text-ink">
+              {fresh ? freshCopy.title : title}
+            </Text>
+            {fresh ? (
+              // The hook (2026-11-01, the user's request): the pain most people feel at once, the one small thing asked of
+              // them, and the payoff the app really gives, with no promised outcome. The free-plan line that stood here
+              // went with it, and the three benefit rows before that went with the cover.
+              <Text className="mt-2 text-center text-body text-mauve">{freshCopy.hook}</Text>
+            ) : (
+              <Text className="mt-2 max-w-[290px] text-center text-body text-mauve">{subtitle}</Text>
+            )}
           </View>
 
-          <View className="mt-8 gap-3">
+          <View className={fresh ? "mt-6 gap-3" : "mt-8 gap-3"}>
             {/* The native Apple flow is iOS-only; App Store Guideline 4.8 applies to iOS only. */}
             {Platform.OS === "ios" ? (
               <AuthButton
@@ -183,6 +239,20 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
         </View>
       </ScrollView>
 
+      {/* On the cover the progress row sits over the scene's top fade, under the status bar, with every pill filled: the
+          flow goes on, it does not start over. It takes no space of its own and no touches. */}
+      {fresh ? (
+        <View pointerEvents="none" className="screen__content" style={[styles.coverHeader, { paddingTop: insets.top }]}>
+          <StepProgress
+            step={TOTAL_STEPS - 1}
+            total={TOTAL_STEPS}
+            label={finalStep}
+            accessibilityLabel={stepLabel(TOTAL_STEPS, TOTAL_STEPS)}
+            tone="onImage"
+          />
+        </View>
+      ) : null}
+
       <EmailSheet visible={emailOpen} onClose={() => setEmailOpen(false)} />
     </SafeAreaView>
   );
@@ -191,7 +261,10 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.linen },
   content: { paddingBottom: 24 },
-  logoMark: { width: 32, height: 32 },
+  // The cover's content fills the viewport, so the scene (flex 1) takes what the text and the buttons leave.
+  coverContent: { flexGrow: 1, paddingBottom: 24 },
+  coverBody: { marginTop: -LOCKUP_OVERLAP },
+  coverHeader: { position: "absolute", top: 0, left: 0, right: 0 },
   logo: { width: 16, height: 16 },
   pressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
   disabled: { opacity: 0.5 },
