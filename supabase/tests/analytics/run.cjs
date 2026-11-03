@@ -527,7 +527,7 @@ async function envChecks() {
 
 // ================================================================== the stored answer
 async function storeChecks() {
-  await test("store: a fresh install is unset; the answer is saved as version 3; reset clears it", async () => {
+  await test("store: a fresh install is unset; the answer is saved as version 4; reset clears it", async () => {
     const w = world({ token: undefined, host: undefined });
     const store = w.onboarding();
     await store.persist.rehydrate();
@@ -536,7 +536,7 @@ async function storeChecks() {
     assert.equal(store.getState().analyticsConsent, "granted");
     await settle();
     const saved = JSON.parse(w.env.storage.get("gracehush.onboarding"));
-    assert.equal(saved.version, 3);
+    assert.equal(saved.version, 4);
     assert.equal(saved.state.analyticsConsent, "granted");
     store.getState().setAnalyticsConsent("declined");
     assert.equal(store.getState().analyticsConsent, "declined");

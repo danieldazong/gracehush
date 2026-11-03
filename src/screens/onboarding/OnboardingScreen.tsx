@@ -1,9 +1,8 @@
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import type { SymbolViewProps } from "expo-symbols";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Animated,
   BackHandler,
@@ -14,29 +13,36 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BenefitList, type BenefitItem } from "@/components/BenefitList";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { openAndroidTimeDialog, ReminderTimePicker } from "@/components/ReminderTimePicker";
+import { ONBOARDING_STEPS, StepProgress, TOTAL_STEPS } from "@/components/StepProgress";
+import { WelcomeScenes } from "@/components/WelcomeScenes";
+import { Wordmark } from "@/components/Wordmark";
 import { copy } from "@/constants/copy";
-import { analyticsEnv } from "@/constants/env";
-import { images } from "@/constants/images";
-import { colors, gradients, radii, shadows } from "@/constants/theme";
+import { images, onboardingScenes } from "@/constants/images";
+import { colors, shadows } from "@/constants/theme";
 import type { RootStackParamList } from "@/navigation/types";
-import { track } from "@/services/analytics";
 import { getNotificationPermission, requestNotificationPermission } from "@/services/notifications";
 import { getMicPermission, requestMicPermission } from "@/services/recorder";
+import { isSamplePlaying, playSample, stopSample, subscribeSample } from "@/services/samplePlayer";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { formatTime12 } from "@/utils/format";
 
-const { stepCounter, stepLabel, welcome, rhythm, permissions, analytics: consent } = copy.onboarding;
+const { stepCounter, stepLabel, welcome, rhythm, permissions } = copy.onboarding;
 
-// The consent step (step 34) exists only when a PostHog token is set: without one there is nothing to agree to.
-const STEP_COUNT = analyticsEnv.status === "ok" ? 4 : 3;
-const CONSENT_STEP = 3;
+// The counter and the pills also count the Sign In that follows (TOTAL_STEPS, step 34b). The analytics choice was a fourth
+// step from step 34 until round 8 of 2026-11-01, when it moved to the Journal's first visit.
 // Fade out, swap the step, fade in: about 200ms in total.
 const FADE_MS = 100;
+// The Welcome scene takes whatever the cover's text and footer leave (2026-11-01: about 400 dp on an 812-tall phone,
+// 430 on 844), and never less than this; a short phone, or large text, scrolls the cover instead.
+const SCENE_MIN = 340;
+// The lockup overlaps the scene's linen fade: its 40 dp plus 8 of air above the scene's bottom edge.
+const LOCKUP_OVERLAP = 48;
 
 const icons = {
   morning: { android: "wb_sunny", ios: "sun.max" },
@@ -48,7 +54,10 @@ const icons = {
   microphone: { android: "mic", ios: "mic" },
   notifications: { android: "notifications", ios: "bell" },
   privacy: { android: "lock", ios: "lock" },
-  analytics: { android: "bar_chart", ios: "chart.bar" },
+  play: { android: "play_circle", ios: "play.circle" },
+  stop: { android: "stop_circle", ios: "stop.circle" },
+  headphones: { android: "headphones", ios: "headphones" },
+  book: { android: "menu_book", ios: "book" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 const slots = [
@@ -61,17 +70,28 @@ type SlotKey = (typeof slots)[number]["key"];
 
 type StepCard = { icon: SymbolViewProps["name"]; title: string; body: string };
 
-const permissionCards: readonly StepCard[] = [
-  { icon: icons.microphone, ...permissions.microphone },
-  { icon: icons.notifications, ...permissions.notifications },
+// The three things one prayer gives, under the cover's lead (2026-11-01, round 2; benefit rows since round 3; since
+// round 7 their icons take their turn once the rows have arrived: the headphones pulse, the book turns a page, the bell
+// swings, one after another).
+const deliverables: readonly BenefitItem[] = [
+  { icon: icons.headphones, text: welcome.gets.devotional, motion: "pulse" },
+  { icon: icons.book, text: welcome.gets.passage, motion: "flip" },
+  { icon: icons.notifications, text: welcome.gets.affirmations, motion: "ring" },
 ];
 
-const consentCards: readonly StepCard[] = [
-  { icon: icons.analytics, title: consent.sharedTitle, body: consent.sharedBody },
-  { icon: icons.privacy, title: consent.neverTitle, body: consent.neverBody },
-];
+// The Permissions step's cards. The notifications one names the three times chosen on the Rhythm step (step 34b).
+function permissionCardsFor(times: { morning: string; afternoon: string; evening: string }): readonly StepCard[] {
+  return [
+    { icon: icons.microphone, ...permissions.microphone },
+    {
+      icon: icons.notifications,
+      title: permissions.notifications.title,
+      body: permissions.notifications.body(times.morning, times.afternoon, times.evening),
+    },
+  ];
+}
 
-// The Permissions and consent steps' cards: an icon in a blush circle, a title and a line under it.
+// The Permissions step's cards: an icon in a blush circle, a title and a line under it.
 function StepCards({ cards }: { cards: readonly StepCard[] }) {
   return (
     <View className="mt-6 gap-3.5">
@@ -108,7 +128,6 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
   const setReminder = useOnboardingStore((state) => state.setReminder);
   const markPermissionsPrompted = useOnboardingStore((state) => state.markPermissionsPrompted);
   const completeOnboarding = useOnboardingStore((state) => state.completeOnboarding);
-  const setAnalyticsConsent = useOnboardingStore((state) => state.setAnalyticsConsent);
   // The ref ignores a second tap before the re-render that disables the buttons.
   const [isRequesting, setIsRequesting] = useState(false);
   const isRequestingRef = useRef(false);
@@ -116,6 +135,11 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
   // picker because the community iOS picker never reports changes under the new architecture.
   const [editingSlot, setEditingSlot] = useState<SlotKey | null>(null);
   const [opacity] = useState(() => new Animated.Value(1));
+  const insets = useSafeAreaInsets();
+  // The scene's motion runs only while this screen is in front (Sign In can cover it).
+  const focused = useIsFocused();
+  // The Welcome's sample: its state lives in the service, so the link follows a play that ends by itself.
+  const samplePlaying = useSyncExternalStore(subscribeSample, isSamplePlaying);
 
   const goToStep = useCallback(
     (next: number) => {
@@ -185,21 +209,10 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
     afterPermissions();
   }
 
-  // Permissions is the last step unless the consent step follows it. The navigator removes this screen as soon as
-  // onboarding is complete, so nothing touches state after completeOnboarding().
+  // Permissions is the last step (the analytics choice is asked on the Journal's first visit since round 8 of 2026-11-01).
+  // The navigator removes this screen as soon as onboarding is complete, so nothing touches state after
+  // completeOnboarding().
   function afterPermissions() {
-    if (STEP_COUNT > CONSENT_STEP) goToStep(CONSENT_STEP);
-    else completeOnboarding();
-  }
-
-  // The consent step's two equal choices. Either one finishes onboarding; only a yes sends the first event.
-  function chooseAnalytics(choice: "granted" | "declined") {
-    setAnalyticsConsent(choice);
-    if (choice === "granted") {
-      track("onboarding_completed", {
-        permissions_prompted: useOnboardingStore.getState().permissionsPromptedAt !== null,
-      });
-    }
     completeOnboarding();
   }
 
@@ -235,57 +248,87 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
       },
     },
   ];
-  // The consent step has its own footer (two buttons that look the same); the other steps take theirs from the list.
-  const footer = footers[Math.min(step, CONSENT_STEP - 1)];
+  const footer = footers[Math.min(step, ONBOARDING_STEPS - 1)];
+  const times = {
+    morning: formatTime12(reminders.morning),
+    afternoon: formatTime12(reminders.afternoon),
+    evening: formatTime12(reminders.evening),
+  };
+  const sampleTitle = copy.notifications.affirmationTitle(rhythm.slots.afternoon.name);
+  // The Welcome step is the cover (2026-11-01): its scene runs edge to edge and under the status bar, the progress row
+  // sits over the scene's top fade, and its text is centred like Sign In's. The form steps keep the header in flow,
+  // with the divider, and their text left-aligned.
+  const cover = step === 0;
+  // The sample belongs to the cover: leaving it, or the screen, stops the sound.
+  useEffect(() => {
+    if (cover && focused) return () => stopSample();
+    stopSample();
+    return undefined;
+  }, [cover, focused]);
+  const progress = (
+    <StepProgress
+      step={step}
+      total={TOTAL_STEPS}
+      label={stepCounter(step + 1, TOTAL_STEPS)}
+      accessibilityLabel={stepLabel(step + 1, TOTAL_STEPS)}
+      tone={cover ? "onImage" : "default"}
+    />
+  );
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <View className="screen__content flex-row items-center justify-between pb-4 pt-3">
-        <View className="flex-row items-center gap-1.5">
-          {Array.from({ length: STEP_COUNT }, (_, index) => (
-            <View
-              key={index}
-              className={index === step ? "h-2 w-7 rounded-full bg-plum" : "size-2 rounded-full bg-petal"}
-            />
-          ))}
-        </View>
-        <Text
-          accessibilityLabel={stepLabel(step + 1, STEP_COUNT)}
-          className="font-dm-semibold text-[12px] uppercase leading-[16px] tracking-[1.2px] text-mauve"
-        >
-          {stepCounter(step + 1, STEP_COUNT)}
-        </Text>
-      </View>
-      <View className="divider" />
+    <SafeAreaView edges={["bottom"]} style={styles.screen}>
+      {cover ? null : (
+        <>
+          <View className="screen__content" style={{ paddingTop: insets.top }}>
+            {progress}
+          </View>
+          <View className="divider" />
+        </>
+      )}
 
-      <View className="screen__content flex-1">
+      <View className={cover ? "flex-1" : "screen__content flex-1"}>
         <Animated.View style={[styles.fill, { opacity }]}>
           <ScrollView
             key={step}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={cover ? styles.coverContent : styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
             {step === 0 && (
               <>
-                <LinearGradient
-                  colors={gradients.brand.colors}
-                  locations={gradients.brand.locations}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.hero}
-                >
-                  <View className="size-20 items-center justify-center rounded-card border border-white/20 bg-white/15 p-4">
-                    <Image source={images.logoMarkLight} contentFit="contain" style={styles.logo} />
+                {/* The scene fills whatever the text below leaves: the content container fills the viewport and the
+                    scene has flex 1 (2026-11-01, round 2). */}
+                <WelcomeScenes sources={onboardingScenes} minHeight={SCENE_MIN} active={focused} />
+                {/* The lockup sits on the scene's fade, so the cover reads as one piece; the headline is the one big
+                    text on the screen. */}
+                <View className="screen__content items-center pb-4" style={styles.coverText}>
+                  <Wordmark />
+                  <Text className="mt-4 text-center text-headline-lg text-ink">{welcome.title}</Text>
+                  <Text className="mt-3 text-center text-body text-mauve">{welcome.subtitle}</Text>
+                  {/* The three things one prayer gives, as benefit rows that arrive one after another (2026-11-01,
+                      round 3): a tile and a medium line each, the eye led down the list to the button. The wrapper
+                      stretches (round 5): under items-center its width was auto, and a long line overflowed the phone. */}
+                  <View className="mt-3 self-stretch">
+                    <BenefitList items={deliverables} active={focused} />
                   </View>
-                  <Text className="mt-4 font-fraunces text-[30px] leading-[36px] text-white">
-                    {welcome.wordmark}
-                  </Text>
-                  <Text className="mt-1 font-dm-semibold text-[11px] uppercase leading-[16px] tracking-[2.4px] text-white/80">
-                    {welcome.tagline}
-                  </Text>
-                </LinearGradient>
-                <Text className="mt-6 text-headline-lg text-ink">{welcome.title}</Text>
-                <Text className="mt-3 text-body-lg text-mauve">{welcome.subtitle}</Text>
+                  {/* The sample (round 8): what it sounds like, before anyone signs in. 28 tall with a 44 touch area, so
+                      the cover still fits an 812-tall phone without scrolling. */}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={samplePlaying ? welcome.sample.stop : welcome.sample.play}
+                    accessibilityHint={welcome.sample.hint}
+                    hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+                    className="mt-1.5 h-7 flex-row items-center justify-center gap-1.5 self-center"
+                    onPress={() => {
+                      if (samplePlaying) stopSample();
+                      else playSample();
+                    }}
+                  >
+                    <Icon name={samplePlaying ? icons.stop : icons.play} size={18} color={colors.plum} />
+                    <Text className="font-dm-medium text-[13px] leading-[18px] text-plum">
+                      {samplePlaying ? welcome.sample.stop : welcome.sample.play}
+                    </Text>
+                  </Pressable>
+                </View>
               </>
             )}
 
@@ -327,7 +370,26 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
                     );
                   })}
                 </View>
-                <Text className="mt-5 text-center text-body-sm text-mauve">{rhythm.helper}</Text>
+                {/* What arrives at the afternoon time, as a sample (2026-11-01, round 2): the slot's title as the
+                    notification writes it, marked as a sample, over a headline the model really wrote. One element for a
+                    screen reader, which hears it is a sample first. */}
+                <View
+                  accessible
+                  accessibilityLabel={rhythm.sample.a11y(sampleTitle, times.afternoon, rhythm.sample.headline)}
+                  className="card mt-5 gap-1.5 p-3"
+                  style={shadows.card}
+                >
+                  <View className="flex-row items-center gap-2">
+                    <Image source={images.logoMark} contentFit="contain" style={styles.sampleMark} />
+                    <Text className="shrink font-dm-semibold text-[13px] leading-[18px] text-ink">
+                      {sampleTitle}
+                      <Text className="font-dm text-mauve"> · {rhythm.sample.tag}</Text>
+                    </Text>
+                    <Text className="ml-auto shrink-0 text-body-sm text-mauve">{times.afternoon}</Text>
+                  </View>
+                  <Text className="text-body text-ink">{rhythm.sample.headline}</Text>
+                </View>
+                <Text className="mt-4 text-center text-body-sm text-mauve">{rhythm.helper}</Text>
               </>
             )}
 
@@ -338,31 +400,15 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
                   <Text className="text-headline-lg text-ink">{permissions.title}</Text>
                   <Text className="text-body text-mauve">{permissions.subtitle}</Text>
                 </View>
-                <StepCards cards={permissionCards} />
+                <StepCards cards={permissionCardsFor(times)} />
                 <PrivacyLine text={permissions.privacy} />
-              </>
-            )}
-
-            {step === CONSENT_STEP && (
-              <>
-                <View className="gap-2">
-                  <Text className="eyebrow">{consent.eyebrow}</Text>
-                  <Text className="text-headline-lg text-ink">{consent.title}</Text>
-                  <Text className="text-body text-mauve">{consent.subtitle}</Text>
-                </View>
-                <StepCards cards={consentCards} />
-                <PrivacyLine text={consent.note} />
               </>
             )}
           </ScrollView>
 
-          {step === CONSENT_STEP ? (
-            <View className="gap-3 pb-2 pt-6">
-              <PrimaryButton label={consent.share} tone="ghost" onPress={() => chooseAnalytics("granted")} />
-              <PrimaryButton label={consent.notNow} tone="ghost" onPress={() => chooseAnalytics("declined")} />
-            </View>
-          ) : (
-            <View className={step === 0 ? "pb-2 pt-8" : "pb-2 pt-6"}>
+          {/* The cover's content has no side padding of its own (the scene is full width), so its footer takes it here. */}
+          <View className={cover ? "screen__content" : undefined}>
+            <View className={step === 0 ? "pb-2 pt-4" : "pb-2 pt-6"}>
               <PrimaryButton
                 label={footer.label}
                 iconRight={footer.icon}
@@ -379,9 +425,17 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
                 <Text className={footer.link.className}>{footer.link.label}</Text>
               </Pressable>
             </View>
-          )}
+          </View>
         </Animated.View>
       </View>
+
+      {/* On the cover the progress row sits over the scene's top fade, under the status bar: the scene runs to the
+          screen's top edge and the header takes no space of its own. */}
+      {cover ? (
+        <View pointerEvents="none" className="screen__content" style={[styles.coverHeader, { paddingTop: insets.top }]}>
+          {progress}
+        </View>
+      ) : null}
 
       <ReminderTimePicker
         slot={editingSlot}
@@ -399,6 +453,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.linen },
   fill: { flex: 1 },
   scrollContent: { paddingTop: 16 },
-  hero: { alignItems: "center", borderRadius: radii.hero, padding: 32 },
-  logo: { width: 48, height: 48 },
+  // The cover's content fills the viewport, so the scene (flex 1) takes what the text leaves.
+  coverContent: { flexGrow: 1 },
+  coverText: { marginTop: -LOCKUP_OVERLAP },
+  coverHeader: { position: "absolute", top: 0, left: 0, right: 0 },
+  sampleMark: { width: 18, height: 18 },
 });

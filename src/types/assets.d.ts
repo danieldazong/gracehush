@@ -8,6 +8,11 @@ declare module "*.png" {
   export default source;
 }
 
+declare module "*.jpg" {
+  const source: number;
+  export default source;
+}
+
 declare module "*.m4a" {
   const source: number;
   export default source;

@@ -94,6 +94,17 @@ export const layout = {
 
 export const gradients = {
   brand: { colors: [colors.plum, colors.rose], locations: [0, 1] },
+  // The Welcome scene's soft edges (2026-11-01): linen over the scene's top, where the status bar and the progress row
+  // sit (95% at the edge, 65% halfway, so plum pills read on a dark roof as well as a pale sky), and linen under it,
+  // where the lockup and the headline begin, so the picture has no hard edge on either side.
+  sceneTop: {
+    colors: [`${colors.linen}F2`, `${colors.linen}A6`, `${colors.linen}00`],
+    locations: [0, 0.5, 1],
+  },
+  sceneBottom: {
+    colors: [`${colors.linen}00`, `${colors.linen}B3`, colors.linen],
+    locations: [0, 0.5, 1],
+  },
 } as const;
 
 // iOS shadowRadius is half the CSS blur. iOS has no spread and Android has no offset, so both approximate the CSS shadow.

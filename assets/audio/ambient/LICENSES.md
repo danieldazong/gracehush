@@ -25,3 +25,6 @@ constant gain to the spoken devotional's loudness (-22 LUFS, or lower to keep th
   videos by the sound itself, whatever it is called). That does not touch the app, but never use this sound in a video
   posted to YouTube (a promo, a tutorial, a store preview uploaded there): show Soft Rain, Morning Birds or Off instead.
   The rain's and the birds' pages show no Content ID registration (checked on 2026-10-28).
+- **gentle-piano in the Welcome's sample:** the loop's first 20.5 seconds are also mixed under the voice in
+  `assets/audio/sample-devotional.m4a` (2026-11-01), the same in-app use under the same license, so the note above
+  applies to that file as well.

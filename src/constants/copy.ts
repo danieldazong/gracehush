@@ -3,6 +3,10 @@ import type { AmbientSound, OutboxStatus, PlaybackError, PlaybackRate, TimeSlot 
 // "1 day", "7 days". The paywall's trial lines and disclosures share it.
 const daysLabel = (days: number) => (days === 1 ? "1 day" : `${days} days`);
 
+// A clock time ("8:00 AM") keeps its digits and its AM or PM on one line (step 34b: the Permissions card and the Sign In
+// subtitle name the three reminder times).
+const unbreakable = (time: string) => time.replace(" ", "\u00A0");
+
 // What the mini player and Now Playing say when a devotional's audio could not be had (step 26). Tapping play tries again.
 const playbackErrors = {
   offline: "Audio needs a connection.",
@@ -14,57 +18,68 @@ export const copy = {
     stepCounter: (step: number, total: number) => `${step} of ${total}`,
     stepLabel: (step: number, total: number) => `Step ${step} of ${total}`,
     welcome: {
-      wordmark: "Gracehush",
-      tagline: "Audio Sanctuary",
       title: "A quiet place for your heart.",
-      subtitle:
-        "Speak or write what you’re carrying. Receive scripture, a spoken devotional, and gentle reminders through your day.",
-      primary: "Get Started",
+      // The cover's lead and the three things one prayer gives (2026-11-01, round 2: a list the eye can scan in place of
+      // a paragraph; round 4: written for what the person is carrying, not as a specification; round 5: one line each at
+      // 375 and 390 wide, measured with the font files, because two-line rows read as long). Every claim is the app's
+      // own: one short entry is enough (10 characters, or 3 seconds), spoken or typed; the devotional is made from the
+      // entry; the passage is word-for-word Scripture chosen for it; three affirmations a day on the lock screen.
+      subtitle: "One broken sentence is enough, in the car or late at night. Speak or write it, and you’ll have:",
+      gets: {
+        devotional: "A spoken devotional from your words",
+        passage: "Scripture chosen for what you shared",
+        affirmations: "Three affirmations on your lock screen",
+      },
+      primary: "Begin Your Quiet Time",
       signIn: "I already have an account",
+      // The 20-second sample under the rows (2026-11-01, round 8): a short devotional written for the Welcome in the voice
+      // the prompt asks for, read by the app's real voice with the Gentle Piano under it, so a person hears what they will
+      // get before they sign in. The hint is what a screen reader adds to the label.
+      sample: {
+        play: "Hear a 20-second sample",
+        stop: "Stop the sample",
+        hint: "A short devotional in the app’s own voice, with the Gentle Piano under it",
+      },
     },
     rhythm: {
       eyebrow: "Your rhythm",
       title: "When would you like a gentle word?",
-      subtitle: "Three short affirmations, drawn from your own prayers, at the times you choose.",
+      subtitle: "Three gentle affirmations drawn from your own prayers — waiting on your lock screen at the times you choose.",
       slots: {
         morning: { name: "Morning", descriptor: "Dawn stillness & focus" },
         afternoon: { name: "Afternoon", descriptor: "Midday breather & peace" },
         evening: { name: "Evening", descriptor: "Rest & surrender" },
       },
       helper: "You can change these anytime in Settings.",
-      primary: "Continue",
+      // The sample lock-screen word under the three cards (2026-11-01, round 2): the afternoon slot's title as the
+      // notification's own builder writes it, marked as a sample, over a headline the model really wrote (step 34b, B4).
+      sample: {
+        tag: "Sample",
+        headline: "You are held by his grace",
+        a11y: (title: string, time: string, headline: string) => `Sample ${title} at ${time}: ${headline}`,
+      },
+      primary: "Save My Daily Rhythm",
       back: "Back",
       done: "Done",
       changeTime: (slot: string, time: string) => `${slot} reminder, ${time}, change time`,
     },
     permissions: {
-      eyebrow: "Before we begin",
-      title: "Two small things to make Gracehush work",
+      eyebrow: "Your voice & rhythm",
+      title: "Let Gracehush hear you and remind you.",
       subtitle: "We’ll only ask once. You can change these in your device settings.",
       microphone: {
         title: "Microphone",
-        body: "So you can pray out loud. Your recording is used only to create your reflection.",
+        body: "So you can pray out loud in the car, on a walk or late at night. Your recording is used only to create your reflection.",
       },
+      // The three times are the Rhythm step's, as "8:00 AM" (step 34b).
       notifications: {
         title: "Notifications",
-        body: "For your three daily affirmations. Never ads or spam.",
+        body: (morning: string, afternoon: string, evening: string) =>
+          `Delivers your ${unbreakable(morning)}, ${unbreakable(afternoon)} and ${unbreakable(evening)} affirmations. Never ads or streak guilt.`,
       },
-      privacy: "Your words stay private. You can export or delete everything anytime.",
+      privacy: "Your words stay private. Export or permanently delete everything anytime.",
       primary: "Allow & Continue",
-      later: "Maybe later",
-    },
-    // The consent step (step 34), shown only when a PostHog token is set. Its two choices look the same.
-    analytics: {
-      eyebrow: "Your choice",
-      title: "Help improve Gracehush?",
-      subtitle: "Share anonymous usage data, like which features you use. The app works the same either way.",
-      sharedTitle: "What’s shared",
-      sharedBody: "Which features you use, your plan and the app version. Not tied to your name or email.",
-      neverTitle: "Never shared",
-      neverBody: "Your words, prayers, recordings, name or email.",
-      note: "You can change this anytime in Profile.",
-      share: "Share usage data",
-      notNow: "Not now",
+      later: "Ask me later",
     },
   },
   common: {
@@ -145,6 +160,15 @@ export const copy = {
       name ? `Good ${period}, ${name}` : `Good ${period}`,
     reflectionDays: (count: number) =>
       count === 1 ? "1 day of reflection" : `${count} days of reflection`,
+    // The analytics question (step 34), asked on the Journal's first visit after sign-in since round 8 of 2026-11-01
+    // (until then onboarding's fourth step, before the person had received anything): the card's words and its two choices.
+    // Unanswered is no.
+    consent: {
+      title: "Help improve Gracehush?",
+      body: "Share anonymous usage data, like which features you use. Never your words, prayers or recordings.",
+      share: "Share usage data",
+      notNow: "Not now",
+    },
     affirmation: {
       eyebrow: (slotName: string) => `${slotName} affirmation`,
       save: "Save affirmation",

@@ -18,6 +18,7 @@ interface OnboardingState {
   remindersSyncedAt: string | null; // ISO, set when the times last matched users_profile (step 17)
   remindersDirty: boolean; // an edit the server has not seen yet (step 17)
   analyticsConsent: AnalyticsConsent; // step 34
+  hasSignedIn: boolean; // a session has been active on this device (step 34b): the Sign In screen reads it
   setReminder: (slot: TimeSlot, hhmm: string) => void;
   markRemindersSynced: () => void; // the server has these times
   applyServerReminders: (times: Record<TimeSlot, string>) => void; // the server's times replace this device's
@@ -25,6 +26,7 @@ interface OnboardingState {
   completeOnboarding: () => void; // idempotent
   markPermissionsPrompted: () => void;
   setAnalyticsConsent: (consent: "granted" | "declined") => void;
+  markSignedIn: () => void; // idempotent
   resetOnboarding: () => void; // dev only
 }
 
@@ -38,6 +40,7 @@ type OnboardingPersisted = Pick<
   | "remindersSyncedAt"
   | "remindersDirty"
   | "analyticsConsent"
+  | "hasSignedIn"
 >;
 
 const HHMM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -69,6 +72,7 @@ function getInitialData(): OnboardingPersisted {
     remindersSyncedAt: null,
     remindersDirty: false,
     analyticsConsent: "unset",
+    hasSignedIn: false,
   };
 }
 
@@ -119,11 +123,17 @@ export const useOnboardingStore = create<OnboardingState>()(
         set({ permissionsPromptedAt: new Date().toISOString() });
       },
       setAnalyticsConsent: (consent) => set({ analyticsConsent: consent }),
+      markSignedIn: () => {
+        if (get().hasSignedIn) {
+          return;
+        }
+        set({ hasSignedIn: true });
+      },
       resetOnboarding: () => set(getInitialData()),
     }),
     {
       name: "gracehush.onboarding",
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => safeStorage),
       partialize: (state): OnboardingPersisted => ({
         hasCompletedOnboarding: state.hasCompletedOnboarding,
@@ -133,14 +143,19 @@ export const useOnboardingStore = create<OnboardingState>()(
         remindersSyncedAt: state.remindersSyncedAt,
         remindersDirty: state.remindersDirty,
         analyticsConsent: state.analyticsConsent,
+        hasSignedIn: state.hasSignedIn,
       }),
       // `merge` validates every field. Version 2 (step 17) added remindersDirty. Before it nothing synced the times, so
       // a time that differs from the default was changed on this device and the server has not seen it. Version 3 (step 34)
-      // added analyticsConsent: a save from before it has never been asked, so it is unset.
+      // added analyticsConsent: a save from before it has never been asked, so it is unset. Version 4 (step 34b) added
+      // hasSignedIn: the returning-user rule marks onboarding complete for any signed-in session, so a save from before it
+      // that had completed onboarding counts as a device that has signed in.
       migrate: (persisted: unknown, version: number) => {
         const saved: Record<string, unknown> = isRecord(persisted) ? persisted : {};
-        if (version >= 3) return saved as OnboardingPersisted;
-        if (version === 2) return { ...saved, analyticsConsent: "unset" } as OnboardingPersisted;
+        if (version >= 4) return saved as OnboardingPersisted;
+        const hasSignedIn = saved.hasCompletedOnboarding === true;
+        if (version === 3) return { ...saved, hasSignedIn } as OnboardingPersisted;
+        if (version === 2) return { ...saved, analyticsConsent: "unset", hasSignedIn } as OnboardingPersisted;
         const savedReminders: Record<string, unknown> = isRecord(saved.reminders) ? saved.reminders : {};
         const changed = (Object.keys(DEFAULT_REMINDERS) as TimeSlot[]).some(
           (slot) => isHHmm(savedReminders[slot]) && savedReminders[slot] !== DEFAULT_REMINDERS[slot],
@@ -149,6 +164,7 @@ export const useOnboardingStore = create<OnboardingState>()(
           ...saved,
           remindersDirty: changed && saved.remindersSyncedAt == null,
           analyticsConsent: "unset",
+          hasSignedIn,
         } as OnboardingPersisted;
       },
       // zustand's default merge is shallow: one bad reminder slot would replace the whole object.
@@ -171,6 +187,7 @@ export const useOnboardingStore = create<OnboardingState>()(
           remindersDirty: saved.remindersDirty === true,
           analyticsConsent:
             saved.analyticsConsent === "granted" || saved.analyticsConsent === "declined" ? saved.analyticsConsent : "unset",
+          hasSignedIn: saved.hasSignedIn === true,
         };
       },
       // With safeStorage this should never fire: it is the last line of defence.

@@ -201,16 +201,40 @@ const row = ({
     assert.equal(s().remindersSyncedAt, syncedAt);
     assert.equal(s().reminders.morning, "05:00"); // the time itself stays
   });
-  await test("onboarding: what is saved is version 3 and includes remindersDirty and the analytics choice", async () => {
+  await test("onboarding: what is saved is version 4 and includes remindersDirty, the analytics choice and hasSignedIn", async () => {
     const { env, store } = await onboarding(undefined);
     store.getState().setReminder("afternoon", "14:00");
     await sleep(30);
     const saved = JSON.parse(env.storage.get("gracehush.onboarding"));
-    assert.equal(saved.version, 3);
+    assert.equal(saved.version, 4);
     assert.equal(saved.state.analyticsConsent, "unset");
+    assert.equal(saved.state.hasSignedIn, false);
     assert.equal(saved.state.remindersDirty, true);
     assert.equal(saved.state.reminders.afternoon, "14:00");
     assert.equal(typeof saved.state.setReminder, "undefined");
+  });
+  await test("onboarding: a session marks the device as signed in once, the dev reset clears it, and an older save counts a completed onboarding as signed in", async () => {
+    const { store } = await onboarding(undefined);
+    assert.equal(store.getState().hasSignedIn, false);
+    store.getState().markSignedIn();
+    store.getState().markSignedIn();
+    assert.equal(store.getState().hasSignedIn, true);
+    store.getState().resetOnboarding();
+    assert.equal(store.getState().hasSignedIn, false);
+    const v3 = (extra) => ({ state: { ...v1().state, remindersDirty: false, analyticsConsent: "unset", ...extra }, version: 3 });
+    const done = await onboarding(v3({ hasCompletedOnboarding: true }));
+    assert.equal(done.store.getState().hasSignedIn, true, "a version 3 save that completed onboarding has signed in");
+    const fresh = await onboarding(v3({ hasCompletedOnboarding: false }));
+    assert.equal(fresh.store.getState().hasSignedIn, false, "one that did not has not");
+    const v2 = (extra) => ({ state: { ...v1().state, remindersDirty: false, ...extra }, version: 2 });
+    for (const [name, save] of [["version 2", v2], ["version 1", (extra) => v1(extra)]]) {
+      const old = await onboarding(save({ hasCompletedOnboarding: true }));
+      assert.equal(old.store.getState().hasSignedIn, true, `a ${name} save that completed onboarding has signed in`);
+      const none = await onboarding(save({ hasCompletedOnboarding: false }));
+      assert.equal(none.store.getState().hasSignedIn, false, `a ${name} save that did not has not`);
+    }
+    const bad = await onboarding({ state: { ...v1().state, hasSignedIn: "yes" }, version: 4 });
+    assert.equal(bad.store.getState().hasSignedIn, false, "a value that is not true reads as false");
   });
   await test("onboarding: resetOnboarding clears dirty", async () => {
     const { store } = await onboarding(undefined);

@@ -19,6 +19,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AffirmationCard } from "@/components/AffirmationCard";
+import { AnalyticsConsentCard } from "@/components/AnalyticsConsentCard";
 import { Icon } from "@/components/Icon";
 import { JournalCard } from "@/components/JournalCard";
 import { NoticeBanner } from "@/components/NoticeBanner";
@@ -29,6 +30,7 @@ import { ScreenHeader } from "@/components/ScreenHeader";
 import { Skeleton } from "@/components/Skeleton";
 import { Toast } from "@/components/Toast";
 import { copy } from "@/constants/copy";
+import { analyticsEnv } from "@/constants/env";
 import { images } from "@/constants/images";
 import { colors, layout } from "@/constants/theme";
 import {
@@ -42,7 +44,9 @@ import {
 import { useJournalHome } from "@/hooks/useJournalHome";
 import { useTabBarClearance, useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
+import { track } from "@/services/analytics";
 import { discardItem } from "@/services/syncEngine";
+import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
 import type { HomeEntry } from "@/types";
 import {
@@ -262,6 +266,21 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
   // The refused reflection whose "Review" was tapped.
   const [reviewing, setReviewing] = useState<HomeEntry | null>(null);
 
+  // The analytics question, once, on the first visit after sign-in (2026-11-01, round 8; until then onboarding's fourth
+  // step): shown while the device has not answered and a PostHog token is set. Sharing also sends the first event, as the
+  // step did; an unanswered card means no, as before.
+  const analyticsConsent = useOnboardingStore((state) => state.analyticsConsent);
+  const setAnalyticsConsent = useOnboardingStore((state) => state.setAnalyticsConsent);
+  const askConsent = analyticsEnv.status === "ok" && analyticsConsent === "unset";
+  function chooseAnalytics(choice: "granted" | "declined") {
+    setAnalyticsConsent(choice);
+    if (choice === "granted") {
+      track("onboarding_completed", {
+        permissions_prompted: useOnboardingStore.getState().permissionsPromptedAt !== null,
+      });
+    }
+  }
+
   // The synced toast shows when the device goes from offline to online and nothing is left to send. The previous
   // value is kept in state and compared during render, and only while the data is ready: a scenario switch shows the
   // skeleton in between, and it must still count as offline to online. With reflections still waiting, "All
@@ -330,6 +349,9 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
             onPress: () => navigation.navigate("CrisisResources", { source: "journal" }),
           }}
         />
+      ) : null}
+      {askConsent ? (
+        <AnalyticsConsentCard onShare={() => chooseAnalytics("granted")} onNotNow={() => chooseAnalytics("declined")} />
       ) : null}
       {affirmationCard}
       {hasNoEntries ? null : (

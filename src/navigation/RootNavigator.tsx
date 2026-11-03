@@ -44,14 +44,18 @@ export function RootNavigator() {
   const { isLoaded, isSignedIn } = useAuth();
   const hasCompletedOnboarding = useOnboardingStore((state) => state.hasCompletedOnboarding);
   const completeOnboarding = useOnboardingStore((state) => state.completeOnboarding);
+  const markSignedIn = useOnboardingStore((state) => state.markSignedIn);
 
   // A signed-in user has already been through the first screens (on another device, or before this
-  // flag existed). Marking it done keeps Welcome from showing after they sign out.
+  // flag existed). Marking it done keeps Welcome from showing after they sign out, and the device now
+  // counts as one that has signed in, so the next Sign In welcomes the person back (step 34b). Both
+  // actions are idempotent.
   useEffect(() => {
-    if (isLoaded && isSignedIn && !hasCompletedOnboarding) {
+    if (isLoaded && isSignedIn) {
       completeOnboarding();
+      markSignedIn();
     }
-  }, [isLoaded, isSignedIn, hasCompletedOnboarding, completeOnboarding]);
+  }, [isLoaded, isSignedIn, completeOnboarding, markSignedIn]);
 
   // The splash screen is still visible until Clerk has loaded.
   if (!isLoaded) {
