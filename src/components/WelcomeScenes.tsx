@@ -9,7 +9,7 @@ import { colors, gradients } from "@/constants/theme";
 const HOLD_MS = 7_000;
 
 // The soft edges: linen over the scene's top, where the status bar and the progress row sit, and under it, where the
-// lockup and the headline begin. The Welcome's heights; a shorter scene (the Sign In's) passes shorter ones.
+// lockup and the headline begin. The Welcome's heights; the Sign In's shorter scene passes its own.
 const TOP_FADE = 120;
 const BOTTOM_FADE = 140;
 

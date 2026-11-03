@@ -37,10 +37,12 @@ const icons = {
 } as const;
 
 // The cover of the sign-in that ends onboarding (2026-11-01): the scene takes what the lockup, the title, the three
-// buttons and the privacy card leave (about 260 dp on an 812-tall phone), never less than SCENE_MIN; its fades are shorter
-// than the Welcome's because the scene is, so a face sits in the clear band between them.
+// buttons and the privacy card leave (about 260 dp on an 812-tall phone), never less than SCENE_MIN. Its bottom fade is
+// shorter than the Welcome's because the scene is, so a face sits in the clear band between the two. The top fade follows
+// the status bar, because the progress row sits just under it: at a fixed 90 the pills fell to 1.16:1 over the darkest
+// scene on the newest iPhones, and this keeps them at 4.02:1 or better on every iPhone.
 const SCENE_MIN = 240;
-const SCENE_FADE_TOP = 90;
+const SCENE_FADE_BELOW_INSET = 72;
 const SCENE_FADE_BOTTOM = 100;
 // The lockup overlaps the scene's bottom fade by this much, as on the Welcome.
 const LOCKUP_OVERLAP = 48;
@@ -146,7 +148,7 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
             sources={scenes}
             minHeight={SCENE_MIN}
             active={focused}
-            fadeTop={SCENE_FADE_TOP}
+            fadeTop={insets.top + SCENE_FADE_BELOW_INSET}
             fadeBottom={SCENE_FADE_BOTTOM}
           />
         ) : null}
