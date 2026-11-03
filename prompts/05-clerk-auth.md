@@ -166,7 +166,7 @@ When finished, print this checklist, filled in with `com.gracehush.app` for the 
 6. Google Cloud Console: create the Web OAuth client (paste the Clerk redirect URI into it) and the Android client (package name + the SHA-1 that step 05b prints).
 7. Put the Web and Android client IDs in `.env.local`, then I run step 05b (`prompts/05b-dev-builds.md`).
 
-**C. Needed for the iPhone (waits for the last step, `prompts/35-ios-developer-account.md`)**
+**C. Needed for the iPhone (waits for the last step, `prompts/35-ios-developer-account.md`, whose sections A to C hold these steps click by click)**
 
 8. **Native applications**: add the iOS app (App ID Prefix + Bundle ID). **SSO connections**: enable Apple (sign-up + sign-in).
 9. Google Cloud Console: create the iOS OAuth client, then put its client ID and the iOS URL scheme in `.env.local`.

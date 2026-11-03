@@ -55,10 +55,10 @@ Write one for every step that changes what the person sees or does on the phone,
 
 Say once, before B0:
 
-- whether anything needs a restart or a fresh install (`npx expo start -c` and a force-quit of Expo Go when the step adds files or assets, or changes `app.json`, `metro.config.js`, `global.css` or `package.json`)
+- whether anything needs a restart or a fresh install (`npx expo start -c --dev-client` and a force-quit of the app when the step adds files or assets, or changes `metro.config.js`, `global.css` or `package.json`; a new EAS build when it changes native config: `app.json`, a config plugin or a native package)
 - which account, plan and test data the walk-through needs (for example a reflection with real audio, or a free account that has used its weekly devotionals)
 - what it costs (Gemini and Text-to-Speech calls, emails sent, real charges), or that it costs nothing new
-- that the app stays open and in front for the whole run (iOS pauses the app's JavaScript when Expo Go is minimized or the phone is locked, and the agent can read nothing then)
+- that the app stays open and in front for the whole run (iOS pauses the app's JavaScript when it is minimized or the phone is locked, and the agent can read nothing then)
 
 Number the checks B0, B1, and so on. B0 is always the starting state: signed in as the right account, the right data source, and the keys present. Each check has three lines:
 
@@ -66,7 +66,7 @@ Number the checks B0, B1, and so on. B0 is always the starting state: signed in 
 - **Expect**: what must be true afterwards, as something that can be read: a store value, a count, a status, a column of a row, the text on screen, a log line, an HTTP status. Mark anything that can only be seen or heard (the sound, an animation, how a screen looks, haptics, what the lock screen or a notification shows, an OS dialog): for those the agent asks for a screenshot or a one-word answer.
 - **Read** (the agent): exactly how it checks: which store value or repository function the inspector probe calls, which query or request it runs (or the SQL the user runs and sends back), or "ask the user".
 
-A check that nothing can read and the user did not answer is "not verified" in the report, never PASS. Do not write a check for something that cannot work on this target (Siri on the user's iPhone, lock-screen or background audio in Expo Go, anything that needs the iOS development build of step 35): list it under "not verified", with where it can be tested.
+A check that nothing can read and the user did not answer is "not verified" in the report, never PASS. Do not write a check for something that cannot work on this target (Siri on the user's iPhone, an App Store purchase before Apple has accepted the tax form): list it under "not verified", with where it can be tested.
 
 ## AGENTS.md updates
 

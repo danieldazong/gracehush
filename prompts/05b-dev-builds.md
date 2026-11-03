@@ -1,5 +1,7 @@
 # 05b-dev-builds.md
 
+> **Note (2026-11-02).** Step 35 is being implemented first. Once it has run: `expo-dev-client` is installed and listed in `app.json` with its options, `eas.json` exists with one `development` profile, `.env.local` holds the Web and iOS Google client IDs, and `npx expo start` already targets the dev client (Expo Go is `npx expo start --go`). So here skip decision 1's install and decision 4's search, keep `eas.json` as it is (the "do not create" line no longer applies), and add only the Android client and the Android app entry. The iPhone is no longer on Expo Go.
+
 Read AGENTS.md first and follow it strictly, including "Instructional Memory": the iOS developer account comes last, and my iPhone stays on Expo Go until then.
 
 Set up a **local Android development build** on this Windows PC, so the native modules from step 05 (and the ones later steps add) run in a real app on the emulator instead of Expo Go. Then use it to verify Google sign-in on Android from step 05. This step is tooling only: no screen, copy or feature changes. The iPhone, EAS and the Apple developer account are not part of it: they are the last step (`prompts/35-ios-developer-account.md`). There is no Mac here, so `npx expo run:ios` can never work, and no prompt or reply may tell me to run it.
