@@ -567,7 +567,7 @@ function makeRealtimeFake() {
 
 // ------------------------------------------------------------------ one world per check
 // `realtime: "real"` loads the real Realtime service (supabase/tests/realtime fakes the channel on the real client instead).
-function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes: extraFakes = {}, realtime = "fake" } = {}) {
+function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes: extraFakes = {}, realtime = "fake", aiPermission = "fake" } = {}) {
   const sqlite = offline.makeSqlite();
   const secure = offline.makeSecureStore();
   const net = offline.makeNetInfo();
@@ -619,6 +619,8 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
   };
   const realtimeFake = makeRealtimeFake();
   if (realtime === "fake") fakes["@/services/realtime"] = realtimeFake.module;
+  // The account has allowed Google's AI in every suite but supabase/tests/ai-permission, which checks the real answer.
+  if (aiPermission === "fake") fakes["@/services/aiPermission"] = { __esModule: true, hasAiPermission: () => true };
   // A suite can fake more modules that plain Node cannot load (step 29b: the player store and the devotional files).
   Object.assign(fakes, extraFakes);
   const env = makeEnv({ fakes });

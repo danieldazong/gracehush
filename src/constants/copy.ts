@@ -17,6 +17,33 @@ const playbackErrors = {
 } satisfies Record<PlaybackError, string>;
 
 export const copy = {
+  // The permission New Entry asks for before anything can be said or written (Apple's guideline 5.1.2(i), 2026-11-03). It names
+  // who receives what, why, and what that company's terms allow. Google's paid Gemini terms and its Cloud Text-to-Speech page were
+  // read that day: read them again before changing "What Google can do with it".
+  aiPermission: {
+    eyebrow: "Your permission",
+    title: "May we share your prayers with Google’s AI?",
+    lead: "Your prayer isn’t sent anywhere until you say yes.",
+    rows: [
+      {
+        label: "What’s shared",
+        body: "Your recording or the words you write go to Google’s Gemini AI. Your devotional goes to Google Cloud Text-to-Speech.",
+      },
+      {
+        label: "Why",
+        body: "To write your devotional, read it aloud, and show support resources if your words suggest you need them.",
+      },
+      {
+        label: "What Google can do with it",
+        body: "Its paid terms say your words won’t be used to improve its products. Google can keep them for a limited time to check for misuse.",
+      },
+    ],
+    footnote: "You can change your mind anytime in Profile. Without this, Gracehush can’t prepare a reflection.",
+    allow: "Allow and continue",
+    notNow: "Not now",
+    privacy: "Privacy Policy",
+    support: "Support resources",
+  },
   onboarding: {
     stepCounter: (step: number, total: number) => `${step} of ${total}`,
     stepLabel: (step: number, total: number) => `Step ${step} of ${total}`,
@@ -242,6 +269,8 @@ export const copy = {
       // The screen-reader action of a card with a play pill (step 26). The pill is not a stop of its own: the card is the one
       // element, and this is an action on it.
       playAction: "Play devotional",
+      // A reflection that is saved here while the person has taken back their permission for Google's AI: nothing is being sent.
+      pendingPermission: "Saved · Waiting for your permission in Profile",
       // The status line of a reflection that is saved on this phone and has not been prepared yet (step 24). The card shows
       // it and a screen reader speaks it. `resetDay` is the day the free limit's week ends, as a date ("Monday, Nov 9").
       pendingLine: (status: OutboxStatus, online: boolean | null, resetDay: string | null) => {
@@ -295,14 +324,15 @@ export const copy = {
         cancel: "Keep",
       },
     },
-    // The calm line New Entry leaves on Journal after it saved something that has not been prepared yet. It stays until
-    // it is dismissed or the list is refreshed, never on a timer.
+    // The calm line New Entry leaves on Journal after it saved something that has not been prepared yet, or after the person
+    // said "Not now" to the AI permission. It stays until it is dismissed or the list is refreshed, never on a timer.
     notes: {
       offline: "Saved. We’ll prepare your reflection when you’re back online.",
       retry: "Saved. We’ll finish your reflection as soon as we can.",
+      permission: "Nothing was sent. You can allow Google’s AI anytime in Profile, or the next time you start a reflection.",
     },
-    // A text link under either note: the reflection has not been screened yet (offline, or the service had no answer),
-    // so a way to reach someone stays one tap away. It opens Support Resources, which works offline (step 25 follow-up).
+    // A text link under every note: nothing has been screened yet (offline, the service had no answer, or nothing was sent), so a
+    // way to reach someone stays one tap away. It opens Support Resources, which works offline (step 25 follow-up).
     noteSupport: "Support resources",
     synced: "All reflections synced",
     empty: {
@@ -851,6 +881,12 @@ export const copy = {
       status: (synced: number, pending: number) => `${synced} synced, ${pending} pending`,
       label: (synced: number, pending: number) =>
         `Offline Reflections, ${synced} synced, ${pending} pending`,
+    },
+    // The AI permission's switch (2026-11-03): New Entry asks first, and this is where it is changed afterwards.
+    aiPermission: {
+      title: "Share with Google’s AI",
+      on: "On. Your words and recordings go to Google to prepare your reflections.",
+      off: "Off. Gracehush can’t prepare new reflections.",
     },
     analytics: {
       title: "Share Usage Data",

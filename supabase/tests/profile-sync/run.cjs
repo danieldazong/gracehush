@@ -356,8 +356,8 @@ const row = ({
     assert.deepEqual(by.u1.unsent, { ambientVolume: 1 });
     assert.equal(by.u1.snapshot, null);
     assert.equal(by.u2, undefined);
-    assert.deepEqual(by.u3, { unsent: { ambientVolume: 0.3, ambientSound: "soft-rain", affirmationsEnabled: false }, snapshot: snap });
-    assert.deepEqual(by.u4, { unsent: {}, snapshot: null });
+    assert.deepEqual(by.u3, { unsent: { ambientVolume: 0.3, ambientSound: "soft-rain", affirmationsEnabled: false }, snapshot: snap, aiPermissionAt: null });
+    assert.deepEqual(by.u4, { unsent: {}, snapshot: null, aiPermissionAt: null });
     assert.deepEqual(by.u5.snapshot, { createdAt: snap.createdAt, subscriptionTier: "free", syncedAt: snap.syncedAt, affirmationsEnabled: true, ambientSound: "off", ambientVolume: 0.5 });
   });
   await test("prefs: version 1 data migrates: the settings become unsent edits, an old snapshot gets the defaults", async () => {
@@ -374,7 +374,7 @@ const row = ({
     const by = store.getState().byUser;
     assert.deepEqual(by.u1.unsent, { ambientSound: "soft-rain", affirmationsEnabled: false });
     assert.deepEqual(by.u1.snapshot, { createdAt: snap.createdAt, subscriptionTier: "pro", syncedAt: snap.syncedAt, affirmationsEnabled: true, ambientSound: "off", ambientVolume: 0.5 });
-    assert.deepEqual(by.u2, { unsent: {}, snapshot: null });
+    assert.deepEqual(by.u2, { unsent: {}, snapshot: null, aiPermissionAt: null });
     assert.equal(by.u3, undefined);
   });
   await test("prefs: a __proto__ user id cannot pollute", async () => {

@@ -35,6 +35,7 @@ import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, TERMS_URL } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { analyticsEnv } from "@/constants/env";
 import { colors } from "@/constants/theme";
+import { useAiPermission } from "@/hooks/useAiPermission";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
@@ -71,6 +72,7 @@ const icons = {
   reminders: { android: "schedule", ios: "clock" },
   ambient: { android: "graphic_eq", ios: "waveform" },
   affirmations: { android: "notifications", ios: "bell" },
+  aiPermission: { android: "pan_tool", ios: "hand.raised" },
   analytics: { android: "bar_chart", ios: "chart.bar" },
   // The row's tile is a plain cloud: the trailing icon carries the state, so a "done" cloud would contradict "pending".
   cloud: { android: "cloud", ios: "icloud" },
@@ -353,6 +355,8 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   // Share Usage Data (step 34): the device's answer, kept on the phone only, so it never fails.
   const sharing = useOnboardingStore((store) => store.analyticsConsent === "granted");
   const setAnalyticsConsent = useOnboardingStore((store) => store.setAnalyticsConsent);
+  // Share with Google's AI (2026-11-03): this account's answer, kept on the phone only, so it never fails.
+  const { allowed: aiAllowed, setAllowed: setAiAllowed } = useAiPermission();
 
   // Screen state, reset when the screen unmounts. Both accordion rows start closed.
   const [remindersOpen, setRemindersOpen] = useState(false);
@@ -814,6 +818,27 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
 
               <View className="gap-2">
                 <SettingsGroup title={text.groups.privacy}>
+                  <SettingsRow
+                    icon={icons.aiPermission}
+                    title={text.aiPermission.title}
+                    subtitle={aiAllowed ? text.aiPermission.on : text.aiPermission.off}
+                    trailing={
+                      <Switch
+                        value={aiAllowed}
+                        trackColor={{ false: colors.petal, true: colors.plum }}
+                        thumbColor={colors.card}
+                        ios_backgroundColor={colors.petal}
+                      />
+                    }
+                    onPress={() => {
+                      haptics.selection();
+                      setAiAllowed(!aiAllowed);
+                    }}
+                    accessibilityRole="switch"
+                    accessibilityLabel={text.aiPermission.title}
+                    accessibilityHint={aiAllowed ? text.aiPermission.on : text.aiPermission.off}
+                    accessibilityState={{ checked: aiAllowed }}
+                  />
                   {analyticsEnv.status === "ok" ? (
                     <SettingsRow
                       icon={icons.analytics}

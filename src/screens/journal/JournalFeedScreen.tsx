@@ -41,6 +41,7 @@ import {
   getUnsentCount,
   type JournalFilter,
 } from "@/data/selectors";
+import { useAiPermission } from "@/hooks/useAiPermission";
 import { useJournalHome } from "@/hooks/useJournalHome";
 import { useTabBarClearance, useTabScreenBottomPadding } from "@/hooks/useTabScreenBottomPadding";
 import type { MainTabScreenProps } from "@/navigation/types";
@@ -267,6 +268,7 @@ function LoadingMore() {
 export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">) {
   const { user } = useUser();
   const state = useJournalHome();
+  const { allowed: aiAllowed } = useAiPermission();
   const { width } = useWindowDimensions();
   const paddingBottom = useTabScreenBottomPadding();
   const barClearance = useTabBarClearance();
@@ -350,13 +352,15 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
         })}
         reflectionDays={ready.reflectionDays}
       />
-      {ready.isOffline ? <OfflineBanner unsyncedCount={unsentCount} /> : null}
+      {/* While the person's permission is off nothing will go by itself when the phone reconnects. */}
+      {ready.isOffline ? <OfflineBanner unsyncedCount={aiAllowed ? unsentCount : 0} /> : null}
       {ready.savedNote !== null ? (
         <NoticeBanner
           message={copy.journal.notes[ready.savedNote]}
           onDismiss={ready.dismissNote}
-          // The reflection has not been screened yet (offline, or the service had no answer), so a way to reach someone
-          // stays one tap away (step 25 follow-up). Like every way into Support Resources: no haptic and no log.
+          // Nothing has been screened yet (offline, the service had no answer, or the person said "Not now" and nothing was
+          // sent), so a way to reach someone stays one tap away (step 25 follow-up). Like every way into Support Resources: no
+          // haptic and no log.
           link={{
             label: copy.journal.noteSupport,
             onPress: () => navigation.navigate("CrisisResources", { source: "journal" }),
@@ -401,6 +405,7 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
               entry={item}
               now={ready.now}
               online={ready.isOffline ? false : ready.isOnline}
+              heldForPermission={!aiAllowed}
               onOpen={(entryId) => navigation.navigate("Reflection", { entryId })}
               onPlay={(entry) => {
                 const track = getPlaybackTrack(entry);

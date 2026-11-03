@@ -319,6 +319,8 @@ function makeWorld({ tier = "free" } = {}) {
     "react-native": appState.module,
     "@/services/recordingFiles": recordings.module,
     "@/services/entryProcessor": processor.module,
+    // The account has allowed Google's AI: supabase/tests/ai-permission checks the real answer.
+    "@/services/aiPermission": { __esModule: true, hasAiPermission: () => true },
     "@/data/journalRepository": { __esModule: true, getKnownTier: () => world.tier },
   };
   const env = makeEnv({ fakes });

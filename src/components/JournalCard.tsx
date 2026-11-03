@@ -39,9 +39,11 @@ function getKind(entry: JournalEntry): CardKind {
 
 // The status line of a reflection that is saved on this phone and not prepared yet (entry.pending). The card shows it
 // and a screen reader speaks it, so it is one string.
-function getPendingLine(entry: HomeEntry, online: boolean | null): string | null {
+function getPendingLine(entry: HomeEntry, online: boolean | null, heldForPermission: boolean): string | null {
   const { pending } = entry;
   if (!pending) return null;
+  // Nothing is being sent, whatever the network says.
+  if (pending.status === "queued" && heldForPermission) return copy.journal.card.pendingPermission;
   const resetDay = pending.resetsAt === null ? null : formatResetDay(pending.resetsAt);
   return copy.journal.card.pendingLine(pending.status, online, resetDay);
 }
@@ -183,12 +185,13 @@ type PendingFooterProps = {
   entry: HomeEntry;
   line: string;
   online: boolean | null;
+  heldForPermission: boolean;
   onReview?: (entry: HomeEntry) => void;
   onUnlock?: (entry: HomeEntry) => void;
 };
 
 // The footer of a reflection that is saved on this phone and not prepared yet.
-function PendingFooter({ entry, line, online, onReview, onUnlock }: PendingFooterProps) {
+function PendingFooter({ entry, line, online, heldForPermission, onReview, onUnlock }: PendingFooterProps) {
   const { card } = copy.journal;
   const status = entry.pending?.status;
   if (status === "needs_action") {
@@ -219,8 +222,8 @@ function PendingFooter({ entry, line, online, onReview, onUnlock }: PendingFoote
       </View>
     );
   }
-  // Being sent now, or about to be: a spinner. Waiting for the phone to connect or for a sign-in: the hourglass.
-  if (status === "sending" || (status === "queued" && online !== false)) {
+  // Being sent now, or about to be: a spinner. Waiting for the phone to connect, a sign-in or the person's permission: the hourglass.
+  if (status === "sending" || (status === "queued" && online !== false && !heldForPermission)) {
     return (
       <View className="flex-row items-center gap-2 pt-0.5">
         <ActivityIndicator size="small" color={colors.plum} />
@@ -241,6 +244,7 @@ function CardFooter({
   kind,
   pendingLine,
   online,
+  heldForPermission,
   onReview,
   onUnlock,
   onPlay,
@@ -249,6 +253,7 @@ function CardFooter({
   kind: CardKind;
   pendingLine: string | null;
   online: boolean | null;
+  heldForPermission: boolean;
   onReview?: (entry: HomeEntry) => void;
   onUnlock?: (entry: HomeEntry) => void;
   onPlay?: (entry: HomeEntry) => void;
@@ -260,6 +265,7 @@ function CardFooter({
         entry={entry}
         line={pendingLine}
         online={online}
+        heldForPermission={heldForPermission}
         onReview={onReview}
         onUnlock={onUnlock}
       />
@@ -347,6 +353,8 @@ type JournalCardProps = {
   now: Date;
   // false when the phone has no connection, null before NetInfo has answered.
   online: boolean | null;
+  // The account has not allowed Google's AI, so a reflection waiting on this phone is not being sent.
+  heldForPermission?: boolean;
   onOpen: (entryId: string) => void;
   // A refused reflection on this phone: "Review" opens what can be done with it.
   onReview?: (entry: HomeEntry) => void;
@@ -360,6 +368,7 @@ export function JournalCard({
   entry,
   now,
   online,
+  heldForPermission = false,
   onOpen,
   onReview,
   onUnlock,
@@ -367,7 +376,7 @@ export function JournalCard({
 }: JournalCardProps) {
   const kind = getKind(entry);
   const timestamp = formatEntryTimestamp(entry.createdAt, now);
-  const pendingLine = getPendingLine(entry, online);
+  const pendingLine = getPendingLine(entry, online, heldForPermission);
   const label = getLabel(entry, kind, timestamp, pendingLine);
   const isFinished = kind === "ready" || kind === "textOnly";
   // A card with a button of its own is not one grouped element: a button inside it must be reachable on its own.
@@ -392,6 +401,7 @@ export function JournalCard({
         kind={kind}
         pendingLine={pendingLine}
         online={online}
+        heldForPermission={heldForPermission}
         onReview={onReview}
         onUnlock={onUnlock}
         onPlay={play}

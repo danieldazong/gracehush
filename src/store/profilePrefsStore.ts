@@ -11,6 +11,9 @@ import { safeStorage } from "./safeStorage";
 // - `snapshot` is what the server last said: when the account was created, the plan and the three settings.
 // - `unsent` holds the settings the user changed on this device that the server has not confirmed yet. They show on
 //   top of the snapshot and win over the server until a sync sends them, the same rule the reminder times follow.
+// - `aiPermissionAt` is when this account allowed its words and recordings to go to Google's AI (Apple's guideline 5.1.2(i)), or
+//   null for not yet, or taken back. It lives only on this phone: a new phone, or a reinstall, asks again. It survives a sign-out
+//   like the rest of the entry, and account deletion forgets it.
 // No journal text is kept here.
 export type Settings = Required<ProfilePatch>;
 
@@ -20,13 +23,14 @@ export type ServerSnapshot = Settings & {
   syncedAt: string; // ISO, when the server last said so
 };
 
-export type ProfileEntry = { unsent: ProfilePatch; snapshot: ServerSnapshot | null };
+export type ProfileEntry = { unsent: ProfilePatch; snapshot: ServerSnapshot | null; aiPermissionAt: string | null };
 
 interface ProfilePrefsState {
   byUser: Record<string, ProfileEntry>;
   saveUnsent: (userId: string, patch: ProfilePatch) => void; // the user changed a setting
   clearUnsent: (userId: string, sent: ProfilePatch) => void; // the server has these: drop each one not edited since
   saveSnapshot: (userId: string, snapshot: ServerSnapshot) => void;
+  setAiPermission: (userId: string, at: string | null) => void;
   forgetUser: (userId: string) => void; // account deletion
 }
 
@@ -75,7 +79,7 @@ function readSnapshot(value: unknown): ServerSnapshot | null {
   };
 }
 
-const emptyEntry = (): ProfileEntry => ({ unsent: {}, snapshot: null });
+const emptyEntry = (): ProfileEntry => ({ unsent: {}, snapshot: null, aiPermissionAt: null });
 
 export const useProfilePrefsStore = create<ProfilePrefsState>()(
   persist(
@@ -113,6 +117,11 @@ export const useProfilePrefsStore = create<ProfilePrefsState>()(
           const entry = state.byUser[userId] ?? emptyEntry();
           return { byUser: { ...state.byUser, [userId]: { ...entry, snapshot } } };
         }),
+      setAiPermission: (userId, at) =>
+        set((state) => {
+          const entry = state.byUser[userId] ?? emptyEntry();
+          return { byUser: { ...state.byUser, [userId]: { ...entry, aiPermissionAt: at } } };
+        }),
       forgetUser: (userId) =>
         set((state) => ({
           byUser: Object.fromEntries(Object.entries(state.byUser).filter(([id]) => id !== userId)),
@@ -140,7 +149,17 @@ export const useProfilePrefsStore = create<ProfilePrefsState>()(
         const byUser = Object.fromEntries(
           Object.entries(saved).flatMap(([userId, entry]) => {
             if (!isRecord(entry)) return [];
-            return [[userId, { unsent: readUnsent(entry.unsent), snapshot: readSnapshot(entry.snapshot) }]];
+            return [
+              [
+                userId,
+                {
+                  unsent: readUnsent(entry.unsent),
+                  snapshot: readSnapshot(entry.snapshot),
+                  // A damaged value is no permission, and so is a save from before this field existed.
+                  aiPermissionAt: isTimestamp(entry.aiPermissionAt) ? entry.aiPermissionAt : null,
+                },
+              ],
+            ];
           }),
         );
         return { ...current, byUser };

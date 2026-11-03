@@ -731,6 +731,14 @@ function DevToolsContent() {
                   setAnalytics(getAnalyticsSummary());
                 }}
               />
+              {/* New Entry asks for the AI permission again, as it does the first time. */}
+              <DevButton
+                label="Reset AI permission (dev)"
+                onPress={() => {
+                  const userId = getSupabaseUserId();
+                  if (userId !== null) useProfilePrefsStore.getState().setAiPermission(userId, null);
+                }}
+              />
             </View>
           </View>
           <View className="items-center gap-2">

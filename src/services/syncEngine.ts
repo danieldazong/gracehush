@@ -6,6 +6,7 @@ import * as cache from "@/db/cache";
 import { isDatabaseOpen } from "@/db/database";
 import * as mutations from "@/db/mutations";
 import * as outbox from "@/db/outbox";
+import { hasAiPermission } from "@/services/aiPermission";
 import { isProcessorMock, processItem } from "@/services/entryProcessor";
 import { cleanOldRecordings } from "@/services/recordingCleanup";
 import { deleteRecording } from "@/services/recordingFiles";
@@ -28,6 +29,9 @@ import type { InputType, OutboxItem, OutboxStatus, ProcessingStage, ProcessOutco
 //   count or a delay. A crisis answer is logged like any other ("finished"): the app logs nothing about a crisis entry.
 // - Prayer changes (step 29, db/mutations.ts) go before the outbox, one at a time, in the same run: they are small, and the
 //   person is looking at them.
+// - Nothing in the outbox leaves this phone until the account has allowed Google's AI (Apple's guideline 5.1.2(i)): the outbox is
+//   the only way a person's words reach process-entry, so this is the one gate. Prayer changes still go: they go to no AI.
+// "permission": the person has just allowed it, so what was held is sent now.
 // "realtime" (step 33): a reflection this phone stopped waiting for has finished on the server, so its item is sent again now.
 export type SyncReason =
   | "start"
@@ -38,6 +42,7 @@ export type SyncReason =
   | "upgrade"
   | "manual"
   | "mutation"
+  | "permission"
   | "realtime";
 
 export type SyncEvent =
@@ -138,9 +143,11 @@ async function arm(gen: number): Promise<void> {
   clearTimer();
   if (!canRun()) return;
   try {
+    // A reflection that is held for the person's permission wakes nothing: it would find itself still held, every second.
+    const allowed = hasAiPermission();
     const [retryAt, resetAt, changeAt] = await Promise.all([
-      outbox.nextAttemptAt(),
-      outbox.earliestLimitReset(),
+      allowed ? outbox.nextAttemptAt() : null,
+      allowed ? outbox.earliestLimitReset() : null,
       mutations.nextMutationAt(),
     ]);
     if (gen !== generation) return;
@@ -341,7 +348,7 @@ async function drain(gen: number): Promise<void> {
     let item: OutboxItem | null = null;
     try {
       change = await mutations.nextDueMutation(Date.now());
-      if (change === null) item = await outbox.nextDue(Date.now());
+      if (change === null && hasAiPermission()) item = await outbox.nextDue(Date.now());
     } catch {
       return;
     }

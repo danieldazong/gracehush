@@ -19,17 +19,20 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { SegmentedControl } from "@/components/SegmentedControl";
-import { MIN_RECORDING_MS, MIN_TEXT_LENGTH } from "@/constants/app";
+import { MIN_RECORDING_MS, MIN_TEXT_LENGTH, PRIVACY_POLICY_URL } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors, layout } from "@/constants/theme";
 import * as outbox from "@/db/outbox";
+import { useAiPermission } from "@/hooks/useAiPermission";
 import { useRecorder } from "@/hooks/useRecorder";
 import type { RootStackScreenProps } from "@/navigation/types";
+import { openLegalPage } from "@/services/externalLinks";
 import { haptics } from "@/services/haptics";
 import { discardItem, syncAndWait, syncNow } from "@/services/syncEngine";
 import { selectIsOnline, useOfflineStore, type SavedNote } from "@/store/offlineStore";
 import type { ProcessingStage } from "@/types";
 
+import { AiPermissionView } from "./AiPermissionView";
 import { ProcessingOverlay, type OverlayFailure } from "./ProcessingOverlay";
 import { SpeakSection } from "./SpeakSection";
 import { WriteSection } from "./WriteSection";
@@ -63,6 +66,7 @@ type QueuedItem = Parameters<typeof outbox.enqueue>[0];
 
 export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewEntry">) {
   const { width, fontScale } = useWindowDimensions();
+  const { allowed, setAllowed } = useAiPermission();
   // One id per reflection: the recording is named after it (recordings/{id}.m4a), the outbox row is keyed by it, and the
   // server treats a second request with it as the same reflection. "Edit and resend" opens this screen with the id of
   // the item it edits. "Record again" after a refusal makes a new one, because the server has kept the old one.
@@ -106,13 +110,14 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     };
   }, []);
 
+  // The field is not on screen until the AI permission is answered: the keyboard comes up after "Allow and continue".
   useEffect(() => {
-    if (route.params.mode !== "write") {
+    if (route.params.mode !== "write" || !allowed) {
       return undefined;
     }
     const timer = setTimeout(() => inputRef.current?.focus(), FOCUS_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [route.params.mode]);
+  }, [route.params.mode, allowed]);
 
   // "Edit and resend" from Journal: the words that were refused come back into the field, and sending them again
   // reuses the same id (outbox.enqueue puts the refused item back in the queue with the new words).
@@ -136,7 +141,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
 
   // Every removal fires this, replace() included, so deliberate exits set `leaving` first and the
   // guard passes the action straight on. While sending nothing may leave; otherwise ask first.
-  usePreventRemove(phase !== "editing" || hasContent, ({ data }) => {
+  usePreventRemove(allowed && (phase !== "editing" || hasContent), ({ data }) => {
     if (leaving.current) {
       navigation.dispatch(data.action);
     } else if (phase !== "sending") {
@@ -323,6 +328,19 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
 
   const padding = width < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding;
   const editing = phase === "editing";
+
+  // Nothing can be said or written until this account has answered (Apple's guideline 5.1.2(i)). It is asked here, before the first
+  // word, so nothing typed or recorded waits on the answer, and "Not now" has nothing to lose.
+  if (!allowed) {
+    return (
+      <AiPermissionView
+        onAllow={() => setAllowed(true)}
+        onNotNow={() => leaveToJournal("permission")}
+        onOpenSupport={() => navigation.navigate("CrisisResources", { source: "newEntry" })}
+        onOpenPrivacy={() => void openLegalPage(PRIVACY_POLICY_URL)}
+      />
+    );
+  }
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
