@@ -57,3 +57,7 @@ example
 # generated native folders
 /ios
 /android
+
+# Local agent tooling: links to .agents/skills. EAS copies the working tree for a build, and on Windows it cannot recreate symlinks.
+.claude/skills/
+.commandcode/

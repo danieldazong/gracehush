@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "gracehush",
+    "name": "Gracehush",
     "slug": "gracehush",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,7 +10,10 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.gracehush.app",
-      "usesAppleSignIn": true
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.gracehush.app",
@@ -36,7 +39,12 @@
       ],
       "@react-native-community/datetimepicker",
       "@clerk/expo",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       "expo-apple-authentication",
       "@clerk/expo-google-signin",
       [
@@ -55,10 +63,24 @@
           "color": "#5B3A5E",
           "enableRemoteNotifications": false
         }
+      ],
+      [
+        "expo-dev-client",
+        {
+          "launchMode": "most-recent",
+          "toolsButton": false,
+          "skipOnboarding": true,
+          "showMenuAtLaunch": false
+        }
       ]
     ],
     "experiments": {
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "2a93e6e4-4e4b-4815-9260-201555db2e40"
+      }
     }
   }
 }
