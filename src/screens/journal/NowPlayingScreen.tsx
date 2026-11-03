@@ -1,9 +1,9 @@
-import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import type { SymbolViewProps } from "expo-symbols";
 import { useEffect, useState, type ReactElement } from "react";
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Platform,
   Pressable,
   ScrollView,
@@ -19,14 +19,16 @@ import { ChoiceChip } from "@/components/ChoiceChip";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { ProgressScrubber } from "@/components/ProgressScrubber";
+import { SceneStack } from "@/components/SceneStack";
 import { Skeleton } from "@/components/Skeleton";
 import { PLAYBACK_RATES, SKIP_MS } from "@/constants/app";
 import { copy } from "@/constants/copy";
-import { images } from "@/constants/images";
-import { colors, gradients, layout, radii, shadows } from "@/constants/theme";
+import { playerScenes } from "@/constants/images";
+import { colors, layout, radii, shadows } from "@/constants/theme";
 import { updateProfile } from "@/data/journalRepository";
-import { getPlaybackTrack } from "@/data/selectors";
+import { getPlaybackTrack, getPlayerSceneForHour } from "@/data/selectors";
 import { usePlayback } from "@/hooks/usePlayback";
+import { useReduceMotion } from "@/hooks/useReduceMotion";
 import { useReflection } from "@/hooks/useReflection";
 import type { RootStackScreenProps } from "@/navigation/types";
 import { track } from "@/services/analytics";
@@ -39,6 +41,13 @@ const { nowPlaying } = copy;
 const { states } = nowPlaying;
 
 const SKIP_SECONDS = SKIP_MS / 1000;
+// The artwork sits a little smaller while the devotional is paused and grows to full size when it plays (Apple Music's
+// cue), over 300 ms; still under Reduce Motion.
+const PAUSED_ARTWORK_SCALE = 0.94;
+const ARTWORK_SCALE_MS = 300;
+// While the voice is heard the card drifts to the next scene on this beat, so a devotional of a minute and a half shows
+// all four.
+const ARTWORK_HOLD_MS = 20_000;
 
 const icons = {
   close: { android: "keyboard_arrow_down", ios: "chevron.down" },
@@ -83,28 +92,51 @@ function CloseRow({ onClose }: { onClose: () => void }) {
   );
 }
 
-// Decorative: the gradient with the logo mark in a frosted tile, built in code. It has no text, because white
-// on this gradient fails AA. The shadow sits on an outer view with a background (an iOS shadow needs one),
-// and the gradient clips itself, since overflow: "hidden" on the same view would clip the shadow.
-function Artwork() {
+type ArtworkProps = {
+  playing: boolean; // the person asked for sound: the card grows at once
+  buffering: boolean; // and it has not started yet: the scenes wait for the voice
+};
+
+// The player's four painted scenes (2026-11-02). The card opens on the scene of the hour, the one the lock screen shows,
+// and while the voice is heard it drifts through the day's four moments; paused, it holds the scene it is on, a little
+// smaller. Under Reduce Motion it is the hour's scene, still. Decorative for a screen reader: the title under it says what
+// plays. The shadow sits on the outer view with a background (an iOS shadow needs one) and the inner view clips the
+// scenes, since overflow: "hidden" on the same view would clip the shadow.
+function Artwork({ playing, buffering }: ArtworkProps) {
+  const reduceMotion = useReduceMotion();
+  const [scale] = useState(() => new Animated.Value(playing || reduceMotion ? 1 : PAUSED_ARTWORK_SCALE));
+  const [startScene] = useState(() => getPlayerSceneForHour(new Date().getHours()));
+
+  useEffect(() => {
+    if (reduceMotion) {
+      scale.setValue(1);
+      return;
+    }
+    const run = Animated.timing(scale, {
+      toValue: playing ? 1 : PAUSED_ARTWORK_SCALE,
+      duration: ARTWORK_SCALE_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    run.start();
+    return () => run.stop();
+  }, [playing, reduceMotion, scale]);
+
   return (
-    <View
+    <Animated.View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[shadows.card, styles.artwork]}
+      style={[shadows.card, styles.artwork, { transform: [{ scale }] }]}
     >
-      <LinearGradient
-        colors={gradients.brand.colors}
-        locations={gradients.brand.locations}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.artworkFill}
-      >
-        <View className="size-24 items-center justify-center rounded-card border border-white/20 bg-white/15">
-          <Image source={images.logoMarkLight} contentFit="contain" style={styles.logo} />
-        </View>
-      </LinearGradient>
-    </View>
+      <View style={styles.artworkClip}>
+        <SceneStack
+          sources={playerScenes}
+          start={startScene}
+          holdMs={ARTWORK_HOLD_MS}
+          moving={playing && !buffering}
+        />
+      </View>
+    </Animated.View>
   );
 }
 
@@ -162,7 +194,7 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
       contentContainerStyle={[styles.content, { paddingHorizontal: padding }]}
     >
       <CloseRow onClose={onClose} />
-      <Artwork />
+      <Artwork playing={status === "playing"} buffering={isBuffering} />
 
       <View className="items-center pt-2">
         <Text
@@ -451,14 +483,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.hero,
     backgroundColor: colors.plum,
   },
-  artworkFill: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    borderRadius: radii.hero,
-  },
-  logo: { width: 56, height: 56 },
+  artworkClip: { flex: 1, borderRadius: radii.hero, overflow: "hidden" },
   mirror: { transform: [{ scaleX: -1 }] },
   pressed: { opacity: 0.6 },
   orbPressed: { transform: [{ scale: 0.95 }] },

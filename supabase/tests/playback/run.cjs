@@ -408,8 +408,24 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
     const OPTIONS = { showSeekForward: true, showSeekBackward: true, seekForwardIntervalSeconds: 15, seekBackwardIntervalSeconds: 15 };
     const newPlayer = (w) => w.expoAudio.createAudioPlayer({ uri: "file:///x.wav" }, {});
     const info = { title: "Peace in the midst", subtitle: "Gracehush • Psalm 23:1–3" };
+    // The picture follows the hour the phone reads, so each check says which hour it is.
+    const atHour = async (hour, run) => {
+      const real = Date.prototype.getHours;
+      Date.prototype.getHours = () => hour;
+      try {
+        await run();
+      } finally {
+        Date.prototype.getHours = real;
+      }
+    };
 
-    await test("lock: the controls appear at once with the title and the reference, and the artwork follows", async () => {
+    await test("scene: every hour of the day has its scene, the greeting's parts of the day with morning split at 9", async () => {
+      const { getPlayerSceneForHour } = rig().env.use("@/data/selectors");
+      const hours = Array.from({ length: 24 }, (_, hour) => getPlayerSceneForHour(hour));
+      assert.deepEqual(hours, [0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0]);
+    });
+
+    await test("lock: the controls appear at once with the title and the reference, and the hour's artwork follows", () => atHour(7, async () => {
       const w = rig();
       const player = newPlayer(w);
       lock(w).activateLockScreen(player, info);
@@ -422,22 +438,43 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       assert.equal(player.calls.updateMeta.length, 0, "the artwork is not waited for");
       await W.advance(10);
       assert.deepEqual(player.calls.updateMeta, [
-        { title: "Peace in the midst", artist: "Gracehush • Psalm 23:1–3", artworkUrl: "file:///assets/player-artwork.png" },
+        { title: "Peace in the midst", artist: "Gracehush • Psalm 23:1–3", artworkUrl: "file:///assets/player-scene-2-square.jpg" },
       ]);
-      assert.deepEqual(w.asset.calls.fromModule, [7], "the bundled picture of constants/images");
-    });
+      assert.deepEqual(w.asset.calls.fromModule, [8], "the square crop of the first-light scene, from constants/images");
+    }));
 
-    await test("lock: a second devotional gets the artwork in its first call, with no second lookup", async () => {
+    await test("lock: a second devotional in the same part of the day gets the artwork in its first call, with no second lookup", () => atHour(7, async () => {
       const w = rig();
       const a = newPlayer(w);
       lock(w).activateLockScreen(a, info);
       await W.advance(10);
       const b = newPlayer(w);
-      lock(w).activateLockScreen(b, info);
-      assert.equal(b.calls.setActive[0].metadata.artworkUrl, "file:///assets/player-artwork.png");
+      await atHour(8, async () => lock(w).activateLockScreen(b, info));
+      assert.equal(b.calls.setActive[0].metadata.artworkUrl, "file:///assets/player-scene-2-square.jpg");
       await W.advance(10);
       assert.equal(b.calls.updateMeta.length, 0);
       assert.equal(w.asset.calls.downloads, 1);
+    }));
+
+    await test("lock: each part of the day shows its own scene, and each scene is looked up once", async () => {
+      const w = rig();
+      const seen = [];
+      for (const hour of [22, 6, 10, 14, 3]) {
+        await atHour(hour, async () => {
+          const player = newPlayer(w);
+          lock(w).activateLockScreen(player, info);
+          await W.advance(10);
+          seen.push(player.calls.updateMeta[0]?.artworkUrl ?? player.calls.setActive[0].metadata.artworkUrl);
+        });
+      }
+      assert.deepEqual(seen, [
+        "file:///assets/player-scene-1-square.jpg",
+        "file:///assets/player-scene-2-square.jpg",
+        "file:///assets/player-scene-3-square.jpg",
+        "file:///assets/player-scene-4-square.jpg",
+        "file:///assets/player-scene-1-square.jpg",
+      ]);
+      assert.deepEqual(w.asset.calls.fromModule, [7, 8, 9, 10], "night comes back with no second lookup");
     });
 
     await test("lock: the lock screen shows the title and the reference and nothing else", async () => {
@@ -452,7 +489,7 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       }
     });
 
-    await test("lock: a picture that cannot be loaded changes nothing and is tried again with the next devotional", async () => {
+    await test("lock: a picture that cannot be loaded changes nothing and is tried again with the next devotional", () => atHour(7, async () => {
       const w = rig();
       w.flags.artworkFails = true;
       const a = newPlayer(w);
@@ -466,7 +503,7 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       await W.advance(10);
       assert.equal(b.calls.updateMeta.length, 1);
       assert.equal(w.asset.calls.downloads, 2);
-    });
+    }));
 
     await test("lock: a lock screen that cannot be set up never throws, and the artwork is not looked up for it", async () => {
       const w = rig();

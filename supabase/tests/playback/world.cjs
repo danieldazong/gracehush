@@ -110,7 +110,7 @@ function makeAsset(flags) {
     constructor(module_) {
       this.module = module_;
       this.localUri = null;
-      this.uri = "http://dev-server.example/assets/player-artwork.png";
+      this.uri = `http://dev-server.example/assets/player-scene-${module_ - 6}-square.jpg`;
     }
     static fromModule(module_) {
       calls.fromModule.push(module_);
@@ -120,7 +120,7 @@ function makeAsset(flags) {
       calls.downloads += 1;
       if ((flags.artworkMs ?? 0) > 0) await new Promise((resolve) => setTimeout(resolve, flags.artworkMs));
       if (flags.artworkFails) throw new Error("the asset could not be loaded");
-      this.localUri = "file:///assets/player-artwork.png";
+      this.localUri = `file:///assets/player-scene-${this.module - 6}-square.jpg`;
       return this;
     }
   }
@@ -576,7 +576,8 @@ function world({ platform = "ios", extraFakes = {} } = {}) {
     "react-native": { AppState: appState.module.AppState, Platform: { OS: platform } },
     "@supabase/supabase-js": { StorageApiError: storageJs.StorageApiError },
     "@/services/supabaseClient": { getSupabase: () => session.client, getSupabaseUserId: () => session.userId },
-    "@/constants/images": { images: { playerArtwork: 7 } },
+    // The four square lock-screen scenes as asset modules 7 to 10 (and the card's crops, which nothing here draws).
+    "@/constants/images": { images: {}, playerScenes: [11, 12, 13, 14], playerSceneSquares: [7, 8, 9, 10] },
     "@/constants/sounds": { sounds: SOUNDS },
     expo: { PermissionStatus: { GRANTED: "granted", DENIED: "denied", UNDETERMINED: "undetermined" } },
     ...extraFakes,

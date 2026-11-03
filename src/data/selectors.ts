@@ -187,3 +187,13 @@ export function getGreeting(now: Date): TimeSlot {
   if (hour >= 12 && hour <= 16) return "afternoon";
   return "evening";
 }
+
+// The player's painted scene for an hour of the day, 0 to 23, as an index into `playerScenes`, which runs in the day's
+// order: the bedside at night, the back steps at first light, the armchair in the morning, the park bench in the
+// afternoon. These are the greeting's parts of the day (getGreeting), with its morning split at 9.
+export function getPlayerSceneForHour(hour: number): number {
+  if (hour >= 5 && hour <= 8) return 1;
+  if (hour >= 9 && hour <= 11) return 2;
+  if (hour >= 12 && hour <= 16) return 3;
+  return 0;
+}
