@@ -178,9 +178,10 @@ export interface ExportDataError {
 }
 
 // delete-account (step 31): deletes the caller's account for good: their files, their rows, their RevenueCat customer and their
-// Clerk user. The body must be exactly { confirm: "DELETE" }. DELETE_INCOMPLETE is a step that failed: what was done stays done,
-// and the same request sent again continues.
-export type DeleteAccountRequest = { confirm: "DELETE" };
+// Clerk user. The body must be { confirm: "DELETE" }, with Apple's one-time code beside it when the person signed in with Apple
+// (step 35: it lets the server end Gracehush's access to their Sign in with Apple, and no code or a bad one never stops a deletion).
+// DELETE_INCOMPLETE is a step that failed: what was done stays done, and the same request sent again continues.
+export type DeleteAccountRequest = { confirm: "DELETE"; appleAuthorizationCode?: string };
 export type DeleteAccountResponse = { deleted: true };
 export type DeleteAccountErrorCode =
   | "INVALID_REQUEST"

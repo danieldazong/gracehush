@@ -995,6 +995,7 @@ Deno.test(
     const line = JSON.parse(world.logs[0]);
     assertEquals(Object.keys(line).sort(), [
       "account",
+      "accountApple",
       "accountBytes",
       "accountEntries",
       "accountFiles",
@@ -1033,7 +1034,7 @@ Deno.test(
       "ttsMs",
       "user",
     ]);
-    assertEquals(Object.keys(line).length, 38);
+    assertEquals(Object.keys(line).length, 39);
     assertEquals(line.status, 200);
     assertEquals(line.inputType, "text");
     // Speech is off in a fresh world, and a free account with nothing made this week is under its limit.
@@ -1700,7 +1701,7 @@ Deno.test(
 // -- The log, the refusals and the entry that was saved (step 22) ------------------------------------------------------
 
 Deno.test(
-  "log s) with speech on the line has exactly 38 fields and holds no script, verse, link, path, key or address",
+  "log s) with speech on the line has exactly 39 fields and holds no script, verse, link, path, key or address",
   speechFlow([geminiOk(readyOutput())], async (world) => {
     const token = await world.token({ sub: USER });
     const response = await post(world, handle, textBody({ text: `${TEXT} SECRET-MARKER` }), { token });
@@ -1708,7 +1709,7 @@ Deno.test(
     const { entry } = await ok(response);
     assertEquals(world.logs.length, 1);
     const line = JSON.parse(world.logs[0]);
-    assertEquals(Object.keys(line).length, 38);
+    assertEquals(Object.keys(line).length, 39);
     assertEquals([line.tts, line.limit, line.limitUsed], ["ok", "free_ok", 0]);
     assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
 

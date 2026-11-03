@@ -279,6 +279,7 @@ Deno.test(
     const line = JSON.parse(world.logs[0]);
     assertEquals(Object.keys(line).sort(), [
       "account",
+      "accountApple",
       "accountBytes",
       "accountEntries",
       "accountFiles",

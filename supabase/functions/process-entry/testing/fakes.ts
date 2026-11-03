@@ -1,4 +1,4 @@
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { exportJWK, exportPKCS8, generateKeyPair, jwtVerify, SignJWT } from "jose";
 
 import { bibleTiming, clearChapterCache } from "../../_shared/bible/helloao.ts";
 import { clearTokenCache } from "../../_shared/tts/googleAuth.ts";
@@ -22,6 +22,7 @@ export const GOOGLE_TOKEN_HOST = "oauth2.googleapis.com";
 export const GOOGLE_TTS_HOST = "texttospeech.googleapis.com";
 export const REVENUECAT_HOST = "api.revenuecat.com";
 export const CLERK_API_HOST = "api.clerk.com";
+export const APPLE_HOST = "appleid.apple.com";
 
 type Row = Record<string, unknown>;
 
@@ -59,6 +60,14 @@ const SPEECH_ACCOUNT = await makeServiceAccount();
 export const SPEECH_VOICE = "en-US-Chirp3-HD-Aoede";
 export const SPEECH_EMAIL = SPEECH_ACCOUNT.account.clientEmail;
 const SPEECH_NAMES = ["GOOGLE_TTS_CREDENTIALS_B64", "TTS_VOICE_NAME", "TTS_SPEAKING_RATE"];
+
+// The Sign in with Apple secrets of the test world (step 35). They are off in a fresh world: appleOn(world) sets them. The two
+// ids are made up, in the shape Apple's are.
+const APPLE_NAMES = ["APPLE_TEAM_ID", "APPLE_SIWA_KEY_ID", "APPLE_SIWA_PRIVATE_KEY_B64"];
+export const APPLE_TEST_TEAM_ID = "TESTTEAM01";
+export const APPLE_TEST_KEY_ID = "TESTKEY001";
+// The app's bundle ID: the fake refuses a client secret or a request for any other.
+const APPLE_TEST_CLIENT_ID = "com.gracehush.app";
 
 // What the Bible API answers for one chapter, keyed "PHP/4". A chapter with no entry is served from the real chapters in
 // _shared/bible/fixtures (404 when there is no fixture for it).
@@ -221,6 +230,17 @@ export type World = {
   clerkUsers: Set<string>;
   clerkQueue: GeminiReply[];
   clerkCalls: Recorded[];
+  // Sign in with Apple (step 35): POST /auth/token and /auth/revoke, form-encoded. The token endpoint verifies the client secret
+  // against the public half of appleOn's key and takes each code in appleCodes once; anything else gets Apple's error shape. The
+  // revoke endpoint answers 200 whatever it is given, a bad token included, as the real one does (probed on 2026-11-02), so
+  // appleRevoked, the tokens it received, is the only record of what was sent. A queued reply answers first.
+  appleKey: CryptoKey | null;
+  appleCodes: Set<string>;
+  appleTokenCalls: Recorded[];
+  appleTokenQueue: GeminiReply[];
+  appleRevokeCalls: Recorded[];
+  appleRevokeQueue: GeminiReply[];
+  appleRevoked: string[];
   // False makes deleting a profile leave its entries, affirmations and records behind: a cascade that did not happen.
   cascade: boolean;
   logs: string[];
@@ -774,6 +794,55 @@ async function clerkApi(world: World, request: Request, recorded: Recorded): Pro
   throw new Error(`the test world has no Clerk route for ${request.method}`);
 }
 
+const appleError = (error: string) => jsonResponse(400, { error, error_description: "SECRET-APPLE-WORDS" });
+
+// Whether a client secret is what Apple asks for: signed by the registered key with its id in the header, with the Team ID as
+// `iss`, the bundle ID as `sub`, Apple as `aud`, and alive right now.
+async function goodAppleSecret(world: World, secret: string, clientId: string): Promise<boolean> {
+  if (world.appleKey === null || clientId !== APPLE_TEST_CLIENT_ID) return false;
+  try {
+    const { protectedHeader } = await jwtVerify(secret, world.appleKey, {
+      algorithms: ["ES256"],
+      issuer: APPLE_TEST_TEAM_ID,
+      subject: APPLE_TEST_CLIENT_ID,
+      audience: "https://appleid.apple.com",
+      requiredClaims: ["iat", "exp"],
+    });
+    return protectedHeader.kid === APPLE_TEST_KEY_ID;
+  } catch {
+    return false;
+  }
+}
+
+async function appleApi(world: World, request: Request, recorded: Recorded): Promise<Response> {
+  const form = new URLSearchParams(recorded.text);
+  if (recorded.url.pathname === "/auth/revoke") {
+    world.appleRevokeCalls.push(recorded);
+    const queued = world.appleRevokeQueue.shift();
+    if (queued) return await play(queued, request);
+    world.appleRevoked.push(form.get("token") ?? "");
+    return new Response(null, { status: 200 });
+  }
+  if (recorded.url.pathname !== "/auth/token") {
+    throw new Error(`the test world has no Apple route for ${recorded.url.pathname}`);
+  }
+  world.appleTokenCalls.push(recorded);
+  const queued = world.appleTokenQueue.shift();
+  if (queued) return await play(queued, request);
+  if (form.get("grant_type") !== "authorization_code") return appleError("unsupported_grant_type");
+  const secret = form.get("client_secret") ?? "";
+  if (!(await goodAppleSecret(world, secret, form.get("client_id") ?? ""))) return appleError("invalid_client");
+  const code = form.get("code") ?? "";
+  if (!world.appleCodes.delete(code)) return appleError("invalid_grant");
+  return jsonResponse(200, {
+    access_token: `at.${code}`,
+    token_type: "Bearer",
+    expires_in: 3600,
+    refresh_token: `rt.${code}`,
+    id_token: "id.token.test",
+  });
+}
+
 export function installWorld(): World {
   const original = globalThis.fetch;
   const saved: Record<string, string | undefined> = {};
@@ -782,7 +851,7 @@ export function installWorld(): World {
     Deno.env.set(name, value);
   }
   // Speech is off in a fresh world, whatever the shell running the tests holds: speechOn(world) turns it on.
-  for (const name of SPEECH_NAMES) {
+  for (const name of [...SPEECH_NAMES, ...APPLE_NAMES]) {
     saved[name] = Deno.env.get(name);
     Deno.env.delete(name);
   }
@@ -843,6 +912,13 @@ export function installWorld(): World {
     clerkUsers: new Set(),
     clerkQueue: [],
     clerkCalls: [],
+    appleKey: null,
+    appleCodes: new Set(),
+    appleTokenCalls: [],
+    appleTokenQueue: [],
+    appleRevokeCalls: [],
+    appleRevokeQueue: [],
+    appleRevoked: [],
     cascade: true,
     logs: [],
     now: isoNow,
@@ -936,6 +1012,8 @@ export function installWorld(): World {
     }
 
     if (url.host === CLERK_API_HOST) return await clerkApi(world, request, recorded);
+
+    if (url.host === APPLE_HOST) return await appleApi(world, request, recorded);
 
     if (url.host === REVENUECAT_HOST) {
       world.revenuecatCalls.push(recorded);
@@ -1200,6 +1278,18 @@ export function rcCustomer(
       },
     },
   };
+}
+
+// Turns Sign in with Apple's secrets on for one test, with a real ES256 key in the PEM form of Apple's .p8 file, and registers its
+// public half with the world's token endpoint. Answers the base64 secret, for a test that must look for it in a log.
+export async function appleOn(world: World): Promise<string> {
+  const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
+  const encoded = btoa(await exportPKCS8(privateKey));
+  Deno.env.set("APPLE_TEAM_ID", APPLE_TEST_TEAM_ID);
+  Deno.env.set("APPLE_SIWA_KEY_ID", APPLE_TEST_KEY_ID);
+  Deno.env.set("APPLE_SIWA_PRIVATE_KEY_B64", encoded);
+  world.appleKey = publicKey;
+  return encoded;
 }
 
 export const TEXT = "I have been so anxious about work this week and I can not seem to rest.";

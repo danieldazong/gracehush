@@ -1,3 +1,4 @@
+import { readAppleConfig, revokeAppleSignIn } from "../_shared/account/apple.ts";
 import { type ClerkResult, deleteClerkUser, getClerkUser, readClerkSecret } from "../_shared/account/clerk.ts";
 import { createAdmin } from "../_shared/admin.ts";
 import { readAuthConfig, verifyClerkRequest } from "../_shared/auth.ts";
@@ -5,7 +6,7 @@ import { deleteSubscriber, readBillingConfig } from "../_shared/billing/revenuec
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import { optionalEnv } from "../_shared/env.ts";
 import { AppError, type ErrorCode, errorResponse, jsonResponse } from "../_shared/errors.ts";
-import { type AccountStatus, blankLogLine, shortHash, writeLog } from "../_shared/log.ts";
+import { type AccountStatus, type AppleStatus, blankLogLine, shortHash, writeLog } from "../_shared/log.ts";
 import type { DeleteAccountResponse } from "../process-entry/contracts.ts";
 import { readJsonBody } from "../process-entry/validate.ts";
 import { deleteUserRows, removeUserFiles } from "./lifecycle.ts";
@@ -14,10 +15,11 @@ import { deleteUserRows, removeUserFiles } from "./lifecycle.ts";
 //
 // Every secret is read and checked, and Clerk is asked whether the caller exists, before anything is deleted: the token has just
 // proved the user exists, so a 404 means the key belongs to another Clerk instance, and deleting with it would look like
-// "already deleted". Then storage, the database, RevenueCat and Clerk, in that order (Clerk last, so the token keeps working for
-// a retry until the end), and a final pass over storage and the database that catches anything a request still running wrote
-// meanwhile. A step that fails stops with DELETE_INCOMPLETE: what was done stays done, and the same request sent again continues.
-// Nothing is deleted without a verified token and the exact confirm body; the user id comes only from the token.
+// "already deleted". Then storage, the database, RevenueCat, Sign in with Apple (step 35: best effort) and Clerk, in that order
+// (Clerk last, so the token keeps working for a retry until the end), and a final pass over storage and the database that catches
+// anything a request still running wrote meanwhile. A step that fails stops with DELETE_INCOMPLETE: what was done stays done, and
+// the same request sent again continues. Nothing is deleted without a verified token and the exact confirm body; the user id comes
+// only from the token, and an Apple code proves nothing about who is calling.
 
 type Context = {
   requestId: string;
@@ -27,6 +29,7 @@ type Context = {
   dbMs: number;
   account: AccountStatus | null;
   accountFiles: number;
+  accountApple: AppleStatus | null;
 };
 
 async function timed<T>(context: Context, bucket: "authMs" | "dbMs", work: () => Promise<T>): Promise<T> {
@@ -52,8 +55,12 @@ async function step<T>(context: Context, name: string, work: () => Promise<T>): 
   }
 }
 
-// The two-step dialog sends exactly { "confirm": "DELETE" }; anything else stops an accidental call.
-async function readConfirm(req: Request): Promise<void> {
+// Apple's codes are far shorter than this. Anything longer is not one.
+const MAX_APPLE_CODE_LENGTH = 4_096;
+
+// The two-step dialog sends { "confirm": "DELETE" }, with Apple's one-time code beside it when the person signed in with Apple and
+// confirmed on Apple's sheet (step 35). Anything else stops an accidental call. Answers the code, or null when none came.
+async function readConfirm(req: Request): Promise<string | null> {
   let body: unknown;
   try {
     body = await readJsonBody(req);
@@ -63,20 +70,38 @@ async function readConfirm(req: Request): Promise<void> {
     }
     throw error;
   }
-  const exact = typeof body === "object" && body !== null && !Array.isArray(body) &&
-    Object.keys(body).length === 1 && (body as Record<string, unknown>).confirm === "DELETE";
-  if (!exact) throw new AppError("INVALID_REQUEST", "confirm");
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new AppError("INVALID_REQUEST", "confirm");
+  }
+  const { confirm, appleAuthorizationCode: code, ...others } = body as Record<string, unknown>;
+  if (confirm !== "DELETE" || Object.keys(others).length > 0) throw new AppError("INVALID_REQUEST", "confirm");
+  if (code === undefined) return null;
+  if (typeof code !== "string" || code === "" || code.length > MAX_APPLE_CODE_LENGTH) {
+    throw new AppError("INVALID_REQUEST", "confirm");
+  }
+  return code;
 }
 
 function clerkFailed(context: Context, result: ClerkResult): AppError | null {
   return result.ok ? null : stepFailed(context, "clerk", result.reason);
 }
 
+// Ends Gracehush's access to the person's Sign in with Apple, when the app sent a code. Apple says the deletion must be fulfilled
+// without it, so this answers a word for the log and never stops or fails anything, and its secrets are not part of the check at the
+// start. A retry after DELETE_INCOMPLETE brings a new code or none; a code that was used already is only a word too.
+async function endAppleAccess(code: string | null): Promise<AppleStatus> {
+  if (code === null) return "no_code";
+  const config = await readAppleConfig(optionalEnv);
+  if (config.kind === "off") return "off";
+  if (config.kind === "bad") return config.reason;
+  return await revokeAppleSignIn(config, code);
+}
+
 async function run(req: Request, context: Context): Promise<Response> {
   if (req.method !== "POST") throw new AppError("METHOD_NOT_ALLOWED");
   const user = await timed(context, "authMs", () => verifyClerkRequest(req, readAuthConfig()));
   context.userHash = await shortHash(user.userId);
-  await readConfirm(req);
+  const appleCode = await readConfirm(req);
   const userId = user.userId;
 
   // 1. Every secret, and the caller on this Clerk instance. Nothing has been deleted yet.
@@ -99,13 +124,15 @@ async function run(req: Request, context: Context): Promise<Response> {
   const customer = await deleteSubscriber(billing.apiKey, userId);
   if (!customer.ok) throw stepFailed(context, "revenuecat", customer.reason);
 
-  // 5. Clerk, last. A user that is already gone is done.
-  // TODO(35): revoke Sign in with Apple here, before this call (AGENTS.md, Before a store build).
+  // 5. Sign in with Apple, best effort (step 35).
+  context.accountApple = await endAppleAccess(appleCode);
+
+  // 6. Clerk, last. A user that is already gone is done.
   const gone = await deleteClerkUser(clerk.secretKey, userId);
   const notDeleted = clerkFailed(context, gone);
   if (notDeleted) throw notDeleted;
 
-  // 6. The final pass: anything written while this ran (a request that was still making an entry recreates the profile). The
+  // 7. The final pass: anything written while this ran (a request that was still making an entry recreates the profile). The
   // account is gone by now, so this is best effort: logged, never a failure.
   let account: AccountStatus = rows.leftover > 0 ? "delete:done:cascade_missed" : "delete:done";
   try {
@@ -131,6 +158,7 @@ export async function handle(req: Request): Promise<Response> {
     dbMs: 0,
     account: null,
     accountFiles: 0,
+    accountApple: null,
   };
   let status = 200;
   let failure: AppError | null = null;
@@ -149,8 +177,8 @@ export async function handle(req: Request): Promise<Response> {
     status = failure.status;
     return errorResponse(failure, context.requestId, corsHeaders);
   } finally {
-    // The same allow-list as the other functions: the step as one word and the files removed as a count. Never an id, a key or
-    // a path.
+    // The same allow-list as the other functions: the step as one word, the files removed as a count and what became of Sign in
+    // with Apple as one word. Never an id, a key, a path or anything Apple sent or was sent.
     writeLog(
       blankLogLine({
         requestId: context.requestId,
@@ -163,6 +191,7 @@ export async function handle(req: Request): Promise<Response> {
         totalMs: Date.now() - context.startedAt,
         account: context.account,
         accountFiles: context.account === null ? null : context.accountFiles,
+        accountApple: context.accountApple,
       }),
     );
   }

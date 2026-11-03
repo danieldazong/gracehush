@@ -224,6 +224,7 @@ export async function handle(req: Request): Promise<Response> {
       accountFiles: null,
       accountLeftOut: null,
       accountBytes: null,
+      accountApple: null,
     };
     writeLog(line);
   }

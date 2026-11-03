@@ -1,6 +1,8 @@
 import type { DeleteAccountError, DeleteAccountResponse } from "../process-entry/contracts.ts";
 import { assert, assertEquals } from "../process-entry/testing/assert.ts";
 import {
+  APPLE_HOST,
+  appleOn,
   CLERK_API_HOST,
   installWorld,
   ISSUER,
@@ -15,13 +17,15 @@ import {
 } from "../process-entry/testing/fakes.ts";
 import { handle } from "./handler.ts";
 
-// delete-account (step 31) against the fake Supabase, RevenueCat and Clerk: what it checks before it deletes anything, the order
-// it deletes in, what a failure at each step leaves (and that a retry finishes), the final pass, and that nobody else's files,
-// rows, customer or user are touched.
+// delete-account (step 31) against the fake Supabase, RevenueCat, Clerk and Apple: what it checks before it deletes anything, the
+// order it deletes in, what a failure at each step leaves (and that a retry finishes), the final pass, that nobody else's files,
+// rows, customer or user are touched, and (step 35) that ending Apple's access never stops or fails a deletion.
 
 const USER = "user_test";
 const OTHER = "user_other";
 const CONFIRM = { confirm: "DELETE" };
+const APPLE_CODE = "c.apple-one-time-code";
+const WITH_CODE = { confirm: "DELETE", appleAuthorizationCode: APPLE_CODE };
 
 function flow(work: (world: World) => Promise<void>) {
   return async () => {
@@ -109,6 +113,7 @@ function recordOrder(world: World): string[] {
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
     let kind = `${method} ${url.host}${url.pathname}`;
     if (url.origin === ISSUER) kind = "auth";
+    else if (url.host === APPLE_HOST) kind = `apple:${url.pathname}`;
     else if (url.host === CLERK_API_HOST) kind = `clerk:${method}`;
     else if (url.host === REVENUECAT_HOST) kind = `revenuecat:${method}`;
     else if (url.pathname.startsWith("/storage/v1/object/list/")) kind = "storage:list";
@@ -128,6 +133,7 @@ async function failure(response: Response, status: number, code: DeleteAccountEr
 }
 
 const lastAccount = (world: World) => JSON.parse(String(world.logs.at(-1))).account;
+const lastApple = (world: World) => JSON.parse(String(world.logs.at(-1))).accountApple;
 
 Deno.test(
   "requests: OPTIONS is 204, a GET is 405 and no token is 401, and nothing is asked or deleted",
@@ -142,11 +148,28 @@ Deno.test(
 );
 
 Deno.test(
-  'confirm: anything but exactly { confirm: "DELETE" } is a 400, and nothing is asked or deleted',
+  'confirm: anything but { confirm: "DELETE" }, with or without a well-formed Apple code, is a 400, and nothing is asked or deleted',
   flow(async (world) => {
     seedAccount(world, USER);
+    await appleOn(world);
     for (
-      const body of [{}, { confirm: "delete" }, { confirm: "DELETE", userId: OTHER }, ["DELETE"], "DELETE", null, 1]
+      const body of [
+        {},
+        { confirm: "delete" },
+        { confirm: "DELETE", userId: OTHER },
+        ["DELETE"],
+        "DELETE",
+        null,
+        1,
+        { appleAuthorizationCode: APPLE_CODE },
+        { confirm: "delete", appleAuthorizationCode: APPLE_CODE },
+        { confirm: "DELETE", appleAuthorizationCode: APPLE_CODE, userId: OTHER },
+        { confirm: "DELETE", appleAuthorizationCode: "" },
+        { confirm: "DELETE", appleAuthorizationCode: null },
+        { confirm: "DELETE", appleAuthorizationCode: 7 },
+        { confirm: "DELETE", appleAuthorizationCode: [APPLE_CODE] },
+        { confirm: "DELETE", appleAuthorizationCode: "x".repeat(4_097) },
+      ]
     ) {
       await failure(await ask(world, body), 400, "INVALID_REQUEST");
     }
@@ -158,6 +181,17 @@ Deno.test(
     );
     assertEquals(leftOf(world, USER), WHOLE);
     assertEquals(world.clerkCalls.length + world.revenuecatCalls.length + world.lists.length, 0);
+    assertEquals(world.appleTokenCalls.length, 0);
+  }),
+);
+
+Deno.test(
+  "confirm: a code of exactly 4,096 characters is accepted",
+  flow(async (world) => {
+    seedAccount(world, USER);
+    const response = await ask(world, { confirm: "DELETE", appleAuthorizationCode: "x".repeat(4_096) });
+    assertEquals(response.status, 200, await response.clone().text());
+    assertEquals(lastApple(world), "off");
   }),
 );
 
@@ -358,18 +392,231 @@ Deno.test(
 );
 
 Deno.test(
-  "log: one line of 38 fields, the step as one word and the files as a count; no id, key, path or token",
+  "log: one line of 39 fields, the step as one word and the files as a count; no id, key, path or token",
   flow(async (world) => {
     seedAccount(world, USER);
     const token = await world.token({ sub: USER });
     assertEquals((await ask(world, CONFIRM, { token })).status, 200);
     assertEquals(world.logs.length, 1);
     const line = JSON.parse(world.logs[0]);
-    assertEquals(Object.keys(line).length, 38);
-    assertEquals([line.status, line.account, line.accountFiles], [200, "delete:done", 3]);
+    assertEquals(Object.keys(line).length, 39);
+    assertEquals([line.status, line.account, line.accountFiles, line.accountApple], [200, "delete:done", 3, "no_code"]);
     assert(/^[0-9a-f]{8}$/.test(line.user));
     for (const word of [USER, token, "sk_test", "sk_key", "raw/", ".zip", ".wav", "devotionals"]) {
       assert(!world.logs[0].includes(word), `the log holds ${word}`);
     }
   }),
+);
+
+// ---- Sign in with Apple (step 35) ----------------------------------------------------------------------------------
+
+Deno.test(
+  "apple: with a code the access ends after RevenueCat and before Clerk, by the exchange and then the revoke",
+  flow(async (world) => {
+    seedAccount(world, USER);
+    await appleOn(world);
+    world.appleCodes.add(APPLE_CODE);
+    const order = recordOrder(world);
+    const response = await ask(world, WITH_CODE);
+    assertEquals(response.status, 200, await response.clone().text());
+    assertEquals((await response.json()) as DeleteAccountResponse, { deleted: true });
+    assertEquals(leftOf(world, USER), GONE);
+    assertEquals(lastApple(world), "revoked");
+    assertEquals(lastAccount(world), "delete:done");
+    assertEquals(world.appleRevoked, [`rt.${APPLE_CODE}`]);
+
+    const first = (kind: string) => order.indexOf(kind);
+    assert(first("revenuecat:DELETE") < first("apple:/auth/token"), "RevenueCat before Apple");
+    assert(first("apple:/auth/token") < first("apple:/auth/revoke"), "the exchange before the revoke");
+    assert(first("apple:/auth/revoke") < first("clerk:DELETE"), "Apple before Clerk");
+    assertEquals(
+      order.filter((kind) => kind.startsWith("apple:")).length,
+      2,
+      "the final pass does not ask Apple again",
+    );
+  }),
+);
+
+Deno.test(
+  "apple: no code, secrets off and secrets bad each delete everything, with their word, and ask Apple nothing",
+  async () => {
+    const cases: { body: unknown; set: (world: World) => Promise<unknown> | void; word: string }[] = [
+      { body: CONFIRM, set: () => undefined, word: "no_code" },
+      // A code with no secrets set: this project before section I, and a bad value named in the log.
+      { body: WITH_CODE, set: () => undefined, word: "off" },
+      {
+        body: WITH_CODE,
+        set: async (world) => {
+          await appleOn(world);
+          Deno.env.set("APPLE_TEAM_ID", "SHORT");
+        },
+        word: "bad_config:APPLE_TEAM_ID",
+      },
+      {
+        body: WITH_CODE,
+        set: async (world) => {
+          await appleOn(world);
+          Deno.env.set("APPLE_SIWA_KEY_ID", "SHORT");
+        },
+        word: "bad_config:APPLE_SIWA_KEY_ID",
+      },
+      {
+        body: WITH_CODE,
+        set: async (world) => {
+          await appleOn(world);
+          Deno.env.set("APPLE_SIWA_PRIVATE_KEY_B64", btoa("not a key"));
+        },
+        word: "bad_config:APPLE_SIWA_PRIVATE_KEY_B64",
+      },
+      // No code, with good secrets: an account that did not sign in with Apple. Nothing is asked of Apple.
+      { body: CONFIRM, set: (world) => appleOn(world), word: "no_code" },
+    ];
+    for (const { body, set, word } of cases) {
+      const world = installWorld();
+      try {
+        seedAccount(world, USER);
+        await set(world);
+        const response = await ask(world, body);
+        assertEquals(response.status, 200, `${word}: ${await response.clone().text()}`);
+        assertEquals(leftOf(world, USER), GONE, word);
+        assertEquals(lastApple(world), word);
+        assertEquals(lastAccount(world), "delete:done", word);
+        assertEquals(world.appleTokenCalls.length + world.appleRevokeCalls.length, 0, word);
+      } finally {
+        world.restore();
+      }
+    }
+  },
+);
+
+Deno.test(
+  "apple: a failed exchange or revoke still ends 200 { deleted: true } with the whole account gone, and the word in the log",
+  async () => {
+    const cases: { breakIt: (world: World) => void; word: string; revokes: number }[] = [
+      // A code Apple does not know: nothing was added to the world's codes.
+      { breakIt: () => undefined, word: "token:invalid_grant", revokes: 0 },
+      {
+        breakIt: (world) => world.appleTokenQueue.push({ kind: "json", status: 500, body: {} }),
+        word: "token:http_500",
+        revokes: 0,
+      },
+      { breakIt: (world) => world.appleTokenQueue.push({ kind: "network" }), word: "token:network", revokes: 0 },
+      {
+        breakIt: (world) => {
+          world.appleCodes.add(APPLE_CODE);
+          world.appleRevokeQueue.push({ kind: "json", status: 503, body: {} });
+        },
+        word: "revoke:http_503",
+        revokes: 1,
+      },
+      {
+        breakIt: (world) => {
+          world.appleCodes.add(APPLE_CODE);
+          world.appleRevokeQueue.push({ kind: "network" });
+        },
+        word: "revoke:network",
+        revokes: 1,
+      },
+    ];
+    for (const { breakIt, word, revokes } of cases) {
+      const world = installWorld();
+      try {
+        seedAccount(world, USER);
+        await appleOn(world);
+        breakIt(world);
+        const response = await ask(world, WITH_CODE);
+        assertEquals(response.status, 200, `${word}: ${await response.clone().text()}`);
+        assertEquals((await response.json()) as DeleteAccountResponse, { deleted: true });
+        assertEquals(leftOf(world, USER), GONE, word);
+        assertEquals(lastApple(world), word);
+        assertEquals(lastAccount(world), "delete:done", word);
+        assertEquals(world.appleTokenCalls.length, 1, `${word}: one exchange, no retry`);
+        assertEquals(world.appleRevokeCalls.length, revokes, word);
+      } finally {
+        world.restore();
+      }
+    }
+  },
+);
+
+Deno.test(
+  "apple: the secrets are not part of the check at the start: bad ones never stop a deletion, even with a code",
+  flow(async (world) => {
+    seedAccount(world, USER);
+    await appleOn(world);
+    Deno.env.set("APPLE_SIWA_PRIVATE_KEY_B64", "SECRET not base64");
+    assertEquals((await ask(world, WITH_CODE)).status, 200);
+    assertEquals(leftOf(world, USER), GONE);
+    assert(!world.logs[0].includes("SECRET"), "the value is not in the log");
+  }),
+);
+
+Deno.test(
+  "apple: a deletion that stops before Apple asks nothing of Apple, and the retry brings its own code or none",
+  flow(async (world) => {
+    seedAccount(world, USER);
+    await appleOn(world);
+    world.appleCodes.add(APPLE_CODE);
+    world.revenuecatQueue.push({ kind: "json", status: 503, body: {} });
+    await failure(await ask(world, WITH_CODE), 500, "DELETE_INCOMPLETE");
+    assertEquals(lastAccount(world), "delete:failed:revenuecat:http_5xx");
+    assertEquals(lastApple(world), null);
+    assertEquals(world.appleTokenCalls.length, 0);
+    const retry = await ask(world, CONFIRM);
+    assertEquals(retry.status, 200, await retry.clone().text());
+    assertEquals(lastApple(world), "no_code");
+    assertEquals(leftOf(world, USER), GONE);
+  }),
+);
+
+Deno.test(
+  "apple: Clerk failing after Apple answered is DELETE_INCOMPLETE as before; the retry's used code is only a word",
+  flow(async (world) => {
+    seedAccount(world, USER);
+    await appleOn(world);
+    world.appleCodes.add(APPLE_CODE);
+    world.clerkQueue.push({ kind: "json", status: 200, body: {} }, { kind: "json", status: 502, body: {} });
+    await failure(await ask(world, WITH_CODE), 500, "DELETE_INCOMPLETE");
+    assertEquals(lastAccount(world), "delete:failed:clerk:http_5xx");
+    assertEquals(lastApple(world), "revoked");
+    const retry = await ask(world, WITH_CODE);
+    assertEquals(retry.status, 200, await retry.clone().text());
+    assertEquals(lastApple(world), "token:invalid_grant");
+    assertEquals(leftOf(world, USER), GONE);
+  }),
+);
+
+Deno.test(
+  "apple: no log line of any case holds the code, a token or the secret; the answer holds none either",
+  async () => {
+    const cases: ((world: World) => void)[] = [
+      (world) => world.appleCodes.add(APPLE_CODE),
+      () => undefined,
+      (world) => world.appleTokenQueue.push({ kind: "json", status: 400, body: { error: `bad ${APPLE_CODE}` } }),
+      (world) => {
+        world.appleCodes.add(APPLE_CODE);
+        world.appleRevokeQueue.push({ kind: "json", status: 400, body: { error: "rt.leak" } });
+      },
+    ];
+    for (const prepare of cases) {
+      const world = installWorld();
+      try {
+        seedAccount(world, USER);
+        const secret = await appleOn(world);
+        prepare(world);
+        const response = await ask(world, WITH_CODE);
+        const answer = await response.text();
+        assertEquals(response.status, 200, answer);
+        assertEquals(world.logs.length, 1);
+        const line = world.logs[0];
+        assertEquals(Object.keys(JSON.parse(line)).length, 39);
+        for (const word of [APPLE_CODE, `rt.${APPLE_CODE}`, "rt.leak", secret, "client_secret", "refresh"]) {
+          assert(!line.includes(word), `the log holds ${word.slice(0, 12)}`);
+          assert(!answer.includes(word), `the answer holds ${word.slice(0, 12)}`);
+        }
+      } finally {
+        world.restore();
+      }
+    }
+  },
 );

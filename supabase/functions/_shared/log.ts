@@ -5,11 +5,13 @@
 // crisis screening answered as one word, with the stage that decided (step 21), and what the speech step and the free
 // tier's check did, as one word each with their numbers (step 22), and what billing did, as one word with its time and, for
 // RevenueCat's webhook, the event's type as one word (step 30), and what an export or an account deletion did, as one word with
-// counts (step 31). Never: a token or its claims, an email, a
+// counts (step 31), and what became of Sign in with Apple at a deletion, as one word (step 35). Never: a token or its claims, an
+// email, a
 // transcript, entry text, audio, model output, the script that was read aloud, scripture (not even which book or chapter),
 // the categories of concern the screening named, a phrase that matched, a link, a storage path, a key, the service
 // account's address, SQL, a provider's error message (those can quote what the user wrote), a webhook's body, a RevenueCat
-// answer, a price, a product or a store transaction, a file name, an export's link or an id of any kind.
+// answer, a price, a product or a store transaction, a file name, an export's link, an Apple code, token or client secret, or an
+// id of any kind.
 
 // What became of the passage: verified on the first try, replaced by a second choice that was verified, kept without its
 // text because the Bible text could not be read, or dropped because no valid passage was found. null: no passage was
@@ -79,6 +81,18 @@ export type AccountStatus =
   | "delete:done:final_pass_failed"
   | `delete:failed:${string}`;
 
+// What became of Sign in with Apple at an account's deletion (step 35). null in the log: the deletion did not reach that step.
+// "no_code": the app sent no code (no Apple account, or the phone could not ask); "off": the Apple secrets are not set; "bad_config"
+// names the secret to look at; "token" and "revoke" hold the short reason from Apple's two endpoints (invalid_grant, http_500,
+// timeout, network...). Only "revoked" says Apple was told. None of them ever stops a deletion.
+export type AppleStatus =
+  | "revoked"
+  | "no_code"
+  | "off"
+  | `bad_config:${string}`
+  | `token:${string}`
+  | `revoke:${string}`;
+
 export type LogLine = {
   requestId: string;
   status: number;
@@ -131,6 +145,8 @@ export type LogLine = {
   accountFiles: number | null;
   accountLeftOut: number | null;
   accountBytes: number | null;
+  // Sign in with Apple at a deletion (step 35).
+  accountApple: AppleStatus | null;
 };
 
 // The first 8 hex characters of SHA-256(value): enough to follow one user through the logs, not to find them.
@@ -186,6 +202,7 @@ export function blankLogLine(fields: Pick<LogLine, "requestId" | "status"> & Par
     accountFiles: null,
     accountLeftOut: null,
     accountBytes: null,
+    accountApple: null,
     ...rest,
   };
 }

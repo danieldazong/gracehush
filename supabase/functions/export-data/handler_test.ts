@@ -302,7 +302,7 @@ Deno.test(
 );
 
 Deno.test(
-  "log: one line of 38 fields with the counts, and no id, path, link, token or word",
+  "log: one line of 39 fields with the counts, and no id, path, link, token or word",
   flow(async (world) => {
     const one = reflect(world, 2, { recording: 100, devotional: 100 }, { transcript: "SECRET-WORDS" });
     reflect(world, 1, { devotional: 100 });
@@ -310,7 +310,7 @@ Deno.test(
     const answer = await ok(await ask(world, { token }));
     assertEquals(world.logs.length, 1);
     const line = JSON.parse(world.logs[0]);
-    assertEquals(Object.keys(line).length, 38);
+    assertEquals(Object.keys(line).length, 39);
     assertEquals(
       [line.status, line.account, line.accountEntries, line.accountFiles, line.accountLeftOut, line.accountBytes],
       [200, "export:built", 2, 3, 0, answer.sizeBytes],
