@@ -1,4 +1,4 @@
-import { useScrollToTop } from "@react-navigation/native";
+import { useIsFocused, useScrollToTop } from "@react-navigation/native";
 import type { SymbolViewProps } from "expo-symbols";
 import { useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
@@ -231,6 +231,8 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
   const barClearance = useTabBarClearance();
   const listRef = useRef<FlatList<Prayer>>(null);
   useScrollToTop(listRef);
+  // A card's long title scrolls only while the tab is in front (2026-11-01).
+  const focused = useIsFocused();
 
   // Screen state, reset when the screen unmounts.
   const [tab, setTab] = useState<PrayerTab>("active");
@@ -478,6 +480,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
               <PrayerCard
                 variant="active"
                 prayer={item}
+                active={focused}
                 now={ready.now}
                 onOpen={(entryId) => navigation.navigate("Reflection", { entryId })}
                 onMarkAnswered={(prayer) => openSheet(prayer, "mark")}
@@ -495,6 +498,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
               <PrayerCard
                 variant="answered"
                 prayer={item}
+                active={focused}
                 onOpen={(entryId) => navigation.navigate("Reflection", { entryId })}
                 onOpenMenu={(prayer) => openMenu(prayer, "answered")}
                 onAddNote={(prayer) => openSheet(prayer, "editNote")}

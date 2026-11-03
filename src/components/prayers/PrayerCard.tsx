@@ -2,6 +2,7 @@ import type { SymbolViewProps } from "expo-symbols";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Icon } from "@/components/Icon";
+import { MarqueeText } from "@/components/MarqueeText";
 import { copy } from "@/constants/copy";
 import { colors, shadows } from "@/constants/theme";
 import { getDaysSince } from "@/data/selectors";
@@ -18,12 +19,15 @@ const icons = {
 
 // A union, so an answered card cannot be given an Active handler. A prayer card is a plain View: the text
 // block is one button that opens the reflection, and every other control is its own button beside it, because a
-// Pressable groups its children for a screen reader and a control inside it could not be reached.
+// Pressable groups its children for a screen reader and a control inside it could not be reached. The title is one
+// line that scrolls slowly when it is wider than its column (MarqueeText, 2026-11-01); `active` says whether it may move
+// (the screen passes whether it is in front; default true).
 type PrayerCardProps =
   | {
       variant: "active";
       prayer: Prayer;
       now: Date;
+      active?: boolean;
       onOpen: (prayerId: string) => void;
       onMarkAnswered: (prayer: Prayer) => void;
       onOpenMenu: (prayer: Prayer) => void;
@@ -31,6 +35,7 @@ type PrayerCardProps =
   | {
       variant: "answered";
       prayer: Prayer;
+      active?: boolean;
       onOpen: (prayerId: string) => void;
       onOpenMenu: (prayer: Prayer) => void;
       onAddNote: (prayer: Prayer) => void;
@@ -53,7 +58,7 @@ function Reference({ reference }: { reference: string }) {
 
 type ActiveCardProps = Extract<PrayerCardProps, { variant: "active" }>;
 
-function ActiveCard({ prayer, now, onOpen, onMarkAnswered, onOpenMenu }: ActiveCardProps) {
+function ActiveCard({ prayer, now, active = true, onOpen, onMarkAnswered, onOpenMenu }: ActiveCardProps) {
   const title = getPrayerTitle(prayer);
   const days = copy.prayers.card.days(getDaysSince(prayer.createdAt, now));
   const summary = prayer.summary.trim();
@@ -72,7 +77,9 @@ function ActiveCard({ prayer, now, onOpen, onMarkAnswered, onOpenMenu }: ActiveC
           <View className="flex-row flex-wrap items-start justify-between gap-x-2 gap-y-2 pr-9">
             <View className="min-w-[150px] flex-1 gap-1">
               {prayer.category ? <Text className="eyebrow">{prayer.category}</Text> : null}
-              <Text className="text-section text-plum-deep">{title}</Text>
+              <MarqueeText className="text-section text-plum-deep" active={active}>
+                {title}
+              </MarqueeText>
             </View>
             <View className="chip shrink-0 gap-1">
               <Icon name={icons.days} size={15} color={colors.mauve} />
@@ -114,7 +121,7 @@ function ActiveCard({ prayer, now, onOpen, onMarkAnswered, onOpenMenu }: ActiveC
 type AnsweredCardProps = Extract<PrayerCardProps, { variant: "answered" }>;
 
 // The answered date and "After N days" are the timeline row above this card (PrayersScreen).
-function AnsweredCard({ prayer, onOpen, onOpenMenu, onAddNote }: AnsweredCardProps) {
+function AnsweredCard({ prayer, active = true, onOpen, onOpenMenu, onAddNote }: AnsweredCardProps) {
   const title = getPrayerTitle(prayer);
   const note = prayer.answeredNote?.trim() ?? "";
 
@@ -132,7 +139,11 @@ function AnsweredCard({ prayer, onOpen, onOpenMenu, onAddNote }: AnsweredCardPro
       >
         <View className="gap-2">
           {/* pr-11 keeps the title out from under the overflow button. */}
-          <Text className="pr-11 text-section text-plum-deep">{title}</Text>
+          <View className="pr-11">
+            <MarqueeText className="text-section text-plum-deep" active={active}>
+              {title}
+            </MarqueeText>
+          </View>
           {note === "" ? null : (
             <View className="rounded border border-petal bg-linen p-2">
               <Text className="font-fraunces-italic text-[15px] leading-[23px] text-ink/80">
