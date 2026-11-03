@@ -3,15 +3,20 @@
 // real supabase-js client against the fake Supabase of step 25 (../journal-data/world.cjs), whose export-data hands back a link
 // and whose delete-account deletes the caller only for the exact confirm body, as the real functions do. Plain Node cannot load
 // the player, the downloaded audio, the affirmation notifications or RevenueCat, so those are faked with counters, and so is the
-// plan watch (its stops and starts are what these checks are about). Every check ends by asserting that nothing the database or
-// AGENTS.md would refuse was sent, and that the development log holds no link, id, token or word.
+// plan watch (its stops and starts are what these checks are about). Apple's sheet (step 35) is faked too, with expo's Expo Go
+// check and react-native's Platform. Every check ends by asserting that nothing the database or AGENTS.md would refuse was sent,
+// and that the development log holds no link, id, token, Apple code or word.
 //
 //   node --no-warnings supabase/tests/account/run.cjs        (needs Node 22.5 or newer for node:sqlite)
 //   GRACEHUSH_REPO=<a copy of the repo> node --no-warnings supabase/tests/account/run.cjs
 process.env.TZ = "UTC";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const W = require("../journal-data/world.cjs");
+
+const REPO = process.env.GRACEHUSH_REPO ?? path.resolve(__dirname, "..", "..", "..");
 
 const {
   makeLiveWorld,
@@ -35,8 +40,12 @@ const realSetTimeout = setTimeout;
 const realClearTimeout = clearTimeout;
 const CHECK_LIMIT_MS = 20000;
 
+// What Apple's sheet answers in these checks: the Apple user id Clerk holds for the account, and a one-time code.
+const APPLE_USER = "000123.apple-user.0456";
+const APPLE_CODE = "c.apple-one-time-code";
+
 // Ids, tokens, links and words that must never reach the development log.
-const FORBIDDEN_IN_LOGS = ["user_a", "user_b", "tokA", "tokB", "token=", "signed", "export.zip", "example.com", "DELETE"];
+const FORBIDDEN_IN_LOGS = ["user_a", "user_b", "tokA", "tokB", "token=", "signed", "export.zip", "example.com", "DELETE", APPLE_CODE, APPLE_USER];
 
 function assertQuiet(w) {
   for (const line of w.logs) {
@@ -48,8 +57,28 @@ function assertQuiet(w) {
 
 // What plain Node cannot load, counted. `order` records the plan watch's stops and starts with the requests the server took.
 function serviceFakes() {
-  const state = { order: [], playerStops: 0, audioDeletes: 0, notificationClears: 0, revenueCatLogouts: 0 };
+  const state = {
+    order: [],
+    playerStops: 0,
+    audioDeletes: 0,
+    notificationClears: 0,
+    revenueCatLogouts: 0,
+    // Apple's sheet (step 35): what it was asked, and what it answers.
+    expoGo: false,
+    appleAvailable: () => true,
+    appleAsks: [],
+    appleAnswer: () => ({ user: APPLE_USER, authorizationCode: APPLE_CODE, identityToken: "id" }),
+  };
   const fakes = {
+    expo: { __esModule: true, isRunningInExpoGo: () => state.expoGo },
+    "expo-apple-authentication": {
+      __esModule: true,
+      isAvailableAsync: async () => state.appleAvailable(),
+      signInAsync: async (options) => {
+        state.appleAsks.push(options);
+        return state.appleAnswer();
+      },
+    },
     "@/store/playerStore": {
       __esModule: true,
       usePlayerStore: { getState: () => ({ entryId: null, stop: () => void (state.playerStops += 1) }) },
@@ -92,6 +121,8 @@ async function test(name, run, options = {}) {
   const services = serviceFakes();
   const w = makeLiveWorld({ ...options, fakes: services.fakes });
   w.services = services.state;
+  // react-native's Platform, beside the world's AppState (read when a module uses it, so this is in time).
+  w.appState.module.Platform = { OS: options.platform ?? "ios" };
   let limit;
   try {
     if (options.signIn !== false) await w.signIn();
@@ -119,6 +150,7 @@ async function test(name, run, options = {}) {
 // ------------------------------------------------------------------ helpers
 const api = (w) => w.use("@/api/journalApi");
 const account = (w) => w.use("@/services/account");
+const apple = (w) => w.use("@/services/appleReauth");
 const engine = (w) => w.use("@/services/syncEngine");
 const profileSync = (w) => w.use("@/services/profileSync");
 const copyOf = (w) => w.use("@/constants/copy").copy;
@@ -148,15 +180,21 @@ async function gatewayChecks() {
   });
 
   await test("gateway: delete-account sends exactly { confirm: \"DELETE\" }, and its failures come back with their codes", async (w) => {
-    const result = await api(w).deleteAccount();
+    const result = await api(w).deleteAccount(null);
     assert.deepEqual(result, { ok: true, data: { deleted: true } });
     assert.deepEqual(calls(w, "delete-account")[0].body, { confirm: "DELETE" });
     w.server.state.functions["delete-account"].push(() => fnError(500, "DELETE_INCOMPLETE"));
-    const failed = await api(w).deleteAccount();
+    const failed = await api(w).deleteAccount(null);
     assert.deepEqual({ ok: failed.ok, status: failed.status, code: failed.code }, { ok: false, status: 500, code: "DELETE_INCOMPLETE" });
     w.server.state.offline = true;
-    const offline = await api(w).deleteAccount();
+    const offline = await api(w).deleteAccount(null);
     assert.deepEqual({ status: offline.status, code: offline.code }, { status: 0, code: "NETWORK" });
+  });
+
+  await test("gateway: an Apple code goes beside the confirm, under its own key, and the gateway remembers nothing of it", async (w) => {
+    assert.deepEqual(await api(w).deleteAccount(APPLE_CODE), { ok: true, data: { deleted: true } });
+    assert.deepEqual(calls(w, "delete-account")[0].body, { confirm: "DELETE", appleAuthorizationCode: APPLE_CODE });
+    assert.ok(!JSON.stringify(api(w).getLastFunctionCall()).includes(APPLE_CODE));
   });
 
   await test("gateway: both calls wait 155 seconds before they give up, longer than the functions themselves run", async (w) => {
@@ -165,7 +203,7 @@ async function gatewayChecks() {
     assert.equal(DELETE_ACCOUNT_TIMEOUT_MS, 155_000);
     for (const [name, call, timeout] of [
       ["export-data", () => api(w).exportData(), EXPORT_DATA_TIMEOUT_MS],
-      ["delete-account", () => api(w).deleteAccount(), DELETE_ACCOUNT_TIMEOUT_MS],
+      ["delete-account", () => api(w).deleteAccount(null), DELETE_ACCOUNT_TIMEOUT_MS],
     ]) {
       w.server.state.functions[name].push(() => new Promise(() => undefined));
       let settled = null;
@@ -291,10 +329,141 @@ async function deleteChecks() {
   });
 }
 
+// ================================================================== Sign in with Apple (step 35)
+async function appleChecks() {
+  await test("apple: skipped with no Apple id, in Expo Go, on the mock data and when Apple is unavailable, and Apple is asked nothing", async (w) => {
+    assert.deepEqual(await apple(w).confirmWithApple(null), { kind: "skipped" });
+    w.services.expoGo = true;
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+    w.services.expoGo = false;
+    dev(w).setDataSource("mock");
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+    dev(w).setDataSource("supabase");
+    w.services.appleAvailable = () => false;
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+    assert.deepEqual(w.services.appleAsks, []);
+  });
+
+  await test("apple: skipped on Android, and Apple is asked nothing", async (w) => {
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+    assert.deepEqual(w.services.appleAsks, []);
+  }, { platform: "android" });
+
+  await test("apple: it asks with no scopes, and answers the code for the same Apple user", async (w) => {
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "code", code: APPLE_CODE });
+    assert.deepEqual(w.services.appleAsks, [{ requestedScopes: [] }]);
+  });
+
+  await test("apple: another Apple Account on the phone, or an answer with no code, is skipped: a code is never sent for someone else", async (w) => {
+    w.services.appleAnswer = () => ({ user: "000999.someone-else.0111", authorizationCode: APPLE_CODE, identityToken: "id" });
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+    w.services.appleAnswer = () => ({ user: APPLE_USER, authorizationCode: null, identityToken: "id" });
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+    w.services.appleAnswer = () => ({ user: APPLE_USER, authorizationCode: "", identityToken: "id" });
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+  });
+
+  await test("apple: only ERR_REQUEST_CANCELED is a cancel; any other error goes on without a code", async (w) => {
+    const coded = (code) => () => {
+      throw Object.assign(new Error("Apple's own words"), { code });
+    };
+    w.services.appleAnswer = coded("ERR_REQUEST_CANCELED");
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "cancelled" });
+    for (const code of ["ERR_REQUEST_FAILED", "ERR_REQUEST_NOT_HANDLED", "ERR_REQUEST_UNKNOWN", undefined]) {
+      w.services.appleAnswer = coded(code);
+      assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" }, String(code));
+    }
+    w.services.appleAnswer = () => {
+      throw "not even an error";
+    };
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+    // Asking whether Apple is available failing is not a cancel either.
+    w.services.appleAvailable = () => {
+      throw Object.assign(new Error("no"), { code: "ERR_REQUEST_FAILED" });
+    };
+    assert.deepEqual(await apple(w).confirmWithApple(APPLE_USER), { kind: "skipped" });
+  });
+
+  await test("delete: the code goes to the server, after the background work has stopped, and the phone is cleared as before", async (w) => {
+    await w.startEngine();
+    const seen = {};
+    w.server.state.functions["delete-account"].push(async (call) => {
+      seen.engine = engine(w).isSyncEngineStarted();
+      seen.order = [...w.services.order];
+      seen.body = call.body;
+      return json(200, { deleted: true });
+    });
+    assert.deepEqual(await account(w).deleteAccount(APPLE_CODE), { ok: true, data: null });
+    assert.deepEqual(seen.body, { confirm: "DELETE", appleAuthorizationCode: APPLE_CODE });
+    assert.equal(seen.engine, false);
+    assert.deepEqual(seen.order, ["stop plan watch"]);
+    assert.equal(dbOpen(w), false);
+    assert.equal(prefsOf(w), undefined);
+  });
+
+  await test("delete: with no code the body is exactly { confirm: \"DELETE\" }, and the fake server deletes on both", async (w) => {
+    assert.deepEqual(await account(w).deleteAccount(null), { ok: true, data: null });
+    assert.deepEqual(calls(w, "delete-account")[0].body, { confirm: "DELETE" });
+    assert.deepEqual(w.server.state.appleCodesSent, [false]);
+  });
+
+  await test("delete: called with nothing, as the older callers do, it is the same as null", async (w) => {
+    assert.deepEqual(await account(w).deleteAccount(), { ok: true, data: null });
+    assert.deepEqual(calls(w, "delete-account")[0].body, { confirm: "DELETE" });
+  });
+
+  await test("delete: a failed deletion with a code starts the background work again and clears nothing", async (w) => {
+    await w.startEngine();
+    w.server.state.functions["delete-account"].push(() => fnError(500, "DELETE_INCOMPLETE"));
+    assert.deepEqual(await account(w).deleteAccount(APPLE_CODE), { ok: false, code: "UNKNOWN", message: copyOf(w).profile.errors.delete });
+    await settle();
+    assert.equal(engine(w).isSyncEngineStarted(), true);
+    assert.equal(dbOpen(w), true);
+  });
+
+  await test("delete: the mock source takes a code and sends nothing, and account.ts never imports Apple's package", async (w) => {
+    dev(w).setDataSource("mock");
+    assert.deepEqual(await finish(account(w).deleteAccount(APPLE_CODE)), { ok: true, data: null });
+    assert.equal(calls(w, "delete-account").length, 0);
+    const source = fs.readFileSync(path.join(REPO, "src", "services", "account.ts"), "utf8");
+    assert.ok(!source.includes("expo-apple-authentication"));
+    assert.ok(!source.includes("appleReauth"));
+  });
+
+  await test("screen: Profile asks Apple before it deletes, a cancel returns with the calm line, and it reads Apple's id from Clerk", async () => {
+    const source = fs.readFileSync(path.join(REPO, "src", "screens", "profile", "ProfileScreen.tsx"), "utf8");
+    const asked = source.indexOf("await confirmWithApple(appleUserId)");
+    const cancel = source.indexOf('apple.kind === "cancelled"', asked);
+    const line = source.indexOf("setDialogError(text.errors.deleteAppleCancelled)", cancel);
+    const leave = source.indexOf("return;", line);
+    const remove = source.indexOf('await deleteAccount(apple.kind === "code" ? apple.code : null)', leave);
+    assert.ok(asked >= 0, "the screen asks Apple");
+    assert.ok(cancel > asked && line > cancel && leave > line && remove > leave, "ask, then a cancel returns, then delete");
+    assert.equal(source.split("await deleteAccount(").length - 1, 1, "there is one way to delete");
+    assert.ok(source.includes('account.provider === "apple"'));
+    assert.ok(source.includes("?.providerUserId ?? null"));
+    assert.ok(source.includes("deleteFinal.bodyApple"));
+    assert.ok(/appleUserId !== null/.test(source), "the final dialog says so first, only for an Apple account");
+  });
+
+  await test("copy: the two new lines say what happens and where to go, in curly punctuation", async (w) => {
+    const { profile } = copyOf(w);
+    const body = profile.dialogs.deleteFinal.bodyApple;
+    const cancelled = profile.errors.deleteAppleCancelled;
+    assert.equal(
+      body,
+      "Your sanctuary and everything in it will be removed. Apple will ask you to confirm, so Gracehush stops using your Apple sign-in. If it can\u2019t, you can remove Gracehush in Settings, under your name, Sign-In & Security.",
+    );
+    assert.equal(cancelled, "Nothing was deleted. Apple\u2019s confirmation was cancelled.");
+    for (const text of [body, cancelled]) assert.ok(!text.includes("'"), "no straight apostrophe");
+  });
+}
+
 (async () => {
   await gatewayChecks();
   await exportChecks();
   await deleteChecks();
+  await appleChecks();
   finished = true;
   console.log(`${passed} checks passed${failures.length > 0 ? `, ${failures.length} FAILED` : ""}`);
   if (failures.length > 0) {

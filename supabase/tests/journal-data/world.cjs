@@ -309,8 +309,10 @@ function makeServer() {
     // The ids delete-entry deleted (step 29b), in order.
     deletedEntries: [],
     // Step 31: the accounts delete-account deleted, in order. An empty queue answers as the real function does: only the exact
-    // confirm body deletes, and then everything of the caller goes.
+    // confirm body deletes (since step 35 with or without a well-formed Apple code), and then everything of the caller goes.
+    // appleCodesSent says, for each of them, whether an Apple code came.
     deletedAccounts: [],
+    appleCodesSent: [],
     // Step 30: what RevenueCat says each user's plan is, and the plan the server wrote (users_profile.subscription_tier). An
     // empty sync-subscription queue answers as the real function does: it reads the first and writes it as the second.
     revenueCatPlans: {},
@@ -494,13 +496,16 @@ function makeServer() {
         return json(200, { url, expiresAt, partial: false, reused: false, sizeBytes: 2048 });
       }
       if (name === "delete-account") {
-        const exact = body !== null && typeof body === "object" && !Array.isArray(body) &&
-          Object.keys(body).length === 1 && body.confirm === "DELETE";
+        const isObject = body !== null && typeof body === "object" && !Array.isArray(body);
+        const { confirm, appleAuthorizationCode: code, ...others } = isObject ? body : {};
+        const goodCode = code === undefined || (typeof code === "string" && code !== "" && code.length <= 4096);
+        const exact = confirm === "DELETE" && Object.keys(others).length === 0 && goodCode;
         if (!exact) return fnError(400, "INVALID_REQUEST");
         for (const list of [state.entries, state.affirmations]) {
           for (let i = list.length - 1; i >= 0; i -= 1) if (list[i].user_id === sub) list.splice(i, 1);
         }
         state.deletedAccounts.push(sub);
+        state.appleCodesSent.push(code !== undefined);
         return json(200, { deleted: true });
       }
       return json(200, { scripture: null });

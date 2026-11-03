@@ -925,6 +925,9 @@ export const copy = {
       deleteFinal: {
         title: "Are you sure?",
         body: "Your sanctuary and everything in it will be removed.",
+        // An account that signed in with Apple (step 35): Apple's sheet comes next, and this says why before it appears.
+        bodyApple:
+          "Your sanctuary and everything in it will be removed. Apple will ask you to confirm, so Gracehush stops using your Apple sign-in. If it can’t, you can remove Gracehush in Settings, under your name, Sign-In & Security.",
         confirm: "Delete forever",
         cancel: "Keep my account",
       },
@@ -943,6 +946,7 @@ export const copy = {
       save: "We couldn’t save that change.",
       export: "We couldn’t prepare your export. Please try again.",
       delete: "We couldn’t delete your account. Please try again.",
+      deleteAppleCancelled: "Nothing was deleted. Apple’s confirmation was cancelled.",
       signOut: "We couldn’t sign you out. Please try again.",
       link: "We couldn’t open that page.",
       email: (address: string) =>

@@ -46,6 +46,7 @@ import { deleteAccount, requestDataExport, signOutCleanup } from "@/services/acc
 import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
 import { track } from "@/services/analytics";
 import { isPreviewing, previewAmbient, stopPreview, subscribePreview } from "@/services/ambientPlayer";
+import { confirmWithApple } from "@/services/appleReauth";
 import {
   openExportDownload,
   openLegalPage,
@@ -339,6 +340,10 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   // RevenueCat's own link to this customer's subscription page, when it has one (step 30).
   const { managementUrl } = useEntitlement();
   const { signOut } = useAuth();
+  const { user } = useUser();
+  // The person's Apple user id when they signed in with Apple (step 35): deleting the account asks Apple's sheet first. clerk-js
+  // strips `oauth_` from an external account's provider.
+  const appleUserId = user?.externalAccounts.find((account) => account.provider === "apple")?.providerUserId ?? null;
   const scrollRef = useRef<ScrollViewInstance>(null);
   useScrollToTop(scrollRef);
   const paddingBottom = useTabScreenBottomPadding();
@@ -562,7 +567,14 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
         setDialogError(result.message);
       }
     } else {
-      const result = await deleteAccount();
+      // Apple first (step 35), before anything stops or is deleted, so a cancel changes nothing.
+      const apple = await confirmWithApple(appleUserId);
+      if (apple.kind === "cancelled") {
+        setBusy(false);
+        setDialogError(text.errors.deleteAppleCancelled);
+        return;
+      }
+      const result = await deleteAccount(apple.kind === "code" ? apple.code : null);
       if (result.ok) {
         await endSession(false);
       } else {
@@ -593,7 +605,9 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
           confirm: signOutUnsent.confirm,
           cancel: signOutUnsent.cancel,
         }
-      : dialogContent.strings;
+      : dialog === "delete2" && appleUserId !== null
+        ? { ...dialogContent.strings, body: text.dialogs.deleteFinal.bodyApple }
+        : dialogContent.strings;
   const reminderTimes = SLOTS.map((slot) => ({
     name: rhythm.slots[slot].name,
     time: formatTime12(reminders[slot]),

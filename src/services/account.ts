@@ -51,7 +51,8 @@ export async function requestDataExport(): Promise<RepoResult<ExportLink>> {
 }
 
 // Deletes the account for good: its files, its rows, its RevenueCat customer and its Clerk user (delete-account). The caller
-// signs out of Clerk afterwards.
+// signs out of Clerk afterwards. The caller has also asked Apple for a one-time code when the person signed in with Apple (step
+// 35): it goes to that one request and nowhere else. The mock source has no use for it.
 //
 // First this phone stops its own background work, so nothing it does can make the account's data again while the server
 // deletes it: the sync engine (a reflection being prepared makes the profile row), the plan watch (a sync re-reads RevenueCat,
@@ -59,7 +60,7 @@ export async function requestDataExport(): Promise<RepoResult<ExportLink>> {
 // profile row). A success, or UNAUTHORIZED (the account or its session is already gone), runs the sign-out cleanup and forgets
 // the account's settings kept on this phone: signing out is always safe. A failure clears nothing and starts again what was
 // stopped.
-export async function deleteAccount(): Promise<RepoResult<null>> {
+export async function deleteAccount(appleAuthorizationCode: string | null = null): Promise<RepoResult<null>> {
   if (getDataSource() === "mock") return await deleteMockAccount();
   const userId = getSupabaseUserId();
   const engineWasRunning = isSyncEngineStarted();
@@ -67,7 +68,7 @@ export async function deleteAccount(): Promise<RepoResult<null>> {
   stopPlanWatch();
   await stopRealtime();
   if (userId !== null) pauseProfileSync(userId);
-  const result = await deleteAccountOnServer();
+  const result = await deleteAccountOnServer(appleAuthorizationCode);
   if (result.ok || result.code === "UNAUTHORIZED") {
     await signOutCleanup();
     if (userId !== null) useProfilePrefsStore.getState().forgetUser(userId);

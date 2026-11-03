@@ -276,9 +276,12 @@ export function exportData(): Promise<FunctionResult<ExportDataResponse>> {
 }
 
 // delete-account (step 31): the account goes for good, its files, rows, RevenueCat customer and Clerk user. The body is the confirm
-// the function insists on; DELETE_INCOMPLETE is a step that failed, and the same call again continues.
-export function deleteAccount(): Promise<FunctionResult<DeleteAccountResponse>> {
-  return callFunction("delete-account", { confirm: "DELETE" }, DELETE_ACCOUNT_TIMEOUT_MS, isDeleteAccountResponse);
+// the function insists on, with Apple's one-time code beside it when there is one (step 35); DELETE_INCOMPLETE is a step that failed,
+// and the same call again continues.
+export function deleteAccount(appleAuthorizationCode: string | null): Promise<FunctionResult<DeleteAccountResponse>> {
+  const body: DeleteAccountRequest =
+    appleAuthorizationCode === null ? { confirm: "DELETE" } : { confirm: "DELETE", appleAuthorizationCode };
+  return callFunction("delete-account", body, DELETE_ACCOUNT_TIMEOUT_MS, isDeleteAccountResponse);
 }
 
 // The 402 body (step 22): the entry the server saved and when the free week ends. Null for any other body.
