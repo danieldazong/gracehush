@@ -16,6 +16,7 @@ import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
+import { LogBox } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { SupabaseAuthBridge } from "@/components/SupabaseAuthBridge";
@@ -32,6 +33,11 @@ import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 SplashScreen.preventAutoHideAsync();
 // The launch screen fades into the first screen rather than cutting to it. Expo Go has no launch screen of ours, and warns.
 if (!isRunningInExpoGo()) SplashScreen.setOptions({ fade: true, duration: 400 });
+
+// PostHog's SDK reports a send that failed with console.error, whatever its debug setting. With no connection that is
+// expected: it keeps the events and sends them later. So it gets no red toast over the tab bar in a development build. A
+// release build has no such toasts.
+LogBox.ignoreLogs(["Error while flushing PostHog"]);
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 

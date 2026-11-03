@@ -941,6 +941,14 @@ async function contractChecks() {
     return out;
   }
 
+  await test("contract: a send that fails with no connection keeps its events and draws no toast in a development build", async () => {
+    const core = read("node_modules/@posthog/core/dist/posthog-core-stateless.js");
+    // The SDK's own words, which App.tsx must ignore exactly, and its rule that a network failure leaves the queue alone.
+    assert.ok(core.includes("console.error('Error while flushing PostHog', err)"));
+    assert.ok(core.includes("if (!(err instanceof PostHogFetchNetworkError)) await persistQueueChange();"));
+    assert.ok(read("App.tsx").includes('LogBox.ignoreLogs(["Error while flushing PostHog"]);'));
+  });
+
   await test("contract: only services/analytics.ts imports posthog-react-native, and nothing identifies, groups, records or logs", async () => {
     const files = walk("src");
     const importers = files.filter((rel) => /from "posthog-react-native"|require\("posthog-react-native"\)/.test(read(rel)));
