@@ -254,6 +254,19 @@ const row = ({
     assert.equal(copy.auth.fresh.gets, undefined, "no rows on the Sign In any more");
     assert.equal(copy.auth.fresh.freePlan, undefined, "and no free-plan line");
   });
+  await test("names: an Apple private address never gives a name, and an ordinary address still does", async () => {
+    const { env } = await onboarding(undefined);
+    const { getDisplayName, getFullName, getInitials } = env.use("@/utils/format");
+    const relay = "zq8wk2rt5m@privaterelay.appleid.com";
+    assert.equal(getDisplayName({ firstName: null, email: relay }), null, "random letters are not a name");
+    assert.equal(getDisplayName({ firstName: null, email: "ZQ8WK@PrivateRelay.AppleID.com" }), null, "whatever its case");
+    assert.equal(getFullName({ firstName: null, lastName: null, email: relay }), null, "so Profile takes its own fallback");
+    assert.equal(getInitials({ firstName: null, lastName: null, email: relay }), null, "so the avatar shows its icon");
+    assert.equal(getDisplayName({ firstName: "Sarah", email: relay }), "Sarah", "a name Apple did send still wins");
+    assert.equal(getInitials({ firstName: "Sarah", lastName: "Jones", email: relay }), "SJ");
+    assert.equal(getDisplayName({ firstName: null, email: "sarah.j92@x.com" }), "Sarah", "an ordinary address still gives one");
+    assert.equal(getDisplayName({ firstName: null, email: "zq@privaterelay.appleid.com.example.org" }), "Zq", "only Apple's own domain");
+  });
   await test("copy: the reset of the free week is a date, in the same words on Profile, the Paywall and a held card", async () =>{
     const { env } = await onboarding(undefined);
     const { copy } = env.use("@/constants/copy");

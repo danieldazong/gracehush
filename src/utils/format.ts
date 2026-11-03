@@ -170,6 +170,8 @@ export function getDisplayName({ firstName, email }: NameParts): string | null {
   if (first) return first;
   const at = email ? email.indexOf("@") : -1;
   if (!email || at < 1) return null;
+  // Apple's Hide My Email address is random letters, so it never gives a name.
+  if (email.toLowerCase().endsWith("@privaterelay.appleid.com")) return null;
   const word = /^[^._+\-\d]*/.exec(email.slice(0, at))?.[0] ?? "";
   if (word.replace(/[^a-z]/gi, "").length < 2) return null;
   return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
