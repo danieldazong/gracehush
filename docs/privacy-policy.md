@@ -11,7 +11,7 @@ Gracehush is a private audio prayer journal. You speak or write what you are car
 ## The short version
 
 - Your prayers are yours. We use your recordings and words to make your reflections and run the features you use. We do not use them for advertising, and we do not sell your personal information. **[TODO: lawyer to confirm the wording on "sell" and "share" for each place we operate.]**
-- To make a reflection, your recording or text is processed by Google's AI services. **[TODO: before publishing, confirm that Gracehush uses Google's paid terms, under which Google does not use the content to improve its products, and say so here.]**
+- To make a reflection, your recording or text goes to Google's AI services. The app asks your permission first, and nothing goes until you say yes. **[TODO: before publishing, confirm that Gracehush uses Google's paid terms, under which Google does not use the content to improve its products, and say so here.]**
 - Usage analytics are off unless you turn them on, and they never contain your words.
 - You can export a copy of your journal or permanently delete your account in the app, at any time.
 - Gracehush is not a crisis, medical or counseling service.
@@ -97,7 +97,7 @@ In the app:
 - **Export your journal.** Profile, Export Journal. You get a link, good for one hour, to a ZIP file with your entries as data and as readable text, plus your recordings and devotional audio. If it is too large, some audio is left out (your own recordings come first), and the README in the file lists what was left out. If you export again within ten minutes, you get the same file with a new link.
 - **Delete a reflection.** In Prayers (the ⋯ on a prayer) or at the end of a reflection, Delete reflection… permanently deletes that reflection, its recording, its devotional audio and its affirmations. It asks first and needs an internet connection. Remove from Prayers only takes a prayer off your prayer list and keeps the reflection in your journal.
 - **Delete your account.** Profile, Delete Account. This permanently deletes your entries, recordings, devotionals, prayers and affirmations, your exports, your settings, your subscription record at RevenueCat and your sign-in account. If you signed in with Apple, Apple asks you to confirm and Gracehush then asks Apple to end its access to your Apple sign-in; if that cannot happen, you can remove Gracehush yourself in your iPhone's Settings, under your name, Sign-In & Security. If something stops it part way, what was deleted stays deleted and you can try again to finish. It does not cancel an App Store or Google Play subscription: cancel that in your store's subscription settings first. If you are signed in on another device, sign out there first. You can also ask us to delete your account without the app at **[TODO: the account deletion page address]**.
-- **Turn things off.** Daily affirmations and reminders in Profile, usage sharing in Profile, and the microphone and notifications in your phone's settings.
+- **Turn things off.** Sharing with Google's AI in Profile (Gracehush then cannot prepare new reflections, and a reflection still waiting on your phone stays there until you turn sharing back on or sign out), daily affirmations and reminders in Profile, usage sharing in Profile, and the microphone and notifications in your phone's settings.
 - **Sign out.** This removes the local copy of your entries from that device.
 
 You can also write to us at **[TODO: contact email]** to ask what we hold about you, to correct it, or to ask us to delete it. **[TODO: lawyer: rights by region (see the supplements below), how we verify requests, and response times.]**
@@ -131,7 +131,7 @@ When we change this policy we will update the date above and **[TODO: say how ma
 | What we do | Legal basis |
 | --- | --- |
 | Create your reflections, keep your journal, run your plan | Performing our contract with you |
-| Process what your prayers reveal about your beliefs or health | Your explicit consent **[TODO: where it is collected; withdrawing it means deleting the entry or the account]** |
+| Process what your prayers reveal about your beliefs or health | Your explicit consent, which the app asks for the first time you start a reflection, and which you can take back in Profile; deleting an entry or your account removes what was made from it **[TODO: lawyer: is this consent enough for beliefs and health details, and must it name them?]** |
 | Anonymous usage analytics | Your consent |
 | Keep Gracehush secure and fix problems | Our legitimate interests |
 | Meet legal obligations | Legal obligation |
