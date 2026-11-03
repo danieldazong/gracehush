@@ -14,12 +14,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AmbientSoundPicker } from "@/components/AmbientSoundPicker";
 import { ChoiceChip } from "@/components/ChoiceChip";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { ProgressScrubber } from "@/components/ProgressScrubber";
 import { Skeleton } from "@/components/Skeleton";
-import { AMBIENT_SOUNDS, PLAYBACK_RATES, SKIP_MS } from "@/constants/app";
+import { PLAYBACK_RATES, SKIP_MS } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { images } from "@/constants/images";
 import { colors, gradients, layout, radii, shadows } from "@/constants/theme";
@@ -291,24 +292,18 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
             {nowPlaying.volume.short(volumePercent)}
           </Text>
         </View>
-        {/* The chips wrap instead of scrolling sideways, so none is hidden at large text or from a screen reader. */}
-        <View className="flex-row flex-wrap gap-2">
-          {AMBIENT_SOUNDS.map((sound) => (
-            <ChoiceChip
-              key={sound}
-              label={copy.ambient.labels[sound]}
-              accessibilityLabel={nowPlaying.ambientChip(copy.ambient.labels[sound])}
-              selected={sound === ambientSound}
-              onPress={() => {
-                if (sound !== ambientSound) track("ambient_changed", { sound, source: "now_playing" });
-                playback.setAmbient(sound);
-                // What is chosen here is also the sound the next devotional starts with (step 27). A save that fails
-                // changes nothing on this screen: the next change saves again.
-                void updateProfile({ ambientSound: sound });
-              }}
-            />
-          ))}
-        </View>
+        {/* A two-by-two grid of equal chips (2026-11-01): nothing scrolls sideways, so none is hidden at large text or
+            from a screen reader. */}
+        <AmbientSoundPicker
+          value={ambientSound}
+          onSelect={(sound) => {
+            if (sound !== ambientSound) track("ambient_changed", { sound, source: "now_playing" });
+            playback.setAmbient(sound);
+            // What is chosen here is also the sound the next devotional starts with (step 27). A save that fails
+            // changes nothing on this screen: the next change saves again.
+            void updateProfile({ ambientSound: sound });
+          }}
+        />
         {/* Dimmed and disabled while the sound is off, so the card never changes height. Android fades each child on its own unless told to composite the group, which let the thumb show the fill's end through it. */}
         <View
           needsOffscreenAlphaCompositing

@@ -11,6 +11,9 @@ type ChoiceChipProps = {
   selected: boolean;
   // The three speed chips share one width, so choosing one never moves the others.
   wide?: boolean;
+  // The chip takes its row's share of the width and its row's height (the ambient grid, 2026-11-01): the chips of a
+  // row are equal, and a label that wraps at large text makes its whole row taller.
+  fill?: boolean;
   onPress: () => void;
 };
 
@@ -21,6 +24,7 @@ export function ChoiceChip({
   accessibilityLabel,
   selected,
   wide = false,
+  fill = false,
   onPress,
 }: ChoiceChipProps) {
   return (
@@ -34,12 +38,12 @@ export function ChoiceChip({
         haptics.selection();
         onPress();
       }}
-      style={({ pressed }) => pressed && styles.pressed}
+      style={({ pressed }) => [fill && styles.fill, pressed && styles.pressed]}
     >
       <View
         className={[
           "items-center justify-center rounded-full border py-1.5",
-          wide ? "px-4" : "px-3.5",
+          fill ? "flex-1 px-4" : wide ? "px-4" : "px-3.5",
           selected ? "border-plum bg-plum" : "border-petal bg-card",
         ].join(" ")}
       >
@@ -52,5 +56,6 @@ export function ChoiceChip({
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
   pressed: { opacity: 0.6 },
 });

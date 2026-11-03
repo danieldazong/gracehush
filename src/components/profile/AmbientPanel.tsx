@@ -2,10 +2,9 @@ import type { SymbolViewProps } from "expo-symbols";
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { ChoiceChip } from "@/components/ChoiceChip";
+import { AmbientSoundPicker } from "@/components/AmbientSoundPicker";
 import { Icon } from "@/components/Icon";
 import { ProgressScrubber } from "@/components/ProgressScrubber";
-import { AMBIENT_SOUNDS } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors } from "@/constants/theme";
 import type { AmbientSound } from "@/types";
@@ -59,17 +58,8 @@ export function AmbientPanel({
   return (
     <View className="gap-3 pb-4 pl-[68px] pr-4">
       {/* The chips wrap instead of scrolling sideways, so none is hidden at large text or from a screen reader. */}
-      <View className="flex-row flex-wrap gap-2">
-        {AMBIENT_SOUNDS.map((value) => (
-          <ChoiceChip
-            key={value}
-            label={copy.ambient.labels[value]}
-            accessibilityLabel={nowPlaying.ambientChip(copy.ambient.labels[value])}
-            selected={value === sound}
-            onPress={() => onChangeSound(value)}
-          />
-        ))}
-      </View>
+      {/* The same two-by-two grid as Now Playing's (2026-11-01). */}
+      <AmbientSoundPicker value={sound} onSelect={onChangeSound} />
       {/* Android fades each child on its own unless told to composite the group, which let the thumb show the fill's end through it.
           The row wraps: when the slider would get under 96dp (320dp wide at 1.3x text) the readout drops under it. */}
       <View
