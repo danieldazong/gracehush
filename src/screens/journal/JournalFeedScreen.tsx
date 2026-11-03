@@ -97,9 +97,9 @@ function LoadingState({ style, onLayout }: ListEmptyProps) {
         importantForAccessibility="no-hide-descendants"
         className="gap-5"
       >
-        <View className="gap-2 pt-1">
+        <View className="gap-1 pt-1">
+          <Skeleton width="35%" height={16} radius={8} />
           <Skeleton width="60%" height={28} radius={8} />
-          <Skeleton width="40%" height={14} radius={8} />
         </View>
         <Skeleton height={180} />
         <View className="gap-3.5">
@@ -169,18 +169,31 @@ type GreetingBlockProps = {
 function GreetingBlock({ now, name, reflectionDays }: GreetingBlockProps) {
   return (
     <View className="pt-1">
-      {/* A welcome, not the screen's headline: it takes the content's heading size ("Your Reflections", the affirmation's
-          headline), under the 22-px wordmark, so the affirmation and the reflections lead. */}
-      <Text accessibilityRole="header" className="text-section tracking-[-0.5px] text-plum-deep">
-        {copy.journal.greeting(getGreeting(now), name)}
+      {/* The date as a small muted eyebrow above the greeting (2026-11-01, the user's request: the date and the streak
+          had shared one line under it, at two heights, which read as clutter). */}
+      <Text className="font-dm-bold text-[11px] leading-[16px] uppercase tracking-[0.8px] text-mauve">
+        {formatLongDate(now)}
       </Text>
-      {/* The date and the streak share a line, so the greeting keeps the full width. They wrap under each other when they do not fit. */}
-      <View className="mt-1 flex-row flex-wrap items-center gap-x-3 gap-y-2">
-        <Text className="text-body-sm text-mauve">{formatLongDate(now)}</Text>
+      {/* The greeting's row: the greeting at its own width (shrink-0, so the tag never squeezes a name onto a second
+          line) and, at the right edge of the row, the streak as a small tag (ml-auto). When the two do not fit on one
+          line the tag drops under the greeting, still at the right edge (flex-wrap). */}
+      <View className="mt-1 flex-row flex-wrap items-center gap-x-2 gap-y-2">
+        {/* A welcome, not the screen's headline: it takes the content's heading size ("Your Reflections", the
+            affirmation's headline), under the 22-px wordmark, so the affirmation and the reflections lead. */}
+        <Text
+          accessibilityRole="header"
+          accessibilityLabel={copy.journal.greeting(getGreeting(now), name)}
+          className="shrink-0 text-section tracking-[-0.5px] text-plum-deep"
+        >
+          {copy.journal.greetingPrefix(getGreeting(now), name !== null)}
+          {/* The name in rosewood (2026-11-01): the one personal word on the screen, in the brand's second colour. */}
+          {name !== null ? <Text className="text-rosewood"> {name}</Text> : null}
+        </Text>
+        {/* A smaller tag (the user's call, 2026-11-01): a 12 sun and an 11 semibold label, 22 tall against the chip's 28. */}
         {reflectionDays > 0 ? (
-          <View className="chip chip--terracotta shrink-0 gap-1.5 border border-terracotta/25">
-            <Icon name={icons.sun} size={15} color={colors.terracotta} />
-            <Text className="chip__label chip__label--terracotta">
+          <View className="chip chip--terracotta ml-auto gap-1 border border-terracotta/25 px-2 py-0.5">
+            <Icon name={icons.sun} size={12} color={colors.terracotta} />
+            <Text className="font-dm-semibold text-[11px] leading-[16px] text-hopeful-fg">
               {copy.journal.reflectionDays(reflectionDays)}
             </Text>
           </View>

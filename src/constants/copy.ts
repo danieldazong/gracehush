@@ -3,6 +3,9 @@ import type { AmbientSound, OutboxStatus, PlaybackError, PlaybackRate, TimeSlot 
 // "1 day", "7 days". The paywall's trial lines and disclosures share it.
 const daysLabel = (days: number) => (days === 1 ? "1 day" : `${days} days`);
 
+// "Good evening," before a name, "Good evening" alone (the Journal greeting draws the name in its own colour).
+const greetingPrefix = (period: TimeSlot, withName: boolean) => (withName ? `Good ${period},` : `Good ${period}`);
+
 // A clock time ("8:00 AM") keeps its digits and its AM or PM on one line (step 34b: the Permissions card and the Sign In
 // subtitle name the three reminder times).
 const unbreakable = (time: string) => time.replace(" ", "\u00A0");
@@ -169,8 +172,11 @@ export const copy = {
     affirmationTitle: (slotName: string) => `${slotName} affirmation`,
   },
   journal: {
+    // The greeting is drawn in two spans, the name in rosewood (2026-11-01, the Daily Calm cue); `greeting` is the
+    // whole line, for the spoken label.
+    greetingPrefix,
     greeting: (period: TimeSlot, name: string | null) =>
-      name ? `Good ${period}, ${name}` : `Good ${period}`,
+      name ? `${greetingPrefix(period, true)} ${name}` : greetingPrefix(period, false),
     reflectionDays: (count: number) =>
       count === 1 ? "1 day of reflection" : `${count} days of reflection`,
     // The analytics question (step 34), asked on the Journal's first visit after sign-in since round 8 of 2026-11-01
