@@ -3,13 +3,16 @@ import { useCallback, useRef, useState } from "react";
 import { canDeleteNow } from "@/data/journalRepository";
 import { deleteReflection } from "@/services/entryDeletion";
 
-export type DeleteTarget = { entryId: string; answered: boolean };
+// `crisis`: the reflection is a crisis entry (nothing but the person's words is deleted, and the dialog says so).
+export type DeleteTarget = { entryId: string; answered: boolean; crisis?: boolean };
 
 // What DeleteReflectionDialog is given.
 export type DeleteReflectionDialogState = {
   visible: boolean;
   // The reflection is an answered prayer: deleting it also deletes the gratitude note, and the dialog says so.
   answered: boolean;
+  // The reflection is a crisis entry: there is no devotional, audio or affirmations to name, and the dialog says so.
+  crisis: boolean;
   running: boolean;
   failed: boolean;
   onConfirm: () => void;
@@ -67,6 +70,7 @@ export function useDeleteReflection(onDeleted: (entryId: string) => void): {
     dialog: {
       visible: open,
       answered: target?.answered ?? false,
+      crisis: target?.crisis === true,
       running,
       failed,
       onConfirm: confirm,

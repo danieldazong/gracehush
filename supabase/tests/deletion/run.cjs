@@ -47,6 +47,17 @@ const PRAYER = {
 };
 const AT = "2026-10-27T12:00:00.000Z";
 const ANSWERED = { ...PRAYER, is_answered: true, answered_at: AT, answered_notes: NOTE };
+// A crisis entry: the flag and the person's words, nothing else (the table's crisis check).
+const CRISIS = {
+  is_crisis: true,
+  dominant_emotion: null,
+  scripture_reference: null,
+  scripture_text: null,
+  scripture_verified: false,
+  devotional_title: null,
+  devotional_script: null,
+  closing_prayer: null,
+};
 const TRACK_OFF = { is_active_prayer: false, is_answered: false, answered_at: null, answered_notes: null };
 
 // Words, notes, ids and tokens that must never reach the development log.
@@ -447,6 +458,30 @@ async function serviceChecks() {
     }
   }, { fakes: holding.fakes });
 
+  // A crisis entry can be deleted from its view since 2026-11-01 (the user's call): the service treats it like any other.
+  const crisisService = serviceFakes();
+  await test("service: a crisis entry is deleted like any other: the server row goes, the phone forgets it, deleted is announced once, and the plan is made again once, from the cleared cache", async (w) => {
+    await seedBoth(w, 2, (n) => (n === 1 ? CRISIS : PRAYER));
+    const events = [];
+    engine(w).subscribe((event) => events.push(event));
+    const replan = await watchReplan(w, idOf(1));
+    try {
+      const result = await w.use("@/services/entryDeletion").deleteReflection(idOf(1));
+      assert.deepEqual(result, { ok: true, data: null });
+      assert.deepEqual(w.server.state.deletedEntries, [idOf(1)]);
+      assert.equal(serverOf(w, 1), undefined, "the server row is gone");
+      assert.equal(crisisService.state.stops, 0, "a crisis entry is never the loaded devotional");
+      assert.deepEqual(crisisService.state.forgotten, [idOf(1)]);
+      assert.deepEqual(events.filter((event) => event.type === "deleted"), [{ type: "deleted", entryId: idOf(1) }]);
+      assert.deepEqual(replan.seen, [{ entries: 0, affirmations: 0 }], "once, and only after the phone forgot the entry");
+      assert.equal(await cache(w).getEntry(idOf(1)), null);
+      assert.notEqual(await cache(w).getEntry(idOf(2)), null, "the reflection before it stays");
+      assert.equal((await cache(w).listAffirmationsForEntry(idOf(2))).length, 3, "with its affirmations, which the next plan reads");
+    } finally {
+      replan.close();
+    }
+  }, { fakes: crisisService.fakes });
+
   const other = serviceFakes({ entryId: idOf(2) });
   await test("service: the player is left alone when it holds another devotional, and the other steps still run", async (w) => {
     await seedBoth(w, 2, () => PRAYER);
@@ -703,6 +738,32 @@ async function hookChecks() {
     handle.unmount();
   }, { fakes: happy.fakes });
 
+  const crisisHook = serviceFakes();
+  await test("useDeleteReflection: a crisis entry opens the dialog with crisis set and its own body, confirming deletes it and calls onDeleted once; a plain reflection's target leaves crisis unset", async (w) => {
+    await seedBoth(w, 2, (n) => (n === 1 ? CRISIS : PRAYER));
+    const deleted = [];
+    const handle = await renderDialog(w, (id) => deleted.push(id));
+    assert.equal(handle.result.current.ask({ entryId: idOf(1), answered: false, crisis: true }), true);
+    let state = await untilState(handle, (s) => s.dialog.visible === true, "open");
+    assert.equal(state.dialog.crisis, true);
+    assert.equal(state.dialog.answered, false);
+    const text = copyOf(w).deleteReflection;
+    assert.equal(text.bodyCrisis, "This permanently deletes what you shared. This can’t be undone.");
+    assert.ok(!/devotional|audio|affirmation|recording|note/i.test(text.bodyCrisis), "nothing a crisis entry lacks is named");
+    assert.ok(!/'/.test(text.bodyCrisis), "a curly apostrophe");
+    await state.dialog.onConfirm();
+    state = await untilState(handle, (s) => s.dialog.visible === false, "closed");
+    assert.deepEqual(deleted, [idOf(1)]);
+    assert.deepEqual(w.server.state.deletedEntries, [idOf(1)]);
+    assert.equal(await cache(w).getEntry(idOf(1)), null);
+    assert.equal(handle.result.current.ask({ entryId: idOf(2), answered: false }), true);
+    state = await untilState(handle, (s) => s.dialog.visible === true, "open again");
+    assert.equal(state.dialog.crisis, false, "the ready view's target");
+    state.dialog.onCancel();
+    await untilState(handle, (s) => s.dialog.visible === false, "closed again");
+    handle.unmount();
+  }, { fakes: crisisHook.fakes });
+
   const failed = serviceFakes();
   await test("useDeleteReflection: a failure keeps the dialog open with failed set, and the confirm button tries again", async (w) => {
     await seedBoth(w, 1, () => PRAYER);
@@ -767,6 +828,25 @@ async function hookChecks() {
 
 // ================================================================== the menu, the copy and the log
 async function menuChecks() {
+  // The screens are not loaded in Node, so what they wire is read from their source: the crisis view carries the same link
+  // as the ready view, asks with `crisis: true`, and its delete sends no analytics event (Analytics Rules).
+  await test("source: the crisis view has the ready view's delete link, asks with crisis set, and its delete sends no event", async () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const root = process.env.GRACEHUSH_REPO ?? path.resolve(__dirname, "../../..");
+    const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
+    const screen = read("src/screens/journal/ReflectionScreen.tsx");
+    const panel = read("src/components/crisis/CrisisSupportPanel.tsx");
+    const link = read("src/components/DeleteReflectionLink.tsx");
+    assert.equal(screen.split("<DeleteReflectionLink ").length - 1, 1, "the ready view draws the shared link once");
+    assert.equal(panel.split("<DeleteReflectionLink ").length - 1, 1, "the crisis view draws the shared link once");
+    assert.ok(panel.indexOf("returnToJournal") < panel.indexOf("<DeleteReflectionLink "), "under the way back, last of all");
+    assert.ok(/deletion\.ask\(\{ entryId: state\.entry\.id, answered: false, crisis: true \}\)/.test(screen), "the crisis branch asks with crisis set");
+    assert.ok(/if \(!isCrisisEntry\) track\("reflection_deleted"/.test(screen), "no event for a crisis entry");
+    assert.equal(screen.split('track("reflection_deleted"').length - 1, 1, "one call site, guarded");
+    assert.ok(link.includes("text-mauve") && !/colors[.]crisis|-crisis[^a-z]/.test(link), "the link is mauve and never crisis red");
+    assert.ok(!/haptics|console\./.test(link) && !/haptics|console\./.test(panel), "no haptic and no log line");
+  });
   await test("menu: Active offers Remove then Delete; Answered offers Edit, Move back, Remove then Delete; the delete is last and the only destructive one", async (w) => {
     const { getPrayerMenu } = w.use("@/utils/prayerMenu");
     const { copy } = w.use("@/constants/copy");

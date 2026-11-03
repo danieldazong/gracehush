@@ -760,6 +760,8 @@ export const copy = {
     body: "This permanently deletes the reflection, its devotional audio, its affirmations and any recording. This can’t be undone.",
     bodyAnswered:
       "This permanently deletes the reflection, its devotional audio, its affirmations, any recording and your gratitude note. This can’t be undone.",
+    // A crisis entry holds nothing but the person's words (2026-11-01).
+    bodyCrisis: "This permanently deletes what you shared. This can’t be undone.",
     confirm: "Delete forever",
     cancel: "Keep",
     failed: "We couldn’t delete this reflection. Please try again.",

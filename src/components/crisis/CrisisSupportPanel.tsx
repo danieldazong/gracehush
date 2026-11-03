@@ -13,6 +13,7 @@ import {
 
 import { CrisisContactList } from "@/components/crisis/CrisisContactList";
 import { CrisisFallbackSheet } from "@/components/crisis/CrisisFallbackSheet";
+import { DeleteReflectionLink } from "@/components/DeleteReflectionLink";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { TranscriptRow } from "@/components/TranscriptRow";
@@ -39,12 +40,22 @@ type CrisisSupportPanelProps = {
   transcript: string | null;
   onOpenResources: () => void;
   onReturn: () => void;
+  // Delete reflection (2026-11-01, the user's call): the same quiet link as the ready view, last of all. `deleteOffline`
+  // is true after a tap with no connection.
+  onDelete: () => void;
+  deleteOffline: boolean;
 };
 
 // What Reflection shows for a crisis entry instead of the devotional. It takes the transcript and nothing
 // else, so it cannot draw a player, a verse, tabs, an emotion badge, a prayer toggle or a share button even if
 // the entry holds them. No animation, haptic or sound, and nothing here is logged.
-export function CrisisSupportPanel({ transcript, onOpenResources, onReturn }: CrisisSupportPanelProps) {
+export function CrisisSupportPanel({
+  transcript,
+  onOpenResources,
+  onReturn,
+  onDelete,
+  deleteOffline,
+}: CrisisSupportPanelProps) {
   const { width } = useWindowDimensions();
   const { fallback, fallbackVisible, run, closeFallback } = useCrisisActions();
   const titleRef = useRef<TextInstance>(null);
@@ -112,11 +123,16 @@ export function CrisisSupportPanel({ transcript, onOpenResources, onReturn }: Cr
           <Text className="text-body text-ink">{crisis.note.body}</Text>
         </View>
         {words ? <TranscriptRow title={crisis.words} transcript={words} /> : null}
-        <PrimaryButton
-          tone="ghost"
-          label={copy.reflection.footer.returnToJournal}
-          onPress={onReturn}
-        />
+        <View className="gap-3">
+          <PrimaryButton
+            tone="ghost"
+            label={copy.reflection.footer.returnToJournal}
+            onPress={onReturn}
+          />
+          {/* Deleting the entry is the person's own choice (2026-11-01): the same quiet link as the ready view, last and
+              under the way back, so it never competes with the help above it. Mauve, never red; no haptic, no event. */}
+          <DeleteReflectionLink onPress={onDelete} offline={deleteOffline} />
+        </View>
       </ScrollView>
       <CrisisFallbackSheet fallback={fallback} visible={fallbackVisible} onClose={closeFallback} />
     </>

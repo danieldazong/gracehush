@@ -16,6 +16,7 @@ const trash = { android: "delete", ios: "trash" } satisfies SymbolViewProps["nam
 export function DeleteReflectionDialog({
   visible,
   answered,
+  crisis,
   running,
   failed,
   onConfirm,
@@ -29,7 +30,7 @@ export function DeleteReflectionDialog({
       tone="destructive"
       icon={trash}
       title={text.title}
-      body={answered ? text.bodyAnswered : text.body}
+      body={crisis ? text.bodyCrisis : answered ? text.bodyAnswered : text.body}
       confirmLabel={text.confirm}
       cancelLabel={text.cancel}
       loading={running}

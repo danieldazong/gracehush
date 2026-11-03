@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CrisisSupportPanel } from "@/components/crisis/CrisisSupportPanel";
 import { DeleteReflectionDialog } from "@/components/DeleteReflectionDialog";
+import { DeleteReflectionLink } from "@/components/DeleteReflectionLink";
 import { FadeIn } from "@/components/FadeIn";
 import { Icon } from "@/components/Icon";
 import { MiniPlayerCard } from "@/components/MiniPlayerCard";
@@ -66,7 +67,7 @@ const icons = {
   date: { android: "calendar_today", ios: "calendar" },
   prayer: { android: "volunteer_activism", ios: "hands.sparkles" },
   share: { android: "share", ios: "square.and.arrow.up" },
-  delete: { android: "delete", ios: "trash" },
+
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 type ReflectionHeaderProps = {
@@ -319,25 +320,7 @@ function ReadyView({
             ) : null}
           </View>
           {/* Deleting is permanent, so it is a quiet link at the very end, not a button beside the main action (step 29b). */}
-          <View className="items-center">
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={deleteText.linkLabel}
-              accessibilityHint={deleteText.linkHint}
-              onPress={onDelete}
-              style={({ pressed }) => pressed && styles.pressed}
-            >
-              <View className="min-h-11 flex-row items-center gap-1.5 px-4">
-                <Icon name={icons.delete} size={16} color={colors.mauve} />
-                <Text className="btn-text__label text-mauve">{deleteText.link}</Text>
-              </View>
-            </Pressable>
-            {deleteOffline ? (
-              <Text accessibilityLiveRegion="polite" className="text-center text-body-sm text-mauve">
-                {deleteText.offline}
-              </Text>
-            ) : null}
-          </View>
+          <DeleteReflectionLink onPress={onDelete} offline={deleteOffline} />
         </View>
       </FadeIn>
     </ScrollView>
@@ -347,8 +330,11 @@ function ReadyView({
 export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Reflection">) {
   const state = useReflection(route.params.entryId);
   // Delete reflection (step 29b): the dialog is shared with Prayers. A delete takes the person back to where they came from.
+  // A crisis entry can be deleted from its view since 2026-11-01, with no analytics event (Analytics Rules: no event is
+  // about a crisis entry).
+  const isCrisisEntry = state.status === "ready" && state.entry.isCrisis;
   const deletion = useDeleteReflection(() => {
-    track("reflection_deleted", { source: "reflection" });
+    if (!isCrisisEntry) track("reflection_deleted", { source: "reflection" });
     goBack();
   });
   const [deleteOffline, setDeleteOffline] = useState(false);
@@ -385,6 +371,11 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
         transcript={state.entry.transcript}
         onOpenResources={() => navigation.navigate("CrisisResources", { source: "reflection" })}
         onReturn={returnToJournal}
+        onDelete={() => {
+          const opened = deletion.ask({ entryId: state.entry.id, answered: false, crisis: true });
+          setDeleteOffline(!opened);
+        }}
+        deleteOffline={deleteOffline}
       />
     );
   } else if (
