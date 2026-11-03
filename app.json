@@ -12,7 +12,8 @@
       "bundleIdentifier": "com.gracehush.app",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIStatusBarStyle": "UIStatusBarStyleLightContent"
       }
     },
     "android": {
@@ -32,9 +33,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FBF7F2",
+          "backgroundColor": "#3E2741",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 120
+          "imageWidth": 200
         }
       ],
       "@react-native-community/datetimepicker",

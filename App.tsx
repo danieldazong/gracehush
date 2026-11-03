@@ -11,6 +11,7 @@ import { Fraunces_400Regular_Italic } from "@expo-google-fonts/fraunces/400Regul
 import { Fraunces_500Medium } from "@expo-google-fonts/fraunces/500Medium";
 import { Fraunces_600SemiBold } from "@expo-google-fonts/fraunces/600SemiBold";
 import { NavigationContainer } from "@react-navigation/native";
+import { isRunningInExpoGo } from "expo";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
@@ -29,6 +30,8 @@ import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 
 SplashScreen.preventAutoHideAsync();
+// The launch screen fades into the first screen rather than cutting to it. Expo Go has no launch screen of ours, and warns.
+if (!isRunningInExpoGo()) SplashScreen.setOptions({ fade: true, duration: 400 });
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -72,11 +75,10 @@ function AppShell() {
   // navigator first renders with everything known: a signed-in user never sees Onboarding flash by, a
   // finished onboarding never shows Welcome, and the profile sync never writes to a store that is
   // still loading (step 17).
+  const ready = Boolean((loaded || error) && isLoaded && hydrated && prefsHydrated);
   useEffect(() => {
-    if ((loaded || error) && isLoaded && hydrated && prefsHydrated) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded, error, isLoaded, hydrated, prefsHydrated]);
+    if (ready) SplashScreen.hideAsync();
+  }, [ready]);
 
   // Nothing is rendered while waiting: the splash screen is still visible.
   if ((!loaded && !error) || !hydrated || !prefsHydrated) {
@@ -89,7 +91,8 @@ function AppShell() {
       <NavigationContainer ref={navigationRef} onReady={onNavigationChange} onStateChange={onNavigationChange}>
         <RootNavigator />
       </NavigationContainer>
-      <StatusBar style="dark" />
+      {/* Light over the plum launch screen, dark over the app's linen from the moment the launch screen starts to fade. */}
+      <StatusBar style={ready ? "dark" : "light"} animated />
     </SafeAreaProvider>
   );
 }
