@@ -66,6 +66,8 @@ As built (the Paywall, step 16): a yearly and a monthly plan. The prices on scre
 
 ## 8. Questions only the owner can answer
 
+**Answered by the owner on 2026-11-04:** the legal entity and its address (given to the website build and kept out of this public repository), the domain (gracehush.com), the support address (support@gracehush.com) and the minimum age (18). **Proposed by the agent and confirmed by the owner the same day:** a US-only launch, North Carolina law with the courts of Mecklenburg County and no arbitration, a liability cap of what a user paid in the 12 months before the claim (or US$50), answering requests within 30 days, and that nobody reads entries except to fix a problem the person reports (with their permission) or when the law requires it. None of it has been reviewed by a lawyer. The pages are in `privacy-policy.md`, `terms-of-use.md` and `site/`.
+
 1. The legal entity, its address and country, and the governing law.
 2. The domain for the pages, the support mailbox, and the address of the account deletion page.
 3. The minimum age.
