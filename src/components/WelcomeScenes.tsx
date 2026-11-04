@@ -8,9 +8,8 @@ import { colors, gradients } from "@/constants/theme";
 // person in a second moment. The breathing and the cross-fade itself are SceneStack's.
 const HOLD_MS = 7_000;
 
-// The soft edges: linen over the scene's top, where the status bar and the progress row sit, and under it, where the
-// lockup and the headline begin. The Welcome's heights; the Sign In's shorter scene passes its own.
-const TOP_FADE = 120;
+// The soft edge under the scene, where the lockup and the headline begin: the Welcome's height, and the Sign In's shorter scene
+// passes its own.
 const BOTTOM_FADE = 140;
 
 type WelcomeScenesProps = {
@@ -19,7 +18,9 @@ type WelcomeScenesProps = {
   // viewport), and never less than this; on a short phone, or at large text, the cover scrolls instead.
   minHeight: number;
   active: boolean; // false while the screen is not in front: the motion stops
-  fadeTop?: number; // the linen fade over the top edge, TOP_FADE by default
+  // The linen fade over the top edge, where the status bar and the progress row sit. It has no default: each screen works it out
+  // from the status bar's height, because a fixed one leaves the row unreadable over a dark scene on some iPhones.
+  fadeTop: number;
   fadeBottom?: number; // and under the bottom edge, BOTTOM_FADE by default
 };
 
@@ -30,7 +31,7 @@ export function WelcomeScenes({
   sources,
   minHeight,
   active,
-  fadeTop = TOP_FADE,
+  fadeTop,
   fadeBottom = BOTTOM_FADE,
 }: WelcomeScenesProps) {
   return (

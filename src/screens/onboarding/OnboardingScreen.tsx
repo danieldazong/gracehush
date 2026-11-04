@@ -43,6 +43,9 @@ const FADE_MS = 100;
 const SCENE_MIN = 340;
 // The lockup overlaps the scene's linen fade: its 40 dp plus 8 of air above the scene's bottom edge.
 const LOCKUP_OVERLAP = 48;
+// The top fade follows the status bar, because the progress row sits just under it: at a fixed 120 the counter fell to 2.88:1 over
+// the kitchen scene on five of nine iPhone sizes, and this keeps it at 5.01:1 or better, and the pills at 5.70:1, on all of them.
+const SCENE_FADE_BELOW_INSET = 90;
 
 const icons = {
   morning: { android: "wb_sunny", ios: "sun.max" },
@@ -297,7 +300,12 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
               <>
                 {/* The scene fills whatever the text below leaves: the content container fills the viewport and the
                     scene has flex 1 (2026-11-01, round 2). */}
-                <WelcomeScenes sources={onboardingScenes} minHeight={SCENE_MIN} active={focused} />
+                <WelcomeScenes
+                  sources={onboardingScenes}
+                  minHeight={SCENE_MIN}
+                  active={focused}
+                  fadeTop={insets.top + SCENE_FADE_BELOW_INSET}
+                />
                 {/* The lockup sits on the scene's fade, so the cover reads as one piece; the headline is the one big
                     text on the screen. */}
                 <View className="screen__content items-center pb-4" style={styles.coverText}>
