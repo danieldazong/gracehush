@@ -102,10 +102,11 @@ export const MANAGE_SUBSCRIPTION_URL = {
   ios: "https://apps.apple.com/account/subscriptions",
   android: "https://play.google.com/store/account/subscriptions",
 } as const; // the store's own page; RevenueCat's managementURL, when it has one, wins (externalLinks.ts)
-// Apple and Google both require the two policy pages to be reachable inside the app.
-export const PRIVACY_POLICY_URL = "https://example.com/TODO-privacy"; // TODO: real URL before release
-export const TERMS_URL = "https://example.com/TODO-terms"; // TODO: real URL before release
+// Apple and Google both require the two policy pages to be reachable inside the app. They are the pages built from docs/ by
+// docs/site/build.cjs and hosted at gracehush.com.
+export const PRIVACY_POLICY_URL = "https://gracehush.com/privacy/";
+export const TERMS_URL = "https://gracehush.com/terms/";
 export const SUPPORT_EMAIL = "support@nouvrix.com";
 // The web page where someone can ask for their account and its data to be deleted without the app (Google Play's Data safety
 // form asks for it; step 31). It is not shown in the app.
-export const ACCOUNT_DELETION_URL = "https://example.com/TODO-delete-account"; // TODO: real URL before release
+export const ACCOUNT_DELETION_URL = "https://gracehush.com/delete-account/";
