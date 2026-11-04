@@ -2,11 +2,11 @@
 //
 //   node docs/site/build.cjs ["November 4, 2026"]      (the optional argument is the effective date, today's date if left out)
 //
-// - Sources: docs/privacy-policy.md, docs/terms-of-use.md and docs/site/{home,support,delete-account}.md.
+// - Sources: docs/privacy-policy.md, docs/terms-of-use.md and docs/site/{home,support,delete-account,not-found}.md.
 // - {{COMPANY_NAME}} and {{COMPANY_ADDRESS}} come from docs/site/facts.json, which is git-ignored: the company's details are on the published
 //   pages and stay out of the public repository, and out of the site/ folder too, so uploading site/ publishes nothing but the pages.
 //   {{SUPPORT_EMAIL}} comes from src/constants/app.ts, so the app and the pages never disagree. {{SITE}}, {{DATE}} and {{YEAR}} are set here.
-// - Output: site/index.html, site/{privacy,terms,support,delete-account}/index.html and site/logo-mark.png. Every page is plain HTML with
+// - Output: site/index.html, site/{privacy,terms,support,delete-account}/index.html, site/404.html and site/logo-mark.png. Every page is plain HTML with
 //   its style inline: no script, no cookie, no analytics and no request to another site. Upload the site/ folder to any static host.
 // - It writes nothing while a {{token}}, a TODO or an example.com address is left in a page.
 //
@@ -24,6 +24,7 @@ const PAGES = [
   { src: "docs/terms-of-use.md", out: "terms/index.html", title: "Terms of Use", description: "The terms for using Gracehush." },
   { src: "docs/site/support.md", out: "support/index.html", title: "Support", description: "Help with Gracehush: deleting your account, exporting your journal, subscriptions and more." },
   { src: "docs/site/delete-account.md", out: "delete-account/index.html", title: "Delete your account", description: "How to delete your Gracehush account, in the app or by email." },
+  { src: "docs/site/not-found.md", out: "404.html", title: "Page not found", description: "This page does not exist.", hidden: true },
 ];
 
 function fail(message) {
@@ -151,7 +152,7 @@ function markdown(source) {
 
 const STYLE = `:root{color-scheme:light}*{box-sizing:border-box}body{margin:0;background:#FBF7F2;color:#2E2A33;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}header,main,footer{max-width:720px;margin:0 auto;padding-left:20px;padding-right:20px}header{padding-top:24px;padding-bottom:8px}.brand{display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:#3E2741;font:600 22px/1 Georgia,"Times New Roman",serif;letter-spacing:-.02em}.brand img{width:40px;height:40px}.wm span{color:#96555D}main{padding-top:16px;padding-bottom:40px}h1,h2,h3{font-family:Georgia,"Times New Roman",serif;color:#3E2741;line-height:1.25;font-weight:600}h1{font-size:1.9rem;margin:.6em 0 .4em}.home h1{font-size:2.3rem}h2{font-size:1.3rem;margin:1.8em 0 .5em}h3{font-size:1.08rem;margin:1.4em 0 .4em}p,li{margin:.6em 0}ul{padding-left:1.3em}a{color:#5B3A5E;text-underline-offset:2px}hr{border:0;border-top:1px solid #EADFDB;margin:2em 0}.table{overflow-x:auto;margin:1em 0}table{border-collapse:collapse;width:100%;font-size:.94rem;min-width:520px}th,td{border:1px solid #EADFDB;padding:8px 10px;text-align:left;vertical-align:top;background:#fff}th{background:#F5ECE8;color:#3E2741}footer{border-top:1px solid #EADFDB;padding-top:20px;padding-bottom:40px;font-size:.9rem;color:#6E636D}footer nav{margin-bottom:10px}footer nav a{margin-right:16px}footer p{margin:.3em 0}@media (max-width:640px){.table{overflow:visible}table{min-width:0}thead{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}table,tbody,tr,td{display:block;width:100%}tr{background:#fff;border:1px solid #EADFDB;border-radius:12px;margin:0 0 12px;padding:4px 14px}td{border:0;padding:8px 0}td+td{border-top:1px solid #F1EDE8}td::before{content:attr(data-label);display:block;font-size:.8rem;font-weight:600;color:#6E636D;margin-bottom:2px}}`;
 
-function page({ title, description, home }, body) {
+function page({ title, description, home, hidden }, body) {
   const heading = home ? "Gracehush" : `${title} · Gracehush`;
   return `<!doctype html>
 <html lang="en">
@@ -161,7 +162,7 @@ function page({ title, description, home }, body) {
 <meta name="color-scheme" content="light">
 <meta name="theme-color" content="#FBF7F2">
 <title>${escape(heading)}</title>
-<meta name="description" content="${escape(description)}">
+<meta name="description" content="${escape(description)}">${hidden ? '\n<meta name="robots" content="noindex">' : ""}
 <link rel="icon" href="/logo-mark.png">
 <style>${STYLE}</style>
 </head>
