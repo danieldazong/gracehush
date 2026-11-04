@@ -61,3 +61,8 @@ example
 # Local agent tooling: links to .agents/skills. EAS copies the working tree for a build, and on Windows it cannot recreate symlinks.
 .claude/skills/
 .commandcode/
+
+# The website built from docs/ (gracehush.com, docs/site/build.cjs), and the company's name and address it is built with: both are published on the
+# pages and stay out of the public repository. The facts file is not inside site/, so uploading site/ publishes nothing but the pages.
+/site/
+/docs/site/facts.json
