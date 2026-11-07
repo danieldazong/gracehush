@@ -210,16 +210,45 @@ async function main() {
     assert.equal(store.getState().byUser.user_a.aiPermissionAt, at);
   });
 
-  await test("copy: it names Google and the AI, says what is shared and why, and promises nothing the app does not do", async (w) => {
+  await test("copy: the sheet names Google and the AI, says what is sent, answers the training worry and stays short", async (w) => {
     const { copy } = w.use("@/constants/copy");
-    const page = copy.aiPermission;
-    const all = [page.eyebrow, page.title, page.lead, page.footnote, page.allow, page.notNow, page.privacy, page.support, ...page.rows.flatMap((row) => [row.label, row.body])].join(" ");
-    for (const word of ["Google", "AI", "Gemini", "Text-to-Speech", "recording", "words", "support resources", "Profile", "misuse"]) {
-      assert.ok(all.includes(word), `the page must say "${word}"`);
+    const sheet = copy.aiPermission;
+    const face = [sheet.title, sheet.body, sheet.trust, sheet.caption].join(" ");
+    const all = [
+      face,
+      sheet.allow,
+      sheet.notNow,
+      sheet.learnMore,
+      sheet.showLess,
+      sheet.support,
+      sheet.privacy,
+      ...sheet.details.flatMap((row) => [row.label, row.body]),
+    ].join(" ");
+    // What Apple's reviewers look for: what is sent, who gets it, and the permission asked before anything goes.
+    for (const word of ["Google", "AI", "Gemini", "text-to-speech", "recording", "words", "devotional"]) {
+      assert.ok(face.includes(word), `the face of the sheet must say "${word}"`);
     }
-    assert.ok(page.title.includes("Google") && page.title.includes("AI"), "the question itself names Google's AI");
+    assert.ok(sheet.title.includes("Google") && sheet.title.includes("AI"), "the question itself names Google's AI");
+    assert.ok(sheet.title.startsWith("Allow ") && sheet.title.endsWith("?"), "and it is an explicit question");
+    assert.equal(sheet.allow, "Allow");
+    assert.equal(sheet.notNow, "Not now");
+    assert.equal(sheet.caption, "Nothing is sent until you tap Allow.");
+    // Apple's guidance on AI: say plainly whether it is used for training. The Privacy Policy says the same (checked below).
+    assert.ok(sheet.trust.includes("We don\u2019t train AI on them"), "the face answers the training worry");
+    assert.ok(
+      sheet.trust.includes("Google\u2019s paid terms") && sheet.trust.includes("improve its products"),
+      "and says what Google's terms say, in Google's words",
+    );
+    // One tap away, nothing hidden: what Google keeps, why it is asked, where to change it.
+    for (const word of ["support resources", "Profile", "misuse", "limited time"]) {
+      assert.ok(all.includes(word), `the details must say "${word}"`);
+    }
+    assert.equal(sheet.details.length, 3);
+    // The point of the redesign: the page it replaces was 103 words and read like a wall.
+    const faceWords = face.split(/\s+/).filter(Boolean).length;
+    assert.ok(faceWords <= 55, `the face must stay short, it is ${faceWords} words`);
     for (const word of ["confidential", "secure", "encrypted", "guarantee", "never stored", "safe", "free"]) {
-      assert.ok(!all.toLowerCase().includes(word), `the page must not claim "${word}"`);
+      assert.ok(!all.toLowerCase().includes(word), `the sheet must not claim "${word}"`);
     }
     const texts = [all, copy.journal.notes.permission, copy.journal.card.pendingPermission, copy.profile.aiPermission.title, copy.profile.aiPermission.on, copy.profile.aiPermission.off].join(" ");
     assert.ok(!texts.includes("'"), "curly apostrophes only");
@@ -230,27 +259,51 @@ async function main() {
   // ---------------------------------------------------------------- what plain Node cannot draw
   sourceCheck("New Entry: nothing can be said or written until the person has answered", () => {
     const screen = read("src/screens/journal/NewEntryScreen.tsx");
-    const gate = screen.indexOf("if (!allowed) {");
-    const editing = screen.indexOf('<SafeAreaView edges={["top", "bottom"]} style={styles.screen}>');
-    assert.ok(gate > 0 && editing > gate, "the permission view comes before the editing view");
-    assert.match(screen, /<AiPermissionView/);
-    assert.match(screen, /usePreventRemove\(allowed && \(/, "leaving the permission view never asks to discard");
+    assert.ok(!screen.includes("if (!allowed) {"), "no early return: the screen is drawn and the sheet covers it");
+    assert.match(screen, /\{allowed \? null : \(\s*<AiPermissionSheet/, "the sheet covers the screen until the person has answered");
+    assert.ok(
+      screen.indexOf("<AiPermissionSheet") > screen.lastIndexOf("<ConfirmDialog"),
+      "the last thing the screen draws, so above all of it",
+    );
+    assert.match(screen, /accessibilityElementsHidden=\{!editing \|\| !allowed\}/, "screen readers cannot reach the editor behind it");
+    assert.match(screen, /usePreventRemove\(allowed && \(/, "leaving the sheet never asks to discard");
     assert.match(screen, /leaveToJournal\("permission"\)/, "Not now returns to Journal with the calm note");
     assert.match(screen, /navigate\("CrisisResources", \{ source: "newEntry" \}\)/, "Support Resources is one tap away");
     assert.match(screen, /route\.params\.mode !== "write" \|\| !allowed/, "the keyboard waits for the answer");
     assert.match(screen, /\[route\.params\.mode, allowed\]/, "and comes up after it");
   });
 
-  sourceCheck("the permission view: every way out is a button, with no haptic, event, log or crisis colour", () => {
-    const view = read("src/screens/journal/AiPermissionView.tsx");
-    for (const word of ["haptics", "track(", "console.", "Animated", "crisis", "colors.crisis"]) {
-      assert.ok(!view.includes(word), `the view must not use ${word}`);
+  sourceCheck("the sheet: every way out is a button, it covers the screen as a modal view, and it has no haptic, event, log or crisis colour", () => {
+    const view = read("src/screens/journal/AiPermissionSheet.tsx");
+    for (const word of ["haptics", "track(", "console.", "crisis", "colors.crisis", "<Modal"]) {
+      assert.ok(!view.includes(word), `the sheet must not use ${word}`);
     }
-    for (const handler of ["onAllow", "onNotNow", "onOpenSupport", "onOpenPrivacy"]) {
+    // Drawn inside the screen, not as a system Modal: the Support link, Not now and the keyboard never meet iOS's one-Modal rule.
+    assert.ok(!/<BottomSheet|import \{[^}]*BottomSheet/.test(view), "the sheet is not a BottomSheet (a Modal)");
+    for (const handler of ["onOpenSupport", "onOpenPrivacy"]) {
       assert.match(view, new RegExp(`onPress=\\{${handler}\\}`), `${handler} is pressable`);
     }
+    for (const handler of ["onAllow", "onNotNow"]) {
+      assert.match(view, new RegExp(`finish\\(${handler}\\)`), `${handler} goes through the closing animation`);
+    }
     assert.match(view, /accessibilityRole="header"/);
-    assert.match(view, /accessibilityLabel=\{copy\.common\.close\}/);
+    assert.match(view, /accessibilityLabel=\{copy\.common\.close\}/, "the scrim is a labelled button");
+    // On the root view's own tag, not a mention in a comment: the word is in one.
+    assert.match(
+      view,
+      /<View style=\{StyleSheet\.absoluteFill\} accessibilityViewIsModal onAccessibilityEscape=\{\(\) => finish\(onNotNow\)\}>/,
+      "VoiceOver reads the sheet and not the screen behind it, and its two-finger scrub is Not now",
+    );
+    assert.match(view, /BackHandler\.addEventListener\("hardwareBackPress"/, "Android back is Not now");
+    assert.match(view, /accessibilityState=\{expanded === undefined \? undefined : \{ expanded \}\}/, "Learn more says whether it is open");
+    assert.match(view, /useReduceMotion\(\)/, "Reduce Motion shows it at once");
+    assert.match(view, /useNativeDriver: true/);
+    assert.ok(view.indexOf("</ScrollView>") < view.indexOf("text.caption"), "the answers and links are pinned under the scrolling text");
+  });
+
+  sourceCheck("the sheet's training answer is what the Privacy Policy and the Terms already say", () => {
+    assert.match(read("docs/privacy-policy.md"), /we do not use them to train AI models\. Google\u2019s paid terms say it does not use them to improve its products/);
+    assert.match(read("docs/terms-of-use.md"), /we do not use it to train AI models/);
   });
 
   sourceCheck("the engine: the gate is on the outbox, in the run and in the timer, and not on prayer changes", () => {

@@ -17,32 +17,34 @@ const playbackErrors = {
 } satisfies Record<PlaybackError, string>;
 
 export const copy = {
-  // The permission New Entry asks for before anything can be said or written (Apple's guideline 5.1.2(i), 2026-11-03). It names
-  // who receives what, why, and what that company's terms allow. Google's paid Gemini terms and its Cloud Text-to-Speech page were
-  // read that day: read them again before changing "What Google can do with it".
+  // The permission sheet New Entry puts over the screen until this account has answered (Apple's guideline 5.1.2(i)). Since
+  // 2026-11-07 it is one short question: the face says what is sent, to whom, and that nothing goes before Allow, and answers the
+  // training worry in plain words, as Apple's guidance on AI asks. "We don't train AI" is what the Privacy Policy and the Terms say,
+  // and the sentence about Google's terms is theirs, in Google's words. What Google keeps, why it is asked and where to change it are
+  // behind "Learn more". Google's paid Gemini terms and its Cloud Text-to-Speech page were read on 2026-11-03: read them again before
+  // changing the sentence about them or "What Google keeps".
   aiPermission: {
-    eyebrow: "Your permission",
-    title: "May we share your prayers with Google’s AI?",
-    lead: "Your prayer isn’t sent anywhere until you say yes.",
-    rows: [
+    title: "Allow Google’s AI to write your devotional?",
+    body: "Your recording or words go to Google’s Gemini AI, and your devotional to Google’s text-to-speech.",
+    trust: "We don’t train AI on them, and Google’s paid terms say it doesn’t use them to improve its products.",
+    caption: "Nothing is sent until you tap Allow.",
+    allow: "Allow",
+    notNow: "Not now",
+    learnMore: "Learn more",
+    showLess: "Show less",
+    support: "Support resources",
+    privacy: "Privacy Policy",
+    details: [
       {
-        label: "What’s shared",
-        body: "Your recording or the words you write go to Google’s Gemini AI. Your devotional goes to Google Cloud Text-to-Speech.",
-      },
-      {
-        label: "Why",
+        label: "Why we ask",
         body: "To write your devotional, read it aloud, and show support resources if your words suggest you need them.",
       },
+      { label: "What Google keeps", body: "Google can keep your words for a limited time to check for misuse." },
       {
-        label: "What Google can do with it",
-        body: "Its paid terms say your words won’t be used to improve its products. Google can keep them for a limited time to check for misuse.",
+        label: "Your choice",
+        body: "You can change this anytime in Profile. Without it, GraceHush can’t prepare a reflection.",
       },
     ],
-    footnote: "You can change your mind anytime in Profile. Without this, GraceHush can’t prepare a reflection.",
-    allow: "Allow and continue",
-    notNow: "Not now",
-    privacy: "Privacy Policy",
-    support: "Support resources",
   },
   onboarding: {
     stepCounter: (step: number, total: number) => `${step} of ${total}`,

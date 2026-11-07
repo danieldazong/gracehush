@@ -32,7 +32,7 @@ import { discardItem, syncAndWait, syncNow } from "@/services/syncEngine";
 import { selectIsOnline, useOfflineStore, type SavedNote } from "@/store/offlineStore";
 import type { ProcessingStage } from "@/types";
 
-import { AiPermissionView } from "./AiPermissionView";
+import { AiPermissionSheet } from "./AiPermissionSheet";
 import { ProcessingOverlay, type OverlayFailure } from "./ProcessingOverlay";
 import { SpeakSection } from "./SpeakSection";
 import { WriteSection } from "./WriteSection";
@@ -110,7 +110,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     };
   }, []);
 
-  // The field is not on screen until the AI permission is answered: the keyboard comes up after "Allow and continue".
+  // The field is not focused until the AI permission is answered: the keyboard comes up after "Allow".
   useEffect(() => {
     if (route.params.mode !== "write" || !allowed) {
       return undefined;
@@ -329,27 +329,15 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
   const padding = width < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding;
   const editing = phase === "editing";
 
-  // Nothing can be said or written until this account has answered (Apple's guideline 5.1.2(i)). It is asked here, before the first
-  // word, so nothing typed or recorded waits on the answer, and "Not now" has nothing to lose.
-  if (!allowed) {
-    return (
-      <AiPermissionView
-        onAllow={() => setAllowed(true)}
-        onNotNow={() => leaveToJournal("permission")}
-        onOpenSupport={() => navigation.navigate("CrisisResources", { source: "newEntry" })}
-        onOpenPrivacy={() => void openLegalPage(PRIVACY_POLICY_URL)}
-      />
-    );
-  }
-
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
       <KeyboardAvoidingView behavior="padding" style={styles.flex}>
-        {/* The editing view stays mounted under the overlay, so a retry keeps the text and the recording. */}
+        {/* The editing view stays mounted under the overlay, so a retry keeps the text and the recording, and under the AI permission
+            sheet, where screen readers cannot reach it until the person has answered. */}
         <View
           style={styles.flex}
-          accessibilityElementsHidden={!editing}
-          importantForAccessibility={editing ? "auto" : "no-hide-descendants"}
+          accessibilityElementsHidden={!editing || !allowed}
+          importantForAccessibility={editing && allowed ? "auto" : "no-hide-descendants"}
         >
           <View className="screen__content min-h-14 flex-row items-center gap-2 py-1">
             <Pressable
@@ -454,6 +442,17 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
         onConfirm={confirmRecordAgain}
         onCancel={() => setDialog(null)}
       />
+      {/* Nothing can be said or written until this account has answered (Apple's guideline 5.1.2(i)). The sheet is the last thing the
+          screen draws and covers all of it, so every touch lands on the sheet: nothing typed or recorded waits on the answer, and
+          "Not now" has nothing to lose. */}
+      {allowed ? null : (
+        <AiPermissionSheet
+          onAllow={() => setAllowed(true)}
+          onNotNow={() => leaveToJournal("permission")}
+          onOpenSupport={() => navigation.navigate("CrisisResources", { source: "newEntry" })}
+          onOpenPrivacy={() => void openLegalPage(PRIVACY_POLICY_URL)}
+        />
+      )}
     </SafeAreaView>
   );
 }
