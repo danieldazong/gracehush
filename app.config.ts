@@ -5,7 +5,7 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   // ConfigContext types `config` as Partial<ExpoConfig>, so ExpoConfig's required fields need a value.
-  name: config.name ?? "Gracehush",
+  name: config.name ?? "GraceHush",
   slug: config.slug ?? "gracehush",
   extra: {
     ...config.extra,

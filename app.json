@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Gracehush",
+    "name": "GraceHush",
     "slug": "gracehush",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -51,7 +51,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Gracehush uses the microphone so you can pray out loud. Your recording is used only to create your reflection.",
+          "microphonePermission": "GraceHush uses the microphone so you can pray out loud. Your recording is used only to create your reflection.",
           "recordAudioAndroid": true,
           "enableBackgroundRecording": false,
           "enableBackgroundPlayback": true

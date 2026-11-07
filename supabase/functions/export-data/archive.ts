@@ -219,7 +219,7 @@ function entrySection(entry: UserEntry, zone: string): string[] {
 
 export function buildMarkdown(data: UserData, options: { exportedAt: string; zone: string }): string {
   const lines = [
-    "# Your Gracehush journal",
+    "# Your GraceHush journal",
     "",
     `Exported on ${longDay(new Date(options.exportedAt), options.zone)} (${options.zone}).`,
   ];
@@ -239,7 +239,7 @@ export function buildReadme(options: {
 }): string {
   const at = new Date(options.exportedAt);
   const lines = [
-    "Your Gracehush journal",
+    "Your GraceHush journal",
     "",
     `Exported on ${longDay(at, options.zone)} at ${clockTime(at, options.zone)} (${options.zone}).`,
     "",

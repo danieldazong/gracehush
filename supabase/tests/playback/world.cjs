@@ -614,7 +614,7 @@ function track(n = 1, extra = {}) {
   return {
     entryId: `entry-${n}`,
     title: `Peace in the midst ${n}`,
-    subtitle: "Gracehush • Psalm 23:1–3",
+    subtitle: "GraceHush • Psalm 23:1–3",
     durationMs: 113_200,
     audioPath: `user_a/devotionals/entry-${n}.wav`,
     ...extra,

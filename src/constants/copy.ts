@@ -38,7 +38,7 @@ export const copy = {
         body: "Its paid terms say your words won’t be used to improve its products. Google can keep them for a limited time to check for misuse.",
       },
     ],
-    footnote: "You can change your mind anytime in Profile. Without this, Gracehush can’t prepare a reflection.",
+    footnote: "You can change your mind anytime in Profile. Without this, GraceHush can’t prepare a reflection.",
     allow: "Allow and continue",
     notNow: "Not now",
     privacy: "Privacy Policy",
@@ -95,7 +95,7 @@ export const copy = {
     },
     permissions: {
       eyebrow: "Your voice & rhythm",
-      title: "Let Gracehush hear you and remind you.",
+      title: "Let GraceHush hear you and remind you.",
       subtitle: "We’ll only ask once. You can change these in your device settings.",
       microphone: {
         title: "Microphone",
@@ -210,7 +210,7 @@ export const copy = {
     // (until then onboarding's fourth step, before the person had received anything): the card's words and its two choices.
     // Unanswered is no.
     consent: {
-      title: "Help improve Gracehush?",
+      title: "Help improve GraceHush?",
       body: "Share anonymous usage data, like which features you use. Never your words, prayers or recordings.",
       share: "Share usage data",
       notNow: "Not now",
@@ -395,7 +395,7 @@ export const copy = {
       },
       info: {
         title: "Whisper or speak aloud",
-        body: "Gracehush listens for what you’re carrying and shapes a short devotional and scripture just for you.",
+        body: "GraceHush listens for what you’re carrying and shapes a short devotional and scripture just for you.",
       },
     },
     write: {
@@ -562,7 +562,7 @@ export const copy = {
     // arrives already in quotes (quoteVerse).
     share: {
       message: (quotedVerse: string, reference: string) =>
-        `${quotedVerse}\n— ${reference} (BSB)\n\nShared from Gracehush`,
+        `${quotedVerse}\n— ${reference} (BSB)\n\nShared from GraceHush`,
     },
     states: {
       loading: "Loading your reflection",
@@ -604,7 +604,7 @@ export const copy = {
       close: "Close support resources",
       intro: "Ways to reach a real person, any time of day.",
       footer: (date: string) =>
-        `Gracehush is not a crisis service. Resources last checked ${date}. Message and data rates may apply when you text.`,
+        `GraceHush is not a crisis service. Resources last checked ${date}. Message and data rates may apply when you text.`,
     },
     // Shown when the phone cannot open a link (no phone app, no messaging app).
     fallback: {
@@ -647,7 +647,7 @@ export const copy = {
       text: (percent: number) => `${percent} percent`,
     },
     // The title's second line, and what step 26 puts on the lock screen: one string, one source.
-    subtitle: (reference: string | null) => (reference ? `Gracehush • ${reference}` : "Gracehush"),
+    subtitle: (reference: string | null) => (reference ? `GraceHush • ${reference}` : "GraceHush"),
     states: {
       loading: "Loading the player",
       notFound: "We couldn’t find this devotional.",
@@ -809,8 +809,8 @@ export const copy = {
       memberSince: (date: string) => `Member since ${date}`,
     },
     plan: {
-      freeTitle: "Gracehush Free",
-      proTitle: "Gracehush Pro",
+      freeTitle: "GraceHush Free",
+      proTitle: "GraceHush Pro",
       badgeActive: "Active plan",
       badgeTrial: "Free trial",
       usage: (used: number, limit: number) => `${used} of ${limit} audio devotionals used this week`,
@@ -870,7 +870,7 @@ export const copy = {
       subtitle: "A notification at each reminder time.",
     },
     notifications: {
-      deniedTitle: "Notifications are off for Gracehush.",
+      deniedTitle: "Notifications are off for GraceHush.",
       deniedBody: "Turn them on in Settings to receive your affirmations.",
       openSettings: "Open Settings",
       undeterminedTitle: "Allow notifications to receive your affirmations.",
@@ -886,7 +886,7 @@ export const copy = {
     aiPermission: {
       title: "Share with Google’s AI",
       on: "On. Your words and recordings go to Google to prepare your reflections.",
-      off: "Off. Gracehush can’t prepare new reflections.",
+      off: "Off. GraceHush can’t prepare new reflections.",
     },
     analytics: {
       title: "Share Usage Data",
@@ -917,7 +917,7 @@ export const copy = {
     // One ConfirmDialog serves all of these (the delete one in two steps), so each is a set of strings.
     dialogs: {
       signOut: {
-        title: "Sign out of Gracehush?",
+        title: "Sign out of GraceHush?",
         body: "Your journal stays safe in your account.",
         confirm: "Sign out",
         cancel: "Stay",
@@ -963,7 +963,7 @@ export const copy = {
         body: "Your sanctuary and everything in it will be removed.",
         // An account that signed in with Apple (step 35): Apple's sheet comes next, and this says why before it appears.
         bodyApple:
-          "Your sanctuary and everything in it will be removed. Apple will ask you to confirm, so Gracehush stops using your Apple sign-in. If it can’t, you can remove Gracehush in Settings, under your name, Sign-In & Security.",
+          "Your sanctuary and everything in it will be removed. Apple will ask you to confirm, so GraceHush stops using your Apple sign-in. If it can’t, you can remove GraceHush in Settings, under your name, Sign-In & Security.",
         confirm: "Delete forever",
         cancel: "Keep my account",
       },
@@ -972,7 +972,7 @@ export const copy = {
       // With no version (a build that does not report one) the line is only the scripture credit.
       line: (version: string | null) =>
         version
-          ? `Gracehush v${version} • Scripture quotes from Berean Standard Bible (BSB).`
+          ? `GraceHush v${version} • Scripture quotes from Berean Standard Bible (BSB).`
           : "Scripture quotes from Berean Standard Bible (BSB).",
       blessing: "Peace be with your spirit.",
     },
@@ -997,7 +997,7 @@ export const copy = {
     loading: "Loading plans",
     restore: "Restore purchases",
     hero: {
-      title: "Go deeper with Gracehush Pro",
+      title: "Go deeper with GraceHush Pro",
       subtitle: "A calm, unhurried space for your daily walk with God.",
     },
     // One row per feature that AGENTS.md defines as Pro (Subscription Rules). V1 has one. To advertise another,
@@ -1055,7 +1055,7 @@ export const copy = {
     },
     later: "Maybe later",
     done: {
-      title: "Welcome to Gracehush Pro.",
+      title: "Welcome to GraceHush Pro.",
       body: "Your devotionals are unlimited.",
       bodyTrial: "Your free trial has started. Your devotionals are unlimited.",
       action: "Continue",
@@ -1063,7 +1063,7 @@ export const copy = {
     member: {
       title: "You’re already a Pro member.",
       bodyTrial: "Your free trial is active.",
-      bodyPro: "Thank you for being part of Gracehush.",
+      bodyPro: "Thank you for being part of GraceHush.",
       manage: "Manage subscription",
       manageError: "We couldn’t open your subscription settings.",
       close: "Close",

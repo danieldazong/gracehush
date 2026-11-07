@@ -452,7 +452,7 @@ async function appleChecks() {
     const cancelled = profile.errors.deleteAppleCancelled;
     assert.equal(
       body,
-      "Your sanctuary and everything in it will be removed. Apple will ask you to confirm, so Gracehush stops using your Apple sign-in. If it can\u2019t, you can remove Gracehush in Settings, under your name, Sign-In & Security.",
+      "Your sanctuary and everything in it will be removed. Apple will ask you to confirm, so GraceHush stops using your Apple sign-in. If it can\u2019t, you can remove GraceHush in Settings, under your name, Sign-In & Security.",
     );
     assert.equal(cancelled, "Nothing was deleted. Apple\u2019s confirmation was cancelled.");
     for (const text of [body, cancelled]) assert.ok(!text.includes("'"), "no straight apostrophe");

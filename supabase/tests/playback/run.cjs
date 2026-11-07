@@ -407,7 +407,7 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
     const lock = (w) => w.env.use("@/services/lockScreen");
     const OPTIONS = { showSeekForward: true, showSeekBackward: true, seekForwardIntervalSeconds: 15, seekBackwardIntervalSeconds: 15 };
     const newPlayer = (w) => w.expoAudio.createAudioPlayer({ uri: "file:///x.wav" }, {});
-    const info = { title: "Peace in the midst", subtitle: "Gracehush • Psalm 23:1–3" };
+    const info = { title: "Peace in the midst", subtitle: "GraceHush • Psalm 23:1–3" };
     // The picture follows the hour the phone reads, so each check says which hour it is.
     const atHour = async (hour, run) => {
       const real = Date.prototype.getHours;
@@ -432,13 +432,13 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       assert.equal(player.calls.setActive.length, 1);
       assert.deepEqual(player.calls.setActive[0], {
         active: true,
-        metadata: { title: "Peace in the midst", artist: "Gracehush • Psalm 23:1–3" },
+        metadata: { title: "Peace in the midst", artist: "GraceHush • Psalm 23:1–3" },
         options: OPTIONS,
       });
       assert.equal(player.calls.updateMeta.length, 0, "the artwork is not waited for");
       await W.advance(10);
       assert.deepEqual(player.calls.updateMeta, [
-        { title: "Peace in the midst", artist: "Gracehush • Psalm 23:1–3", artworkUrl: "file:///assets/player-scene-2-square.jpg" },
+        { title: "Peace in the midst", artist: "GraceHush • Psalm 23:1–3", artworkUrl: "file:///assets/player-scene-2-square.jpg" },
       ]);
       assert.deepEqual(w.asset.calls.fromModule, [8], "the square crop of the first-light scene, from constants/images");
     }));
@@ -541,7 +541,7 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       store.getState().load(W.track(1), AMBIENT);
       assert.deepEqual(
         { ...view(store), title: store.getState().title, subtitle: store.getState().subtitle, durationMs: store.getState().durationMs },
-        { entryId: "entry-1", status: "paused", positionMs: 0, isBuffering: false, error: null, title: "Peace in the midst 1", subtitle: "Gracehush • Psalm 23:1–3", durationMs: 113_200 },
+        { entryId: "entry-1", status: "paused", positionMs: 0, isBuffering: false, error: null, title: "Peace in the midst 1", subtitle: "GraceHush • Psalm 23:1–3", durationMs: 113_200 },
       );
       assert.equal(w.players.length, 0, "nothing is made until the file is on the phone");
       await W.advance(100);
@@ -1378,7 +1378,7 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
     assert.deepEqual(getPlaybackTrack(entry()), {
       entryId: "entry-1",
       title: "Peace",
-      subtitle: "Gracehush • Psalm 23:1–3",
+      subtitle: "GraceHush • Psalm 23:1–3",
       durationMs: 113_200,
       audioPath: PATH(1),
     });

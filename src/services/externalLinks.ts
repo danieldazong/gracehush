@@ -47,5 +47,5 @@ export function openExportDownload(url: string): Promise<LinkResult> {
 
 // No device details, no user id and no body: the person writes what they want to say.
 export function openSupportEmail(): Promise<LinkResult> {
-  return openUrl(`mailto:${SUPPORT_EMAIL}?subject=Gracehush%20feedback`);
+  return openUrl(`mailto:${SUPPORT_EMAIL}?subject=GraceHush%20feedback`);
 }

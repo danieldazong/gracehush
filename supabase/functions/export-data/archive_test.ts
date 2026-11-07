@@ -207,7 +207,7 @@ Deno.test("markdown: newest first, the day in the profile's zone, a finished ref
     ],
   };
   const md = buildMarkdown(data, { exportedAt: EXPORTED, zone: "Africa/Lagos" });
-  assert(md.startsWith("# Your Gracehush journal\n\nExported on October 30, 2026 (Africa/Lagos)."), md.slice(0, 120));
+  assert(md.startsWith("# Your GraceHush journal\n\nExported on October 30, 2026 (Africa/Lagos)."), md.slice(0, 120));
   assert(md.indexOf("### Newer") < md.indexOf("### Peace in the Waiting"), "newest first");
   for (
     const part of [
