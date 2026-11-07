@@ -1,7 +1,30 @@
 {
-  "fill" : {
-    "automatic-gradient" : "extended-srgb:0.98431,0.96863,0.94902,1.00000"
-  },
+  "fill-specializations" : [
+    {
+      "value" : {
+        "automatic-gradient" : "extended-srgb:0.98431,0.96863,0.94902,1.00000"
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "extended-srgb:0.98431,0.96863,0.94902,1.00000",
+          "extended-srgb:0.88627,0.87451,0.85098,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 0.35
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 1
+          }
+        }
+      }
+    }
+  ],
   "groups" : [
     {
       "layers" : [
