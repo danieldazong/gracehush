@@ -287,6 +287,59 @@ const row = ({
       else process.env.TZ = before;
     }
   });
+  await test("verse: the card sets a verse as one flowing paragraph (whitespace only), with balanced breaks, and the share message keeps the lines", async () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const root = process.env.GRACEHUSH_REPO ?? path.resolve(__dirname, "..", "..", "..");
+    const { env } = await onboarding(undefined);
+    const { flowVerse, quoteVerse } = env.use("@/utils/format");
+    assert.equal(typeof flowVerse, "function", "format.ts exports flowVerse");
+    // Isaiah 30:15 as the card showed it in the TestFlight build: the long first line wrapped and stranded "said:", and the
+    // others ended where the poet's lines do and not where the card's width does.
+    const isaiah =
+      "For the Lord GOD, the Holy One of Israel, has said:\n“By repentance and rest\nyou would be saved;\nyour strength would lie in quiet confidence—\nbut you were not willing.”";
+    assert.equal(
+      flowVerse(isaiah),
+      "For the Lord GOD, the Holy One of Israel, has said: “By repentance and rest you would be saved; your strength would lie in quiet confidence— but you were not willing.”",
+    );
+    assert.equal(flowVerse("one line, nothing to join"), "one line, nothing to join", "prose is left alone");
+    assert.equal(flowVerse("a \r\n  b\n\n c"), "a b c", "a break and the spaces around it are one space");
+    assert.equal(flowVerse("\n Selah \n"), "Selah", "nothing hangs at either end");
+    assert.equal(flowVerse("a  b"), "a  b", "inside a line nothing changes");
+    // On the real chapters in the repo (Psalms 23, 46 and 127, Isaiah 41, and prose verses with a break inside): not a letter or a
+    // mark changes, no break is left, and flowing it twice changes nothing more.
+    const strings = (value, out = []) => {
+      if (typeof value === "string") out.push(value);
+      else if (Array.isArray(value)) value.forEach((item) => strings(item, out));
+      else if (value && typeof value === "object") Object.values(value).forEach((item) => strings(item, out));
+      return out;
+    };
+    const fixtures = path.join(root, "supabase", "functions", "_shared", "bible", "fixtures");
+    let withBreaks = 0;
+    for (const name of fs.readdirSync(fixtures).filter((file) => file.endsWith(".json"))) {
+      for (const verse of strings(JSON.parse(fs.readFileSync(path.join(fixtures, name), "utf8")))) {
+        const flowed = flowVerse(verse);
+        assert.equal(flowed.replace(/\s+/g, ""), verse.replace(/\s+/g, ""), `${name}: only whitespace may change`);
+        assert.ok(!flowed.includes("\n"), `${name}: no break is left`);
+        assert.equal(flowVerse(flowed), flowed, `${name}: flowing it twice changes nothing`);
+        if (verse.includes("\n")) withBreaks += 1;
+      }
+    }
+    assert.ok(withBreaks >= 20, `the fixtures must hold real poetry to prove this (${withBreaks} verses with a break)`);
+    // A verse whose marks pair up is shown as it is, flowed or not.
+    assert.equal(quoteVerse(flowVerse(isaiah)), flowVerse(isaiah), "the quote marks stay the verse's own");
+    // What the card does with it, read from its source: the verse and the spoken label both take the flowed text, and the
+    // line breaks are balanced so that no word is stranded on a line of its own.
+    const card = fs.readFileSync(path.join(root, "src", "components", "ScriptureCard.tsx"), "utf8");
+    assert.match(card, /verified && text \? flowVerse\(text\) : null/, "the card flows the verse, and only a verified one");
+    assert.match(card, /quoteVerse\(flowed\)/, "and then quotes it");
+    assert.match(card, /a11y\(reference, flowed \?\? scriptureCopy\.confirming\)/, "the spoken label reads the flowed text");
+    assert.match(card, /textBreakStrategy="balanced"/, "Android balances the lines");
+    assert.match(card, /lineBreakStrategyIOS="push-out"/, "and iOS keeps a word from standing alone on the last line");
+    // The share message is a text message: it keeps the Bible's own lines, which read well there.
+    const reflection = fs.readFileSync(path.join(root, "src", "screens", "journal", "ReflectionScreen.tsx"), "utf8");
+    assert.match(reflection, /share\.message\(quoteVerse\(scripture\.text\)/, "the share message keeps the Bible's own lines");
+  });
   await test("onboarding: resetOnboarding clears dirty", async () => {
     const { store } = await onboarding(undefined);
     store.getState().setReminder("morning", "07:00");

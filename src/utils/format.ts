@@ -119,6 +119,15 @@ export function quoteVerse(text: string): string {
   return "“".repeat(missingOpens) + text + "”".repeat(missingCloses);
 }
 
+// A verse as one flowing paragraph, for the card. The Bible's own lines of poetry are separated by line breaks, and on a
+// phone those breaks fall in the wrong places: a long first line wraps and strands its last word ("has / said:"), and the
+// rest end where the poet's lines do and not where the card's width does. So the card sets the lines as one paragraph and lets
+// it wrap to the card. A run of whitespace that holds a line break becomes one space; nothing else changes, not a letter or
+// a mark, and the stored verse and the share message keep their lines.
+export function flowVerse(text: string): string {
+  return text.replace(/\s+/g, (run) => (run.includes("\n") ? " " : run)).trim();
+}
+
 // The prayer's own title, or "Prayer from Oct 2" when it has none. A title is never made up from the transcript.
 export function getPrayerTitle(prayer: Pick<Prayer, "title" | "createdAt">): string {
   const title = prayer.title.trim();
