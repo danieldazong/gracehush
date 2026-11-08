@@ -1,5 +1,5 @@
 import { copy } from "@/constants/copy";
-import type { EmotionKey, Prayer } from "@/types";
+import type { EmotionKey, JournalEntry, Prayer } from "@/types";
 
 const HEADLINE_EMOTIONS: readonly EmotionKey[] = [
   "anxious",
@@ -92,12 +92,35 @@ export function getAffirmationSource(createdAtIso: string, now: Date): string {
   return copy.journal.affirmation.sourceOn(formatShortDate(createdAtIso));
 }
 
-// The Reflection headline for the entry's emotion. The emotion is the raw AI string: it is trimmed and
-// lowercased, and an unknown one (null, "", "overwhelmed") gets the generic line, never its own text.
+// The fixed headline for the entry's emotion, now only the last fallback of getReflectionHeadline (step 36). The
+// emotion is the raw AI string: it is trimmed and lowercased, and an unknown one (null, "", "overwhelmed") gets the
+// generic line, never its own text.
 export function getValidationHeadline(emotion: string | null): string {
   const normalized = emotion?.trim().toLowerCase();
   const known = HEADLINE_EMOTIONS.find((key) => key === normalized);
   return known ? copy.reflection.headlines[known] : copy.reflection.headlines.unknown;
+}
+
+// A devotional's first sentence, by the server's rule (openingSentence in process-entry/tone.ts): up to the first
+// ".", "!" or "?" (and any closing quote) that is followed by a space or the end, with the whitespace made single. A
+// first sentence over 160 characters is cut at a word boundary and ends with an ellipsis. Null when there is no text.
+export function firstSentence(script: string | null | undefined): string | null {
+  const text = (script ?? "").replace(/\s+/g, " ").trim();
+  if (text === "") return null;
+  const end = /[.!?]["”’)]*(?=\s|$)/.exec(text);
+  const sentence = end ? text.slice(0, end.index + end[0].length) : text;
+  if (sentence.length <= 160) return sentence;
+  const cut = sentence.slice(0, 159);
+  const space = cut.lastIndexOf(" ");
+  return (space > 0 ? cut.slice(0, space) : cut).replace(/[\s,;:–—-]+$/, "") + "…";
+}
+
+// The Reflection headline (step 36): the validation line the model wrote from the entry; for a reflection made before
+// it, the devotional's first sentence; and only when there is neither, the fixed line of its emotion.
+export function getReflectionHeadline(entry: Pick<JournalEntry, "devotional" | "dominantEmotion">): string {
+  const line = entry.devotional?.validation?.trim();
+  if (line) return line;
+  return firstSentence(entry.devotional?.script) ?? getValidationHeadline(entry.dominantEmotion);
 }
 
 // A verse in curly quotes, without changing a character of it. A verse with no double quote marks is

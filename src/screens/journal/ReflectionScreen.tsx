@@ -13,10 +13,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { CrisisSupportPanel } from "@/components/crisis/CrisisSupportPanel";
 import { DeleteReflectionDialog } from "@/components/DeleteReflectionDialog";
 import { DeleteReflectionLink } from "@/components/DeleteReflectionLink";
 import { FadeIn } from "@/components/FadeIn";
+import { HelpLine } from "@/components/HelpLine";
 import { Icon } from "@/components/Icon";
 import { MiniPlayerCard } from "@/components/MiniPlayerCard";
 import { PrimaryButton } from "@/components/PrimaryButton";
@@ -44,7 +44,7 @@ import type {
   TimeSlot,
   UserProfile,
 } from "@/types";
-import { formatEntryDate, getValidationHeadline, quoteVerse } from "@/utils/format";
+import { formatEntryDate, getReflectionHeadline, quoteVerse } from "@/utils/format";
 
 import {
   ReflectionError,
@@ -54,7 +54,7 @@ import {
   ReflectionPreparing,
 } from "./ReflectionStateViews";
 
-const { subline, words, request, footer } = copy.reflection;
+const { subline, words, request, footer, wordsOnly } = copy.reflection;
 const deleteText = copy.deleteReflection;
 
 // The sections arrive one after another: each rises 10dp while it fades in, 60 ms after the one above it.
@@ -103,6 +103,8 @@ function ReflectionHeader({ date, onBack }: ReflectionHeaderProps) {
 
 type PrayerRequestRowProps = {
   entryId: string;
+  // A heavy moment sends no analytics event (Analytics Rules), its prayer change included.
+  heavy: boolean;
   prayer: Prayer | null;
   onSetTracked: (tracked: boolean) => Promise<RepoResult<Prayer | null>>;
 };
@@ -111,7 +113,7 @@ type PrayerRequestRowProps = {
 // a picture of the state and is hidden from the touch system and from screen readers. The state is the entry's
 // (step 29): a change shows at once and the sync engine sends it. Turning it off on an answered prayer asks
 // first, because its answered date and gratitude note go with it.
-function PrayerRequestRow({ entryId, prayer, onSetTracked }: PrayerRequestRowProps) {
+function PrayerRequestRow({ entryId, heavy, prayer, onSetTracked }: PrayerRequestRowProps) {
   const checked = prayer !== null;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -131,7 +133,7 @@ function PrayerRequestRow({ entryId, prayer, onSetTracked }: PrayerRequestRowPro
     haptics.selection();
     const result = await onSetTracked(tracked);
     changing.current = false;
-    if (result.ok) track("prayer_tracked_changed", { tracked });
+    if (result.ok && !heavy) track("prayer_tracked_changed", { tracked });
     else setFailed(true);
   }
 
@@ -225,7 +227,8 @@ type ReadyViewProps = {
 
 // A finished entry with a devotional. The screen keys it by the entry and the tab it was opened on, so another
 // entry starts from its own prayer toggle, tab and expanded state, and a tapped notification for the reflection
-// that is already open turns it to Affirmations (step 28).
+// that is already open turns it to Affirmations (step 28). A heavy moment (2026-11-08) is shown like any other, with
+// one quiet line under its devotional (HelpLine).
 function ReadyView({
   entry,
   devotional,
@@ -262,7 +265,7 @@ function ReadyView({
             accessibilityRole="header"
             className="font-fraunces text-[27px] leading-[34px] tracking-[-0.675px] text-plum-deep"
           >
-            {getValidationHeadline(entry.dominantEmotion)}
+            {getReflectionHeadline(entry)}
           </Text>
           <Text className="mt-1.5 text-body-sm text-mauve">
             {isVoice ? subline.audio : subline.text}
@@ -291,6 +294,11 @@ function ReadyView({
           initialTab={initialTab}
         />
       </FadeIn>
+      {entry.isCrisis ? (
+        <FadeIn {...arrive(3)}>
+          <HelpLine />
+        </FadeIn>
+      ) : null}
       {transcript ? (
         <FadeIn {...arrive(4)}>
           <TranscriptRow
@@ -301,7 +309,12 @@ function ReadyView({
       ) : null}
       <FadeIn {...arrive(5)}>
         <View className="gap-3 pt-1">
-          <PrayerRequestRow entryId={entry.id} prayer={entry.prayer} onSetTracked={onSetTracked} />
+          <PrayerRequestRow
+            entryId={entry.id}
+            heavy={entry.isCrisis}
+            prayer={entry.prayer}
+            onSetTracked={onSetTracked}
+          />
           <View className="flex-row items-center gap-2">
             <View className="flex-1">
               <PrimaryButton label={footer.returnToJournal} onPress={onReturn} />
@@ -327,11 +340,55 @@ function ReadyView({
   );
 }
 
+type WordsOnlyViewProps = {
+  transcript: string | null;
+  isVoice: boolean;
+  onReturn: () => void;
+  onDelete: () => void;
+  deleteOffline: boolean;
+};
+
+// A heavy moment saved before 2026-11-08, when such an entry kept only the person's words: those words (collapsed), the quiet
+// help line, the way back and the delete link. Nothing here animates, and nothing is logged.
+function WordsOnlyView({ transcript, isVoice, onReturn, onDelete, deleteOffline }: WordsOnlyViewProps) {
+  const { width } = useWindowDimensions();
+  const shared = transcript?.trim() ?? "";
+  return (
+    <ScrollView
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingHorizontal:
+            width < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding,
+        },
+      ]}
+    >
+      <View>
+        <Text
+          accessibilityRole="header"
+          className="font-fraunces text-[27px] leading-[34px] tracking-[-0.675px] text-plum-deep"
+        >
+          {wordsOnly.title}
+        </Text>
+        <Text className="mt-1.5 text-body-sm text-mauve">{wordsOnly.body}</Text>
+      </View>
+      {shared ? (
+        <TranscriptRow title={isVoice ? words.titleAudio : wordsOnly.words} transcript={shared} />
+      ) : null}
+      <HelpLine />
+      <View className="gap-3 pt-1">
+        <PrimaryButton label={footer.returnToJournal} onPress={onReturn} />
+        <DeleteReflectionLink onPress={onDelete} offline={deleteOffline} />
+      </View>
+    </ScrollView>
+  );
+}
+
 export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Reflection">) {
   const state = useReflection(route.params.entryId);
   // Delete reflection (step 29b): the dialog is shared with Prayers. A delete takes the person back to where they came from.
-  // A crisis entry can be deleted from its view since 2026-11-01, with no analytics event (Analytics Rules: no event is
-  // about a crisis entry).
+  // A heavy moment can be deleted like any reflection, with no analytics event (Analytics Rules: no event is about a heavy
+  // moment).
   const isCrisisEntry = state.status === "ready" && state.entry.isCrisis;
   const deletion = useDeleteReflection(() => {
     if (!isCrisisEntry) track("reflection_deleted", { source: "reflection" });
@@ -363,13 +420,17 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
     body = <ReflectionNotFound onReturn={returnToJournal} />;
   } else if (state.status === "error") {
     body = <ReflectionError onRetry={state.retry} onReturn={returnToJournal} />;
-  } else if (state.entry.isCrisis) {
-    // Checked before the status: a crisis entry is a finished one in the data, so it has to win over the
-    // status checks below. The panel is given the transcript and nothing else of the entry.
+  } else if (
+    state.entry.status === "pending" ||
+    state.entry.status === "uploading" ||
+    state.entry.status === "processing"
+  ) {
+    body = <ReflectionPreparing onReturn={returnToJournal} />;
+  } else if (state.entry.status === "ready" && state.entry.isCrisis && state.entry.devotional === null) {
     body = (
-      <CrisisSupportPanel
+      <WordsOnlyView
         transcript={state.entry.transcript}
-        onOpenResources={() => navigation.navigate("CrisisResources", { source: "reflection" })}
+        isVoice={state.entry.inputType === "audio"}
         onReturn={returnToJournal}
         onDelete={() => {
           const opened = deletion.ask({ entryId: state.entry.id, answered: false, crisis: true });
@@ -378,12 +439,6 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
         deleteOffline={deleteOffline}
       />
     );
-  } else if (
-    state.entry.status === "pending" ||
-    state.entry.status === "uploading" ||
-    state.entry.status === "processing"
-  ) {
-    body = <ReflectionPreparing onReturn={returnToJournal} />;
   } else if (state.entry.status === "failed" || state.entry.devotional === null) {
     body = <ReflectionFailed onReturn={returnToJournal} />;
   } else {
@@ -414,10 +469,7 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
       <ReflectionHeader
-        // No date on the crisis view: it means nothing to someone in distress and makes the screen feel clinical.
-        date={
-          state.status === "ready" && !state.entry.isCrisis ? formatEntryDate(state.entry.createdAt) : null
-        }
+        date={state.status === "ready" ? formatEntryDate(state.entry.createdAt) : null}
         onBack={goBack}
       />
       {body}

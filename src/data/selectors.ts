@@ -45,12 +45,13 @@ export function getAffirmationForSlot(
   return affirmations.find((affirmation) => affirmation.slot === slot) ?? null;
 }
 
-// Consecutive local days with at least one finished, non-crisis entry, ending today or yesterday.
-// Crisis, failed, processing and pending entries do not count, and nothing negative is surfaced.
+// Consecutive local days with at least one finished reflection (one that has its devotional, a heavy moment's included),
+// ending today or yesterday. Failed, processing and pending entries do not count, nor a heavy moment saved before 2026-11-08
+// (the words only), and nothing negative is surfaced. The server's reflection_streak_days has the same rule.
 export function getReflectionDays(entries: JournalEntry[], now: Date): number {
   const days = new Set(
     entries
-      .filter((entry) => entry.status === "ready" && !entry.isCrisis)
+      .filter((entry) => entry.status === "ready" && entry.devotional !== null)
       .map((entry) => dayKey(new Date(entry.createdAt))),
   );
   const dayAt = (offset: number) =>
@@ -122,7 +123,7 @@ export function getUnsentCount(entries: readonly HomeEntry[]): number {
   ).length;
 }
 
-// Whether the Journal lists an entry that comes from the server (step 25): a finished one (a crisis entry included), or one that
+// Whether the Journal lists an entry that comes from the server (step 25): a finished one (a heavy moment included), or one that
 // is still being prepared and was touched lately. A "processing" entry that nothing has touched for STALE_PROCESSING_MS belongs to
 // a request that died, and would be a card that never finishes. A failed entry is not listed: the phone that made it shows it as a
 // card of its own until it is prepared (step 24), and one that was refused or deleted is no reflection.
@@ -144,9 +145,10 @@ export function mergeEntries(
   );
 }
 
-// The newest finished entry that is not a crisis, from a list that is newest first: the one whose affirmations Journal Home shows.
+// The newest finished reflection, from a list that is newest first: the one whose affirmations Journal Home shows. A heavy moment
+// counts like any other; one saved before 2026-11-08 has no devotional and no affirmations, so it is passed over.
 export function getNewestReadyEntry(entries: readonly JournalEntry[]): JournalEntry | null {
-  return entries.find((entry) => entry.status === "ready" && !entry.isCrisis) ?? null;
+  return entries.find((entry) => entry.status === "ready" && entry.devotional !== null) ?? null;
 }
 
 // Whole local calendar days, never negative: a prayer started yesterday at 11 PM is 1 day old at 1 AM.
@@ -154,20 +156,20 @@ export function getDaysSince(iso: string, now: Date): number {
   return Math.max(0, calendarDaysBetween(new Date(iso), now)) || 0;
 }
 
-// Any filter except "all" hides crisis, pending, uploading, processing and failed entries: they have
-// no emotion and no prayer (the mappers null both), so they never match.
+// Any filter except "all" hides pending, uploading, processing and failed entries, and a heavy moment saved before 2026-11-08:
+// they have no emotion and no prayer (the mappers null both), so they never match.
 export function filterEntries<T extends JournalEntry>(entries: T[], filter: JournalFilter): T[] {
   if (filter === "all") return entries;
   if (filter === "prayers") return entries.filter((entry) => entry.prayer !== null);
   return entries.filter((entry) => entry.dominantEmotion?.toLowerCase() === filter);
 }
 
-// What a player plays for this entry, or null when there is nothing to play: a crisis entry (it never
-// reaches a player), an entry that is not finished, and a devotional with no audio or no measured length
-// (a length is never invented). The mini player and Now Playing both build their track with it.
+// What a player plays for this entry, or null when there is nothing to play: an entry that is not finished, one with no
+// devotional (a heavy moment saved before 2026-11-08), and a devotional with no audio or no measured length (a length is never
+// invented). A heavy moment's devotional plays like any other. The mini player and Now Playing both build their track with it.
 export function getPlaybackTrack(entry: JournalEntry): PlaybackTrack | null {
   const { devotional } = entry;
-  if (entry.isCrisis || entry.status !== "ready" || devotional === null) return null;
+  if (entry.status !== "ready" || devotional === null) return null;
   const { audioPath, durationMs } = devotional;
   if (audioPath === null || durationMs === null || !Number.isFinite(durationMs) || durationMs <= 0) {
     return null;

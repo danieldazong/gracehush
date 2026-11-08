@@ -8,7 +8,6 @@ import { EMOTIONS, PRAYER_CATEGORIES, REFLECTION_BOOK_IDS, TIME_SLOTS } from "./
 type JsonSchema = Record<string, unknown>;
 
 const text = (description: string): JsonSchema => ({ type: "string", description });
-const nullableText = (description: string): JsonSchema => ({ type: ["string", "null"], description });
 
 // Where a passage is: the book as a USFM id from the one list in _shared/bible/books.ts (so the enum and the code that
 // checks it cannot disagree), less the Song of Solomon (REFLECTION_BOOK_IDS, step 32), the chapter and the verses. Used
@@ -32,31 +31,29 @@ export function buildScriptureSchema(): JsonSchema {
 }
 
 // The reflection's schema. The call only ever sees text (the crisis screening has already transcribed a recording and
-// judged it), so there is no transcript and no no_speech here. is_crisis stays: it is the last of the three layers.
+// judged it), so there is no transcript and no no_speech here. is_crisis stays: it is the last of the three layers, and since
+// gen-v2.4 it marks a heavy moment, whose reflection is still written in full, so no field is nullable any more.
 export function buildSchema(): JsonSchema {
   return {
     type: "object",
     properties: {
       is_crisis: {
         type: "boolean",
-        description: "True when the entry suggests suicide or self-harm risk, intent to harm others, or danger now.",
+        description:
+          "True when the entry suggests suicide or self-harm risk, intent to harm others, or danger now, or a heavy_moment block follows it. Every other field is still written in full.",
       },
       dominant_emotion: { type: "string", enum: [...EMOTIONS], description: "The core feeling in the entry." },
-      reflection_title: nullableText(
-        "2 to 6 words in Title Case, at most 40 characters. Null when is_crisis is true.",
-      ),
+      reflection_title: text("2 to 6 words in Title Case, at most 40 characters."),
+      // gen-v2.3 (step 36): right after the title, because Gemini writes the properties in this order.
+      validation_line: text("One sentence of 8 to 18 words, second person, written from the entry."),
       scripture: {
-        type: ["object", "null"],
-        description: "Where the chosen Berean Standard Bible passage is. Null when is_crisis is true.",
+        type: "object",
+        description: "Where the chosen Berean Standard Bible passage is.",
         properties: passageProperties(),
         required: PASSAGE_REQUIRED,
       },
-      devotional_text: nullableText(
-        "110 to 150 words in 3 or 4 short paragraphs. Null when is_crisis is true.",
-      ),
-      closing_prayer: nullableText(
-        "2 to 4 sentences, 30 to 50 words, without Amen. Null when is_crisis is true.",
-      ),
+      devotional_text: text("110 to 150 words in 3 or 4 short paragraphs."),
+      closing_prayer: text("2 to 4 sentences, 30 to 50 words, without Amen."),
       prayer: {
         type: "object",
         properties: {
@@ -70,7 +67,7 @@ export function buildSchema(): JsonSchema {
       affirmations: {
         type: "array",
         maxItems: 3,
-        description: "One per time of day. Empty when is_crisis is true.",
+        description: "One per time of day.",
         items: {
           type: "object",
           properties: {
@@ -86,6 +83,7 @@ export function buildSchema(): JsonSchema {
       "is_crisis",
       "dominant_emotion",
       "reflection_title",
+      "validation_line",
       "scripture",
       "devotional_text",
       "closing_prayer",

@@ -151,6 +151,7 @@ function serverRow(n, extra = {}) {
     scripture_text: "The LORD is my shepherd; I shall not want.",
     scripture_verified: true,
     devotional_title: `Title ${n}`,
+    validation_line: `The first line of entry ${n}.`,
     devotional_script: `The devotional of entry ${n}.`,
     closing_prayer: "Lord, hear us",
     devotional_audio_path: null,
@@ -203,7 +204,14 @@ function readyResult(request, userId = "user_a", n = 900) {
     status: "ready",
     isCrisis: false,
     scripture: { reference: row.scripture_reference, text: row.scripture_text, translation: "BSB", verified: true },
-    devotional: { title: row.devotional_title, script: row.devotional_script, closingPrayer: row.closing_prayer, audioPath: null, durationMs: null },
+    devotional: {
+      title: row.devotional_title,
+      validation: row.validation_line,
+      script: row.devotional_script,
+      closingPrayer: row.closing_prayer,
+      audioPath: null,
+      durationMs: null,
+    },
     prayer: null,
     failureCode: null,
     isLocalOnly: false,
@@ -222,40 +230,16 @@ function readyResult(request, userId = "user_a", n = 900) {
   return { row, affirmations, response };
 }
 
+// A heavy moment, as process-entry answers it since gen-v2.4 (2026-11-08): a whole reflection with its three affirmations, marked
+// as one and never made a prayer.
 function crisisResult(request, userId = "user_a", n = 901) {
-  const row = serverRow(n, {
-    user_id: userId,
-    client_entry_id: request.clientEntryId,
-    input_type: request.inputType,
-    transcript: request.inputType === "text" ? request.text : "what was said",
-    is_crisis: true,
-    dominant_emotion: null,
-    scripture_reference: null,
-    scripture_text: null,
-    scripture_verified: false,
-    devotional_title: null,
-    devotional_script: null,
-    closing_prayer: null,
-    created_at: stamp(clock.now),
-    updated_at: stamp(clock.now),
-  });
-  const entry = {
-    id: row.id,
-    clientEntryId: row.client_entry_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    inputType: row.input_type,
-    transcript: row.transcript,
-    dominantEmotion: null,
-    status: "ready",
-    isCrisis: true,
-    scripture: null,
-    devotional: null,
-    prayer: null,
-    failureCode: null,
-    isLocalOnly: false,
+  const ready = readyResult(request, userId, n);
+  const row = { ...ready.row, is_crisis: true, is_active_prayer: false };
+  return {
+    row,
+    affirmations: ready.affirmations,
+    response: { ...ready.response, entry: { ...ready.response.entry, isCrisis: true, prayer: null } },
   };
-  return { row, affirmations: [], response: { entry, affirmations: [] } };
 }
 
 const json = (status, body, headers = {}) =>
@@ -329,12 +313,13 @@ function makeServer() {
     streakCalls: [],
   };
 
-  // The run of consecutive local days in `tz`, ending today or yesterday, with a ready entry that is not a crisis entry.
+  // The run of consecutive local days in `tz`, ending today or yesterday, with a ready entry that has its devotional (a heavy
+  // moment's included since 2026-11-08: supabase/migrations/20261108120000_heavy_moments.sql).
   function streakOf(sub, tz) {
     const day = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new RealDate(ms));
     const days = new Set(
       state.entries
-        .filter((row) => row.user_id === sub && row.processing_status === "ready" && !row.is_crisis)
+        .filter((row) => row.user_id === sub && row.processing_status === "ready" && row.devotional_script !== null)
         .map((row) => day(Date.parse(row.created_at))),
     );
     let offset = days.has(day(clock.now)) ? 0 : 1;
@@ -421,17 +406,16 @@ function makeServer() {
         state.violations.push(`grant: ${extra.join(", ")}`);
         return json(403, { code: "42501", message: "permission denied for table journal_entries", details: null, hint: null });
       }
-      // The table's prayer rules (step 18), on each row as the update would leave it.
+      // The table's prayer rules (step 18), on each row as the update would leave it. A heavy moment may be a prayer since
+      // 2026-11-08 (crisis_not_prayer was dropped).
       for (const row of matched) {
         const next = { ...row, ...body };
         const broken =
           next.is_answered !== (next.answered_at !== null)
             ? "answered_fields_match"
-            : next.is_crisis && (next.is_active_prayer || next.is_answered)
-              ? "crisis_not_prayer"
-              : next.answered_notes !== null && next.answered_notes.length > 1000
-                ? "answered_note_length"
-                : null;
+            : next.answered_notes !== null && next.answered_notes.length > 1000
+              ? "answered_note_length"
+              : null;
         if (broken !== null) {
           return json(400, { code: "23514", message: `violates check constraint "${broken}"`, details: null, hint: null });
         }

@@ -225,6 +225,24 @@ Deno.test("markdown: newest first, the day in the profile's zone, a finished ref
   assert(!md.includes("'"), "no straight apostrophe in the app's own words");
 });
 
+Deno.test("markdown and json: the validation line (step 36) sits under the title; a reflection from before it has none", () => {
+  const line = "Work has kept you anxious all week, and rest still won’t come.";
+  const data: UserData = {
+    profile: profile("UTC"),
+    entries: [
+      entry({ id: ID_2, created_at: "2026-10-28T08:00:00.000Z", devotional_title: "Older", validation_line: null }),
+      entry({ validation_line: line }),
+    ],
+  };
+  const md = buildMarkdown(data, { exportedAt: EXPORTED, zone: "UTC" });
+  assert(md.includes(`### Peace in the Waiting\n\n${line}\n\n**What you shared**`), md);
+  assert(md.includes("### Older\n\n**What you shared**"), md);
+  assertEquals(md.split(line).length - 1, 1);
+  // journal.json carries the column as it carries every other, with no change of its own.
+  const json = JSON.parse(buildJson(data, { exportedAt: EXPORTED, zone: "UTC", included: new Map() }));
+  assertEquals(json.entries.map((row: { validation_line: string | null }) => row.validation_line), [null, line]);
+});
+
 Deno.test("markdown: an unverified passage shows its reference and never a text; no passage, no line", () => {
   const data: UserData = {
     profile: profile("UTC"),
@@ -256,7 +274,7 @@ Deno.test("markdown: an answered prayer shows the stored calendar day in every z
   }
 });
 
-Deno.test("markdown: a crisis entry is its day and the person's words, with no heading, label or word about it", () => {
+Deno.test("markdown: a heavy moment saved before 2026-11-08 is its day and the person's words, with no label or word about it", () => {
   const crisis = entry({
     is_crisis: true,
     transcript: "Words that were heavy to write.",
@@ -277,6 +295,19 @@ Deno.test("markdown: a crisis entry is its day and the person's words, with no h
   const failed = entry({ processing_status: "failed", devotional_title: null, transcript: null });
   const failedMd = buildMarkdown({ profile: null, entries: [failed] }, { exportedAt: EXPORTED, zone: "UTC" });
   assert(failedMd.endsWith("## Thursday, October 29, 2026, 8:46 AM\n"), failedMd);
+});
+
+Deno.test("markdown: a heavy moment since 2026-11-08 is a whole reflection, exported like any other and never labelled", () => {
+  const heavy = entry({ is_crisis: true, is_active_prayer: false });
+  const ordinary = entry({ is_crisis: false, is_active_prayer: false });
+  const heavyMd = buildMarkdown({ profile: profile("UTC"), entries: [heavy] }, { exportedAt: EXPORTED, zone: "UTC" });
+  const ordinaryMd = buildMarkdown({ profile: profile("UTC"), entries: [ordinary] }, {
+    exportedAt: EXPORTED,
+    zone: "UTC",
+  });
+  assertEquals(heavyMd, ordinaryMd, "nothing in the Markdown tells a heavy moment from any other reflection");
+  assert(heavyMd.includes("**Devotional**") && heavyMd.includes("**Closing prayer**"));
+  for (const word of ["crisis", "Crisis", "heavy moment", "988"]) assert(!heavyMd.includes(word), word);
 });
 
 Deno.test("readme: what is inside, when and where, the line about privacy, and every left-out file by name", () => {

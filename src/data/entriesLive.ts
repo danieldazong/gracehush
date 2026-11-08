@@ -74,34 +74,34 @@ export async function readCachedAffirmations(entryId: string): Promise<Affirmati
   return safely(() => cache.listAffirmationsForEntry(entryId), []);
 }
 
-// The newest finished entry that is not a crisis, among the newest few the phone has.
+// The newest finished reflection (one with its devotional), among the newest few the phone has.
 async function cachedNewestReady(): Promise<JournalEntry | null> {
   const entries = await safely(() => cache.listEntries(LATEST_LOOKBACK), []);
   const now = Date.now();
   return getNewestReadyEntry(entries.filter((entry) => isListedEntry(entry, now)));
 }
 
-// The affirmations of the newest finished, non-crisis entry the phone has.
+// The affirmations of the newest finished reflection the phone has.
 export async function readCachedLatestAffirmations(): Promise<Affirmation[]> {
   const latest = await cachedNewestReady();
   return latest === null ? [] : readCachedAffirmations(latest.id);
 }
 
-// The newest finished entry the phone has, a crisis entry included, and its affirmations (step 28's notifications). Unlike the
-// reads above it throws when the cache cannot be read (a closed database included): a bad read must not look like "no
-// reflection", which would cancel the notifications. An entry still being prepared is not finished, so it never counts.
+// The newest finished entry the phone has and its affirmations (step 28's notifications). A heavy moment's are sent like any
+// other's since 2026-11-08; one saved before then has none, so nothing is sent while it is the newest. Unlike the reads above it
+// throws when the cache cannot be read (a closed database included): a bad read must not look like "no reflection", which would
+// cancel the notifications. An entry still being prepared is not finished, so it never counts.
 export async function readCachedAffirmationSource(): Promise<AffirmationSource | null> {
   const entries = await cache.listEntries(LATEST_LOOKBACK);
   const now = Date.now();
   const latest = entries.find((entry) => entry.status === "ready" && isListedEntry(entry, now));
   if (latest === undefined) return null;
-  if (latest.isCrisis) return { entryId: latest.id, isCrisis: true, affirmations: [] };
   const affirmations = await cache.listAffirmationsForEntry(latest.id);
-  return { entryId: latest.id, isCrisis: false, affirmations };
+  return { entryId: latest.id, affirmations };
 }
 
-// The week's count of devotionals, from the entries this phone has: a finished entry that is not a crisis and holds a devotional
-// (the server's rule, step 22). `since` is the start of the week. The query allows a margin, because created_at is compared as
+// The week's count of devotionals, from the entries this phone has: a finished entry that holds a devotional and is not a heavy
+// moment, which is never counted (the server's rule, step 22). `since` is the start of the week. The query allows a margin, because created_at is compared as
 // text, and the exact test is made on the dates.
 export async function countDevotionalsSince(since: Date): Promise<number> {
   const bound = new Date(since.getTime() - 36 * 3_600_000).toISOString();
@@ -201,7 +201,7 @@ export async function changePrayer(
 ): Promise<RepoResult<JournalEntry>> {
   const message = copy.prayers.errors.save;
   const entry = await readCachedEntry(entryId);
-  if (entry === null || entry.isCrisis) return { ok: false, code: "NOT_FOUND", message };
+  if (entry === null) return { ok: false, code: "NOT_FOUND", message };
   if (entry.status !== "ready") return { ok: false, code: "INVALID", message };
   const built = build(entry);
   if (!built.ok) return built;

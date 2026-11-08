@@ -73,6 +73,30 @@ from (
                              where schemaname = 'realtime' and tablename = 'messages'
                                and policyname = 'user_broadcast_select_own') then 'exists' else 'absent' end
         || '; streak function: '
-        || case when to_regprocedure('public.reflection_streak_days(text)') is null then 'absent' else 'exists' end)
+        || case when to_regprocedure('public.reflection_streak_days(text)') is null then 'absent' else 'exists' end),
+    (16, 'the validation line (step 36)',
+        case
+          when not exists (select 1 from information_schema.columns
+                            where table_schema = 'public' and table_name = 'journal_entries'
+                              and column_name = 'validation_line') then 'absent'
+          else 'exists; checks: '
+               || coalesce(nullif((select string_agg(c.conname::text, ', ' order by c.conname)
+                                   from pg_constraint c
+                                   where c.conrelid = to_regclass('public.journal_entries')
+                                     and c.conname in ('validation_line_length', 'validation_line_crisis')), ''), 'none')
+        end),
+    (17, 'heavy moments (2026-11-08): the old crisis rules still in place',
+        coalesce(nullif(concat_ws(', ',
+          (select string_agg(c.conname::text, ', ' order by c.conname)
+             from pg_constraint c
+            where c.conrelid = to_regclass('public.journal_entries')
+              and c.conname in ('journal_entries_crisis_check', 'crisis_not_prayer', 'validation_line_crisis')),
+          (select string_agg(t.tgname::text, ', ')
+             from pg_trigger t
+            where t.tgname = 'daily_affirmations_no_crisis' and t.tgrelid = to_regclass('public.daily_affirmations')::oid),
+          (select 'the run of reflection days skips crisis entries'
+             from pg_proc p
+            where p.oid = to_regprocedure('public.reflection_streak_days(text)') and p.prosrc like '%is_crisis%')), ''),
+          'none'))
 ) as checks (position, item, found)
 order by position;

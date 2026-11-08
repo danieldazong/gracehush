@@ -20,12 +20,8 @@ export type RootStackParamList = {
   // `tab` opens the carousel on that tab: a tapped affirmation notification passes "affirmations" (step 28).
   Reflection: { entryId: string; tab?: ReflectionTab };
   NowPlaying: { entryId: string };
-  // Nothing reads `source` in V1 (no analytics: a crisis view sends no events). It stays because step 15's
-  // Profile row passes "profile", Journal's saved note passes "journal" (step 25 follow-up), and the AI permission page passes
-  // "newEntry".
-  CrisisResources: { source: "reflection" | "profile" | "journal" | "newEntry" };
-  // `entryId` is the reflection the free limit stopped. When it is a crisis entry the Paywall replaces itself
-  // with Reflection: crisis support is never paywalled.
+  // `entryId` is the reflection the free limit stopped. When it is a heavy moment the Paywall replaces itself
+  // with Reflection: a heavy moment is never paywalled.
   Paywall: { source: "profile" | "limit"; entryId?: string };
 };
 

@@ -158,7 +158,7 @@ function getReflectionTargets(entries: JournalEntry[]): ReflectionTarget[] {
     { label: "Processing", entryId: find((entry) => entry.status === "processing") },
     { label: "Pending", entryId: find((entry) => entry.status === "pending") },
     { label: "Failed", entryId: find((entry) => entry.status === "failed") },
-    { label: "Crisis", entryId: find((entry) => entry.isCrisis) },
+    { label: "Heavy", entryId: find((entry) => entry.isCrisis) },
     { label: "Not found", entryId: MISSING_ENTRY_ID },
   ];
 }
@@ -185,7 +185,7 @@ async function loadDataCheck(
 
   const lines = [
     `scenario: ${scenario}`,
-    `entries: ${entries.length} (ready ${ready.length}, processing ${countStatus("processing")}, pending ${countStatus("pending")}, failed ${countStatus("failed")}, crisis ${entries.filter((entry) => entry.isCrisis).length})`,
+    `entries: ${entries.length} (ready ${ready.length}, processing ${countStatus("processing")}, pending ${countStatus("pending")}, failed ${countStatus("failed")}, heavy ${entries.filter((entry) => entry.isCrisis).length})`,
     `reflection days: ${getReflectionDays(entries, now)}`,
     `prayers: active ${prayerCounts.active} · answered ${prayerCounts.answered} · total ${prayerCounts.total}`,
     `current slot: ${slot} → ${affirmation ? `"${affirmation.headline}"` : "none"}`,
@@ -327,8 +327,6 @@ function DevToolsContent() {
   const setNextSubmitOutcome = useDevStore((state) => state.setNextSubmitOutcome);
   const nextReflectionLoadFails = useDevStore((state) => state.nextReflectionLoadFails);
   const setNextReflectionLoadFails = useDevStore((state) => state.setNextReflectionLoadFails);
-  const nextCrisisLinkFails = useDevStore((state) => state.nextCrisisLinkFails);
-  const setNextCrisisLinkFails = useDevStore((state) => state.setNextCrisisLinkFails);
   const nextPrayerMutationFails = useDevStore((state) => state.nextPrayerMutationFails);
   const setNextPrayerMutationFails = useDevStore((state) => state.setNextPrayerMutationFails);
   const nextNetworkFails = useDevStore((state) => state.nextNetworkFails);
@@ -368,9 +366,9 @@ function DevToolsContent() {
   // Read when the panel loads and after each of its buttons: no live subscription.
   const [analytics, setAnalytics] = useState<AnalyticsSummary>(() => getAnalyticsSummary());
   const [preparingNote, setPreparingNote] = useState<string | null>(null);
-  // The entries behind the paywall's "Limit + entry" and "Crisis entry" buttons.
+  // The entries behind the paywall's "Limit + entry" and "Heavy moment" buttons.
   const readyEntryId = targets.find((target) => target.label === "Ready")?.entryId ?? null;
-  const crisisEntryId = targets.find((target) => target.label === "Crisis")?.entryId ?? null;
+  const crisisEntryId = targets.find((target) => target.label === "Heavy")?.entryId ?? null;
 
   // Reloads when the mock plan changes too, so the "plan:" line and the selected plan button follow.
   useEffect(() => {
@@ -622,11 +620,6 @@ function DevToolsContent() {
           selected={nextReflectionLoadFails}
           onPress={() => setNextReflectionLoadFails(true)}
         />
-        <DevButton
-          label="Fail next crisis link (dev)"
-          selected={nextCrisisLinkFails}
-          onPress={() => setNextCrisisLinkFails(true)}
-        />
         {/* One flag for every mock write: a prayer change, a profile save, a data export and an account deletion. */}
         <DevButton
           label="Fail next save (dev)"
@@ -836,8 +829,8 @@ function DevToolsContent() {
               }}
             />
             <DevButton
-              label="Crisis entry"
-              accessibilityLabel="Open paywall for a crisis entry (dev)"
+              label="Heavy moment"
+              accessibilityLabel="Open paywall for a heavy moment (dev)"
               disabled={crisisEntryId === null}
               onPress={() => {
                 if (crisisEntryId) openPaywall({ source: "limit", entryId: crisisEntryId });

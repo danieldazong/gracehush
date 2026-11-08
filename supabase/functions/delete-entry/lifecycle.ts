@@ -20,7 +20,8 @@ export type EntryToDelete = {
   processing_status: string;
   audio_path: string | null;
   devotional_audio_path: string | null;
-  // The free tier counted this one: it is not a crisis entry and it holds a devotional (checkDevotionalLimit's own rule).
+  // The free tier counted this one: it is not a heavy moment (is_crisis) and it holds a devotional (checkDevotionalLimit's own
+  // rule). A heavy moment is never counted, so deleting one records nothing.
   counted: boolean;
 };
 

@@ -70,6 +70,8 @@ export interface Scripture {
 
 export interface Devotional {
   title: string;
+  // The first line on the Reflection screen (step 36), written from the entry. Null for a reflection made before it.
+  validation: string | null;
   script: string;
   closingPrayer: string | null;
   audioPath: string | null;

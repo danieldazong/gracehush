@@ -5,8 +5,8 @@
 // crisis screening answered as one word, with the stage that decided (step 21), and what the speech step and the free
 // tier's check did, as one word each with their numbers (step 22), and what billing did, as one word with its time and, for
 // RevenueCat's webhook, the event's type as one word (step 30), and what an export or an account deletion did, as one word with
-// counts (step 31), and what became of Sign in with Apple at a deletion, as one word (step 35). Never: a token or its claims, an
-// email, a
+// counts (step 31), what became of Sign in with Apple at a deletion, as one word (step 35), and how a reflection is written
+// from the entry, as a count and two words (step 36). Never: a token or its claims, an email, a
 // transcript, entry text, audio, model output, the script that was read aloud, scripture (not even which book or chapter),
 // the categories of concern the screening named, a phrase that matched, a link, a storage path, a key, the service
 // account's address, SQL, a provider's error message (those can quote what the user wrote), a webhook's body, a RevenueCat
@@ -93,6 +93,14 @@ export type AppleStatus =
   | `token:${string}`
   | `revoke:${string}`;
 
+// The closing prayer's voice (step 36): "i" is the person's own prayer, "we" one prayed with them (allowed only when they wrote
+// as "we"), "none" neither. null in the log: no reflection was saved.
+export type PrayerVoiceStatus = "i" | "we" | "none";
+
+// The validation line (step 36): "ok", the model's own line; "salvaged", the devotional's first sentence or no line took its
+// place after the retries. null: no reflection was saved.
+export type ValidationLineStatus = "ok" | "salvaged";
+
 export type LogLine = {
   requestId: string;
   status: number;
@@ -147,6 +155,11 @@ export type LogLine = {
   accountBytes: number | null;
   // Sign in with Apple at a deletion (step 35).
   accountApple: AppleStatus | null;
+  // A saved reflection (step 36): how many content stems of the entry the line, the devotional and the prayer share (a count,
+  // never a word), the prayer's voice, and whether the line is the model's own. null when no reflection was saved.
+  grounding: number | null;
+  prayerVoice: PrayerVoiceStatus | null;
+  validationLine: ValidationLineStatus | null;
 };
 
 // The first 8 hex characters of SHA-256(value): enough to follow one user through the logs, not to find them.
@@ -203,6 +216,9 @@ export function blankLogLine(fields: Pick<LogLine, "requestId" | "status"> & Par
     accountLeftOut: null,
     accountBytes: null,
     accountApple: null,
+    grounding: null,
+    prayerVoice: null,
+    validationLine: null,
     ...rest,
   };
 }

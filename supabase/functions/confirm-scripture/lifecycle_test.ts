@@ -27,6 +27,9 @@ const ready = (world: World, over: Record<string, unknown> = {}) =>
     client_entry_id: crypto.randomUUID(),
     input_type: "text",
     processing_status: "ready",
+    // A finished reflection: saveScripture never gives a passage to an entry that has none (a heavy moment saved before
+    // 2026-11-08).
+    devotional_script: "Words.",
     scripture_reference: "Psalm 23:1–3",
     scripture_text: null,
     scripture_verified: false,
@@ -67,12 +70,14 @@ Deno.test(
 );
 
 Deno.test(
-  "saveScripture touches only a finished entry that is not a crisis entry, and only the caller's",
+  "saveScripture touches only a finished entry that has its reflection, and only the caller's",
   withWorld(async (world, admin) => {
+    // A heavy moment saved before 2026-11-08: no reflection, so never given a passage.
     const crisis = ready(world, {
       is_crisis: true,
       scripture_reference: null,
       scripture_text: null,
+      devotional_script: null,
     });
     const unfinished = ready(world, { processing_status: "processing" });
     const theirs = ready(world, { user_id: "user_someone_else" });
@@ -81,6 +86,11 @@ Deno.test(
     }
     assert(world.entries.every((row) => row.scripture_text === null && row.scripture_verified === false));
     assertEquals(unscopedRequests(world, USER), []);
+    // A heavy moment since then (gen-v2.4) has its reflection, and its passage is saved like any other's.
+    const heavy = ready(world, { is_crisis: true });
+    const saved = await saveScripture(admin, USER, heavy.id, FIELDS);
+    assert(saved !== null);
+    assertEquals(saved.scripture_verified, FIELDS.scripture_verified);
   }),
 );
 

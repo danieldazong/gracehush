@@ -175,7 +175,7 @@ function makeNavigation() {
     },
     signedIn() {
       state.ready = true;
-      state.routeNames = ["MainTabs", "NewEntry", "Reflection", "NowPlaying", "CrisisResources", "Paywall"];
+      state.routeNames = ["MainTabs", "NewEntry", "Reflection", "NowPlaying", "Paywall"];
     },
     signedOut() {
       state.ready = true;
@@ -214,7 +214,7 @@ function affirmationsFor(entryId, headlines = {}) {
 
 function makeRepository(readPrefs) {
   const state = {
-    source: { entryId: "entry-1", isCrisis: false, affirmations: affirmationsFor("entry-1") },
+    source: { entryId: "entry-1", affirmations: affirmationsFor("entry-1") },
     // The Daily Affirmations switch: "prefs" reads it from the real prefs store as the real repository does (null until the
     // profile was read on the phone); true, false or null overrides it.
     enabled: "prefs",

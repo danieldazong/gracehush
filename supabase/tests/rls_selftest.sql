@@ -11,6 +11,10 @@
 -- reason in their name. Run the file again once the app has connected that day, and nothing is skipped. The test rows the file
 -- makes and deletes fire the broadcast triggers too: their messages go to self-test topics that no account can join, and the
 -- file deletes them at the end where the editor's role may (a hosted project keeps them until it drops the day's table).
+--
+-- 2026-11-08 (heavy moments, supabase/migrations/20261108120000_heavy_moments.sql): a crisis entry is a whole reflection since
+-- process-entry gen-v2.4, so checks 21, 22, 31, 44, 64 and 65 now prove that the database lets it be one, and check 67 that the
+-- server can save one whole and that the old rules are gone. Run it after that migration.
 
 drop table if exists pg_temp.rls_results;
 create temp table rls_results (position integer, check_name text, passed boolean);
@@ -212,7 +216,7 @@ declare
   streak constant text := $q$select public.reflection_streak_days('Pacific/Kiritimati')$q$;
   new_s constant text := $q$insert into public.users_profile (id) values ('selftest_s')$q$;
   entries_s constant text :=
-    'insert into public.journal_entries (user_id, input_type, processing_status, is_crisis, created_at) values ';
+    'insert into public.journal_entries (user_id, input_type, processing_status, is_crisis, devotional_script, created_at) values ';
   probe text;
   m1 text;
   m2 text;
@@ -335,12 +339,14 @@ begin
          values ('selftest_a', 'ca000000-0000-4000-8000-000000000001', 'text')
          on conflict (user_id, client_entry_id) do nothing$q$) = 'ok:0');
 
-  insert into rls_results values (21, 'an entry cannot become a crisis entry while it holds a devotional',
+  insert into rls_results values (21, 'a heavy moment holds a whole reflection: a devotional, a prayer, a passage and audio',
     pg_temp.try_as('service_role', no_claims,
-      $q$update public.journal_entries set devotional_script = 'a script'
+      $q$update public.journal_entries set devotional_title = 'a title', devotional_script = 'a script',
+         closing_prayer = 'a prayer', devotional_audio_path = 'selftest_a/devotionals/one.wav',
+         scripture_reference = 'Isaiah 41:10', scripture_text = 'Do not fear, for I am with you;', scripture_verified = true
          where id = 'a0000000-0000-4000-8000-000000000001'$q$,
       $q$update public.journal_entries set is_crisis = true
-         where id = 'a0000000-0000-4000-8000-000000000001'$q$) = '23514');
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$) = 'ok:1');
 
   all_ok := true;
   foreach stmt in array array[
@@ -349,14 +355,12 @@ begin
     $q$insert into public.journal_entries (user_id, input_type, prayer_category) values ('selftest_a', 'text', 'MONEY')$q$,
     $q$insert into public.journal_entries (user_id, input_type, prayer_summary)
        values ('selftest_a', 'text', repeat('x', 201))$q$,
-    $q$insert into public.journal_entries (user_id, input_type, devotional_duration_ms) values ('selftest_a', 'text', -1)$q$,
-    $q$insert into public.journal_entries (user_id, input_type, is_crisis, devotional_script)
-       values ('selftest_a', 'text', true, 'a script')$q$]
+    $q$insert into public.journal_entries (user_id, input_type, devotional_duration_ms) values ('selftest_a', 'text', -1)$q$]
   loop
     outcome := pg_temp.try_as('service_role', no_claims, null, stmt);
     all_ok := all_ok and outcome = '23514';
   end loop;
-  insert into rls_results values (22, 'a bad input type, status, category, summary, duration or crisis row is refused', all_ok);
+  insert into rls_results values (22, 'a bad input type, status, category, summary or duration is refused', all_ok);
 
   -- ===== daily_affirmations =====
   insert into rls_results values (23, 'a user sees only their own affirmations',
@@ -405,12 +409,12 @@ begin
       $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text)
          values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', 'night', 'h', 't')$q$) = '23514');
 
-  insert into rls_results values (31, 'a crisis entry never gets affirmations',
+  insert into rls_results values (31, 'a heavy moment gets its affirmations like any reflection',
     pg_temp.try_as('service_role', no_claims,
       $q$insert into public.journal_entries (id, user_id, input_type, is_crisis)
          values ('a0000000-0000-4000-8000-0000000000c1', 'selftest_a', 'text', true)$q$,
       $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text)
-         values ('selftest_a', 'a0000000-0000-4000-8000-0000000000c1', 'evening', 'h', 't')$q$) = '23514');
+         values ('selftest_a', 'a0000000-0000-4000-8000-0000000000c1', 'evening', 'h', 't')$q$) = 'ok:1');
 
   -- ===== deleting a profile =====
   begin
@@ -536,18 +540,22 @@ begin
       $q$update public.journal_entries set is_answered = true, answered_at = now(), answered_notes = repeat('x', 1000)
          where id = 'a0000000-0000-4000-8000-000000000001'$q$) = 'ok:1');
 
-  insert into rls_results values (44, 'a crisis entry is never a prayer',
-    pg_temp.try_as('service_role', no_claims, null,
-      $q$insert into public.journal_entries (user_id, input_type, is_crisis, is_active_prayer)
-         values ('selftest_a', 'text', true, true)$q$) = '23514'
-    and pg_temp.try_as('service_role', no_claims, null,
-      $q$insert into public.journal_entries (user_id, input_type, is_crisis, prayer_summary)
-         values ('selftest_a', 'text', true, 'a summary')$q$) = '23514'
-    and pg_temp.try_as('authenticated', claims_a,
-      $q$insert into public.journal_entries (id, user_id, input_type, is_crisis)
-         values ('a0000000-0000-4000-8000-0000000000c2', 'selftest_a', 'text', true)$q$,
+  -- Since 2026-11-08 a heavy moment is a reflection like any other: its person may mark it as a prayer request and mark it
+  -- answered (the server never makes one a prayer by itself), and the app still cannot say whether an entry is heavy (check 15).
+  insert into rls_results values (44, 'a heavy moment may become a prayer when its person marks it, and the app cannot mark an entry heavy',
+    pg_temp.try_as('authenticated', claims_a,
+      $q$insert into public.journal_entries (id, user_id, input_type, processing_status, is_crisis, devotional_script)
+         values ('a0000000-0000-4000-8000-0000000000c2', 'selftest_a', 'text', 'ready', true, 'a script')$q$,
       $q$update public.journal_entries set is_active_prayer = true
-         where id = 'a0000000-0000-4000-8000-0000000000c2'$q$) = '23514');
+         where id = 'a0000000-0000-4000-8000-0000000000c2'$q$) = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a,
+      $q$insert into public.journal_entries (id, user_id, input_type, processing_status, is_crisis, devotional_script)
+         values ('a0000000-0000-4000-8000-0000000000c2', 'selftest_a', 'text', 'ready', true, 'a script')$q$,
+      $q$update public.journal_entries set is_active_prayer = true, is_answered = true, answered_at = now(),
+         answered_notes = 'thank you' where id = 'a0000000-0000-4000-8000-0000000000c2'$q$) = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.journal_entries set is_crisis = true
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$) = '42501');
 
   insert into rls_results values (45, 'verified scripture needs its reference and its text',
     pg_temp.try_as('service_role', no_claims, null,
@@ -779,32 +787,33 @@ begin
   -- ===== the run of reflection days (step 33) =====
   -- A user of their own (selftest_s) with entries at noon on given days in a fixed zone, made as the table owner; then the
   -- function as that user. Kiritimati is UTC+14, so a count made in UTC would often land on another day.
-  insert into rls_results values (64, 'the run of reflection days counts the caller''s own finished, non-crisis days up to today or yesterday',
+  insert into rls_results values (64, 'the run of reflection days counts the caller''s own days with a finished reflection, a heavy moment''s included, up to today or yesterday',
     -- today, yesterday and three days ago: 2 (another user's entry two days ago changes nothing)
     pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
-      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 1)),
-         ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 3)), ('selftest_b', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      $q$('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 1)),
+         ('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 3)), ('selftest_b', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 2))$q$,
       streak_zone)], streak) = 'ok:2'
-    -- a day with only a crisis entry breaks the run; a crisis entry next to a reflection does not
+    -- a heavy moment with its reflection counts (yesterday); one saved before 2026-11-08, the words only, does not, and a day
+    -- with only that breaks the run (two days ago)
     and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
-      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'ready', true, pg_temp.noon(%1$L, 0)),
-         ('selftest_s', 'text', 'ready', true, pg_temp.noon(%1$L, 1)), ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
-      streak_zone)], streak) = 'ok:1'
+      $q$('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'ready', true, 'd', pg_temp.noon(%1$L, 1)),
+         ('selftest_s', 'text', 'ready', true, null, pg_temp.noon(%1$L, 2)), ('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 3))$q$,
+      streak_zone)], streak) = 'ok:2'
     -- a day with only a failed, or only a processing, entry breaks the run
     and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
-      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'failed', false, pg_temp.noon(%1$L, 1)),
-         ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      $q$('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'failed', false, null, pg_temp.noon(%1$L, 1)),
+         ('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 2))$q$,
       streak_zone)], streak) = 'ok:1'
     and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
-      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'processing', false, pg_temp.noon(%1$L, 1)),
-         ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      $q$('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 0)), ('selftest_s', 'text', 'processing', false, null, pg_temp.noon(%1$L, 1)),
+         ('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 2))$q$,
       streak_zone)], streak) = 'ok:1'
     -- the run may end yesterday; with nothing today or yesterday it is 0
     and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
-      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 1)), ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2))$q$,
+      $q$('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 1)), ('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 2))$q$,
       streak_zone)], streak) = 'ok:2'
     and pg_temp.value_as('authenticated', claims_s, array[new_s, entries_s || format(
-      $q$('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 2)), ('selftest_s', 'text', 'ready', false, pg_temp.noon(%1$L, 3))$q$,
+      $q$('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 2)), ('selftest_s', 'text', 'ready', false, 'd', pg_temp.noon(%1$L, 3))$q$,
       streak_zone)], streak) = 'ok:0'
     -- an unknown zone is refused (22023), also with no entries
     and pg_temp.value_as('authenticated', claims_s, array[new_s],
@@ -814,6 +823,60 @@ begin
     and not has_function_privilege('anon', 'public.reflection_streak_days(text)', 'execute')
     and not has_function_privilege('public', 'public.reflection_streak_days(text)', 'execute')
     and pg_temp.value_as('anon', no_claims, null, $q$select public.reflection_streak_days('UTC')$q$) = '42501');
+
+  -- ===== the validation line (step 36) =====
+  insert into rls_results values (65, 'the validation line is optional text of at most 240 characters, a heavy moment''s included',
+    exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'journal_entries' and column_name = 'validation_line'
+               and data_type = 'text' and is_nullable = 'YES')
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.journal_entries set validation_line = repeat('x', 240)
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.journal_entries set validation_line = repeat('x', 241)
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.journal_entries (user_id, input_type, is_crisis, validation_line)
+         values ('selftest_a', 'text', true, 'What you are carrying right now is real, and you matter to God.')$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.journal_entries (user_id, input_type, is_crisis, validation_line)
+         values ('selftest_a', 'text', true, repeat('x', 241))$q$) = '23514');
+
+  -- The app reads every column of its own entries (a table-wide select), and writes only the five prayer columns it is granted.
+  insert into rls_results values (66, 'the app reads the validation line on its own entry and can never write it',
+    pg_temp.try_as('authenticated', claims_a,
+      $q$update public.journal_entries set validation_line = 'Your week asked a lot of you, and you kept going.'
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$,
+      $q$select validation_line from public.journal_entries where validation_line is not null$q$) = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.journal_entries set validation_line = 'a line of my own'
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$) = '42501'
+    and not exists (select 1 from information_schema.column_privileges
+                     where table_schema = 'public' and table_name = 'journal_entries' and column_name = 'validation_line'
+                       and grantee in ('authenticated', 'anon') and privilege_type in ('INSERT', 'UPDATE')));
+
+  -- ===== heavy moments (2026-11-08) =====
+  -- The server saves a heavy moment as it saves any reflection (process-entry gen-v2.4): the entry with its whole reflection, then
+  -- its three affirmations. The entry is made as the table owner, which the table's rules refuse as they would the server (the
+  -- server's grants are check 34's); the affirmations are made as the server.
+  insert into rls_results values (67, 'the server saves a heavy moment whole, and the rules that kept a crisis entry empty are gone',
+    pg_temp.try_as('service_role', no_claims,
+      $q$insert into public.journal_entries (id, user_id, client_entry_id, input_type, processing_status, is_crisis, transcript,
+           dominant_emotion, devotional_title, devotional_script, closing_prayer, validation_line, scripture_reference,
+           scripture_text, scripture_verified, devotional_audio_path, devotional_duration_ms)
+         values ('a0000000-0000-4000-8000-0000000000c3', 'selftest_a', 'ca000000-0000-4000-8000-0000000000c3', 'text', 'ready',
+           true, 'words', 'weary', 'You Are Not Alone', 'a script', 'a prayer', 'What you are carrying is real.',
+           'Isaiah 41:10', 'Do not fear, for I am with you;', true, 'selftest_a/devotionals/c3.wav', 90000)$q$,
+      $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text) values
+           ('selftest_a', 'a0000000-0000-4000-8000-0000000000c3', 'morning', 'h', 't'),
+           ('selftest_a', 'a0000000-0000-4000-8000-0000000000c3', 'afternoon', 'h', 't'),
+           ('selftest_a', 'a0000000-0000-4000-8000-0000000000c3', 'evening', 'h', 't')$q$) = 'ok:3'
+    and not exists (select 1 from pg_constraint
+                     where conrelid = 'public.journal_entries'::regclass
+                       and conname in ('journal_entries_crisis_check', 'crisis_not_prayer', 'validation_line_crisis'))
+    and not exists (select 1 from pg_trigger
+                     where tgrelid = 'public.daily_affirmations'::regclass and tgname = 'daily_affirmations_no_crisis')
+    and to_regprocedure('public.reject_affirmation_for_crisis_entry()') is null);
 
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
   delete from public.users_profile where id like 'selftest\_%';

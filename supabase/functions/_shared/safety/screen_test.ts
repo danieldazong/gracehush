@@ -21,8 +21,47 @@ import {
   type ScreenInput,
   screenTiming,
 } from "./screen.ts";
+import { SCREEN_AUDIO_TURN, SCREEN_PROMPT_VERSION, SCREEN_SYSTEM_INSTRUCTION } from "./screenPrompt.ts";
+import { SCREEN_AUDIO_TURN_V1, SCREEN_SYSTEM_INSTRUCTION_V1 } from "./eval/screen_prompt_v1.ts";
 
 const WRITTEN = "I have been so tired this week and I do not know how to rest.";
+
+// ---- screen-v2 (step 36): the transcription rule is stronger, and nothing else changed --------------------------------
+
+const TRANSCRIPTION_V2 =
+  `For audio, first transcribe exactly what was said, word for word, into transcript: in the language and dialect spoken, keeping non-English words, repetitions, false starts and filler words as they were said. Never translate, summarize, tidy the grammar or guess a word: write [unclear] for a word you cannot make out. If there is no intelligible speech, set no_speech to true, transcript to "", risk to "none" and categories to an empty list. For a written entry set no_speech to false and transcript to "".`;
+
+Deno.test("screen-v2: the transcription rule is the new one, word for word", () => {
+  assertEquals(SCREEN_PROMPT_VERSION, "screen-v2");
+  const paragraphs = SCREEN_SYSTEM_INSTRUCTION.split("\n\n");
+  assertEquals(paragraphs.filter((paragraph) => paragraph.startsWith("For audio,")), [TRANSCRIPTION_V2]);
+  assertEquals(
+    SCREEN_AUDIO_TURN,
+    "Transcribe the attached spoken journal entry exactly as it was said, word for word, then classify it.",
+  );
+  assert(String(SCREEN_AUDIO_TURN) !== String(SCREEN_AUDIO_TURN_V1));
+});
+
+Deno.test("screen-v2: every other paragraph is screen-v1's, word for word, in the same place", () => {
+  const now = SCREEN_SYSTEM_INSTRUCTION.split("\n\n");
+  const before = SCREEN_SYSTEM_INSTRUCTION_V1.split("\n\n");
+  assertEquals(now.length, before.length);
+  let changed = 0;
+  for (let index = 0; index < now.length; index += 1) {
+    if (now[index] === before[index]) continue;
+    changed += 1;
+    // Only the transcription paragraph may differ, and it stays where it was.
+    assert(before[index].startsWith("For audio,") && now[index].startsWith("For audio,"), now[index]);
+  }
+  assertEquals(changed, 1);
+  // The classification rules themselves, named one by one.
+  for (
+    const start of ['Set risk to "crisis"', 'Set risk to "uncertain"', 'Set risk to "none"', "When you are unsure"]
+  ) {
+    const rule = now.find((paragraph) => paragraph.startsWith(start));
+    assert(rule !== undefined && before.includes(rule), start);
+  }
+});
 const text: ScreenInput = { kind: "text", text: WRITTEN };
 const audio: ScreenInput = { kind: "audio", bytes: new Uint8Array([1, 2, 3, 4]) };
 

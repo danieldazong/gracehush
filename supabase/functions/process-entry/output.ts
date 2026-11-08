@@ -4,23 +4,35 @@ import { EMOTIONS, LIMITS, PRAYER_CATEGORIES, SCRIPTURE_NUMBER_LIMITS, TIME_SLOT
 import type { EmotionKey, PrayerCategory, TimeSlot } from "./contracts.ts";
 import {
   correctionNote,
+  echoProblem,
+  firstHeavyNeverSay,
   firstNeverSay,
+  groundingProblem,
+  hasQuotation,
   hasVerseReference,
   hookProblem,
   leakedWords,
+  prayerVoiceProblem,
   privateWords,
+  salvageLine,
   type SalvageReason,
   salvageReflection,
+  type SoftProblem,
+  validationProblem,
 } from "./tone.ts";
 
 // The schema guarantees the shape, not the meaning. This checks the model's JSON again, cleans the text the person will
 // read and hear, and returns a typed value. Anything out of range is invalid (nothing is truncated): the caller makes
 // one more attempt and then answers AI_UNAVAILABLE.
 //
-// After the shape, the tone checks of step 32 (tone.ts), in this order: a verse reference in the devotional or the prayer,
-// a never-say phrase anywhere the person reads or hears, and last a word the person wrote in the title or a headline (both
-// reach a lock screen). A tone failure carries a note for the retry (gemini.ts sends it), and a reply whose only fault is a
-// private word also carries itself with safe texts in the leaking fields, which is kept in case no clean reply comes.
+// After the shape, the tone checks (tone.ts). HARD first, with no salvage: a verse reference in the devotional, the prayer or
+// the validation line, then a never-say phrase anywhere the person reads or hears, and for a heavy moment (gen-v2.4, heavy.ts)
+// a quotation in the devotional or the prayer and a phrase a heavy moment never says. Then the SOFT checks, all of them, in this
+// order: a word the person wrote in the title or a headline (both reach a lock screen), and since gen-v2.3 (step 36) the
+// prayer's voice, grounding, the validation line, the echo, and last the hook guard. A reply with soft faults fails with every
+// note joined into one (the retry fixes them together, gemini.ts sends it) and carries itself as a salvage: safe texts in the
+// leaking fields and the devotional's first sentence for a line that failed, kept in case no clean reply comes. The first fault
+// names the reason and the salvage.
 
 export class OutputInvalid extends Error {
   // A short category for the log. Never the model's words.
@@ -45,26 +57,35 @@ function fail(reason: string): never {
 
 export type ReadyReflection = {
   kind: "ready";
+  // gen-v2.4: a heavy moment, from the model's own is_crisis flag or the app's check (ParseContext.heavy). Its reflection is
+  // written in full, by the instruction's "A heavy moment", and checked by the heavy rules below.
+  heavy: boolean;
   emotion: EmotionKey;
   title: string;
+  // gen-v2.3 (step 36): the first line on the person's screen, written from the entry. "model" when it is the model's own
+  // and passed every check; "salvage" when the devotional's first sentence stands in, or nothing (null) does.
+  validationLine: string | null;
+  validationSource: "model" | "salvage";
   // Where the passage is. Whether it exists in the Berean Standard Bible is decided afterwards (scripture.ts), not here.
   scripture: ScriptureRef;
   devotional: string;
   closingPrayer: string;
   prayer: { title: string; summary: string; category: PrayerCategory } | null;
   affirmations: { slot: TimeSlot; headline: string; text: string }[];
-  // Null for every clean reply. Set when this is a reply kept after a word from the entry stayed in its title or a headline,
-  // with the safe text in its place (decision 17 of step 32): the log line says so.
+  // Null for every clean reply. Set when this is a reply kept after a soft check still failed on the last try (a word from the
+  // entry in its title or a headline, with the safe text in its place; the prayer's voice; grounding; the line; the echo; the
+  // hook): the log line says which.
   salvaged: SalvageReason | null;
 };
 
 // What the checks need besides the reply: the words the reflection was written from (the screened text).
 // `recentFirstWords`: the first word of each recent devotional of the person's (tone.ts firstWord), for the hook guard.
-export type ParseContext = { entry: string; recentFirstWords?: readonly string[] };
+// `heavy`: the app's check (the crisis screening) found a heavy moment, so the heavy rules apply whatever the reply says.
+export type ParseContext = { entry: string; recentFirstWords?: readonly string[]; heavy?: boolean };
 
-// The model's own is_crisis flag is the last of the three layers (the crisis screening is the first two). The words of a
-// crisis entry are the screening's, so the flag carries nothing else.
-export type Reflection = { kind: "crisis" } | ReadyReflection;
+// Since gen-v2.4 every reply is a whole reflection. The model's own is_crisis flag (the last of the three layers: the crisis
+// screening is the first two) no longer stands in for one: it makes the reflection a heavy moment (ReadyReflection.heavy).
+export type Reflection = ReadyReflection;
 
 export function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -186,37 +207,119 @@ function readAffirmations(value: unknown): ReadyReflection["affirmations"] {
   return TIME_SLOTS.map((slot) => bySlot.get(slot)!);
 }
 
-// The tone checks on a reflection that has the right shape, in their order, or null when it passes them all. The tone
-// evaluation calls this too, to measure replies the instruction's older version wrote.
-export function checkTone(reflection: ReadyReflection, entry: string): OutputInvalid | null {
+// The hard checks: a reply that fails one is never kept. Shared with the evaluation, which measures older versions with them.
+export function hardProblem(reflection: ReadyReflection, entry: string): OutputInvalid | null {
   const words = privateWords(entry);
-  const toneFailure = (reason: string, leaked: string[] = [], salvage?: unknown) =>
-    new OutputInvalid(reason, { note: correctionNote(reason, words, leaked), salvage });
-
-  if (hasVerseReference(reflection.devotional) || hasVerseReference(reflection.closingPrayer)) {
-    return toneFailure("verse_reference");
-  }
+  const failure = (reason: string) => new OutputInvalid(reason, { note: correctionNote(reason, words) });
+  const spoken = [reflection.devotional, reflection.closingPrayer, reflection.validationLine ?? ""];
+  if (spoken.some(hasVerseReference)) return failure("verse_reference");
   const read = [
     reflection.devotional,
     reflection.closingPrayer,
+    reflection.validationLine ?? "",
     reflection.title,
     ...reflection.affirmations.flatMap((item) => [item.headline, item.text]),
   ];
   for (const part of read) {
     const id = firstNeverSay(part);
-    if (id) return toneFailure(`never_say:${id}`);
+    if (id) return failure(`never_say:${id}`);
   }
+  if (reflection.heavy) {
+    if ([reflection.devotional, reflection.closingPrayer].some(hasQuotation)) return failure("heavy_quote");
+    for (const part of read) {
+      const id = firstHeavyNeverSay(part);
+      if (id) return failure(`heavy_never_say:${id}`);
+    }
+  }
+  return null;
+}
 
-  // Last and together: only a reply that passed everything else gets here, so its salvage is safe to keep.
+// A word from the entry in the title or a headline (step 32), as a soft problem: the note names the words to avoid.
+export function privacyProblem(reflection: ReadyReflection, entry: string): SoftProblem | null {
+  const words = privateWords(entry);
   const titleLeaks = leakedWords(reflection.title, words);
   const headlineLeaks = leakedWords(reflection.affirmations.map((item) => item.headline).join("\n"), words);
   if (titleLeaks.length === 0 && headlineLeaks.length === 0) return null;
   const reason = titleLeaks.length > 0 ? "title_private" : "headline_private";
-  return toneFailure(reason, [...titleLeaks, ...headlineLeaks], salvageReflection(reflection, words));
+  return { reason, salvaged: reason, note: correctionNote(reason, words, [...titleLeaks, ...headlineLeaks]) ?? "" };
 }
 
-// `text` is the model's reply; `context.entry` the words it was written from.
+// The soft checks of gen-v2.3 (step 36), in their order: the prayer's voice, grounding, the line, the echo. The evaluation
+// measures each one on its own. A heavy moment has neither grounding nor an echo (gen-v2.4): grounding would push the reply to
+// reuse the entry's own words, which there can be about dying or harm, and it quotes nothing at all (a hard check instead).
+export function personalProblems(reflection: ReadyReflection, entry: string): SoftProblem[] {
+  const problems = [
+    prayerVoiceProblem(reflection.closingPrayer, entry),
+    reflection.heavy
+      ? null
+      : groundingProblem(entry, [reflection.validationLine ?? "", reflection.devotional, reflection.closingPrayer]),
+    reflection.validationSource === "model" ? validationProblem(reflection.validationLine, privateWords(entry)) : null,
+    reflection.heavy ? null : echoProblem([reflection.devotional, reflection.closingPrayer], entry),
+  ];
+  return problems.filter((problem): problem is SoftProblem => problem !== null);
+}
+
+// The reply as it is kept when no clean one comes: safe texts in the title and the headlines that leak, the devotional's first
+// sentence (or no line) for a line that failed, and the first fault's name. Everything else exactly as the model wrote it.
+function salvageOf(reflection: ReadyReflection, entry: string, problems: readonly SoftProblem[]): ReadyReflection {
+  const words = privateWords(entry);
+  const kept = salvageReflection(reflection, words);
+  const lineFailed = problems.some((problem) => problem.reason.startsWith("validation_"));
+  return {
+    ...kept,
+    validationLine: lineFailed ? salvageLine(reflection.devotional, words) : reflection.validationLine,
+    validationSource: lineFailed ? "salvage" : reflection.validationSource,
+    salvaged: problems[0].salvaged,
+  };
+}
+
+// The tone checks on a reflection that has the right shape, in their order, or null when it passes them all.
+// `recentFirstWords`: the first word of each of the person's recent devotionals, for the hook guard.
+export function checkTone(
+  reflection: ReadyReflection,
+  entry: string,
+  recentFirstWords: readonly string[] = [],
+): OutputInvalid | null {
+  const hard = hardProblem(reflection, entry);
+  if (hard) return hard;
+  const hook = hookProblem(reflection.devotional, recentFirstWords);
+  const problems = [
+    privacyProblem(reflection, entry),
+    ...personalProblems(reflection, entry),
+    hook ? { reason: hook.reason, salvaged: hook.reason, note: hook.note } : null,
+  ].filter((problem): problem is SoftProblem => problem !== null);
+  if (problems.length === 0) return null;
+  // Only a reply that passed every hard check gets here, so its salvage is safe to keep.
+  return new OutputInvalid(problems[0].reason, {
+    note: problems.map((problem) => problem.note).join("\n\n"),
+    salvage: salvageOf(reflection, entry, problems),
+  });
+}
+
+// The line as the model wrote it, cleaned like the title. Anything but a string is no line: validationProblem names it.
+function readValidationLine(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const line = singleLine(clean(value));
+  return line === "" ? null : line;
+}
+
+// The tone of a reply that has the right shape (readReflection), with the context's heavy moment added to the reply's own.
+// Throws the first problem (OutputInvalid), or returns the reflection as it is kept.
+export function checkReflection(read: ReadyReflection, context: ParseContext): ReadyReflection {
+  const reflection = context.heavy === true && !read.heavy ? { ...read, heavy: true } : read;
+  const problem = checkTone(reflection, context.entry, context.recentFirstWords ?? []);
+  if (problem) throw problem;
+  return reflection;
+}
+
+// `text` is the model's reply; `context.entry` the words it was written from. The shape and the cleaning, then the tone.
 export function parseReflection(text: string, context: ParseContext): Reflection {
+  return checkReflection(readReflection(text), context);
+}
+
+// The shape and the cleaning alone, with no tone check. The evaluation reads an older version's replies with it and checks
+// them with that version's own rules (eval/run_tone_eval.ts).
+export function readReflection(text: string): Reflection {
   let data: unknown;
   try {
     data = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -226,9 +329,7 @@ export function parseReflection(text: string, context: ParseContext): Reflection
   if (!isRecord(data)) fail("shape");
   if (typeof data.is_crisis !== "boolean") fail("is_crisis");
 
-  // Crisis wins over everything else the model said.
-  if (data.is_crisis) return { kind: "crisis" };
-
+  // gen-v2.4: a heavy moment is still a whole reflection, read like any other.
   const emotion = (EMOTIONS as readonly string[]).find((item) => item === data.dominant_emotion) as
     | EmotionKey
     | undefined;
@@ -256,8 +357,11 @@ export function parseReflection(text: string, context: ParseContext): Reflection
 
   const reflection: ReadyReflection = {
     kind: "ready",
+    heavy: data.is_crisis,
     emotion,
     title,
+    validationLine: readValidationLine(data.validation_line),
+    validationSource: "model",
     scripture,
     devotional,
     closingPrayer,
@@ -265,12 +369,5 @@ export function parseReflection(text: string, context: ParseContext): Reflection
     affirmations: readAffirmations(data.affirmations),
     salvaged: null,
   };
-  const problem = checkTone(reflection, context.entry);
-  if (problem) throw problem;
-  // The hook guard (gen-v2.2), last: only a reply that passed every hard check gets here, so it is safe to keep as it is.
-  const hook = hookProblem(reflection.devotional, context.recentFirstWords ?? []);
-  if (hook) {
-    throw new OutputInvalid(hook.reason, { note: hook.note, salvage: { ...reflection, salvaged: hook.reason } });
-  }
   return reflection;
 }

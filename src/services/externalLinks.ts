@@ -5,8 +5,8 @@ import { MANAGE_SUBSCRIPTION_URL, SUPPORT_EMAIL } from "@/constants/app";
 
 export type LinkResult = { ok: true } | { ok: false };
 
-// Same pattern as crisisLinks.ts: a result, never a throw, and nothing logged but one development warning. No
-// Linking.canOpenURL: without declared query schemes it answers false for links that would open.
+// A result, never a throw, and nothing logged but one development warning. No Linking.canOpenURL: without declared query
+// schemes it answers false for links that would open.
 async function openUrl(url: string): Promise<LinkResult> {
   try {
     await Linking.openURL(url);
@@ -43,6 +43,12 @@ export async function openLegalPage(url: string): Promise<LinkResult> {
 export function openExportDownload(url: string): Promise<LinkResult> {
   if (!url.startsWith("https://")) return Promise.resolve({ ok: false });
   return openUrl(url);
+}
+
+// A call to a number: the help line under a heavy moment's devotional (components/HelpLine.tsx). The phone app asks before it
+// dials. A tablet or a phone with no phone app answers { ok: false }, and the line says to dial the number by hand.
+export function openPhoneCall(number: string): Promise<LinkResult> {
+  return openUrl(`tel:${number}`);
 }
 
 // No device details, no user id and no body: the person writes what they want to say.

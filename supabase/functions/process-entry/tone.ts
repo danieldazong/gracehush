@@ -1,12 +1,15 @@
 import { BSB_BOOKS } from "../_shared/bible/books.ts";
+import { LIMITS } from "./constants.ts";
 import type { TimeSlot } from "./contracts.ts";
 
 // The pastoral tone's rules that code can check (step 32). Pure: no network, no clock, nothing logged.
 //
-// Two kinds. HARD checks (output.ts) make a reply unusable, because each one guards a person or the scripture: a phrase from
-// the never-say list, a devotional or prayer that points to a Bible passage (the app shows and reads the passage on its own),
-// and a name the person wrote in a title or a headline (both reach a lock screen). STYLE measures (styleMeasures) never cost
-// a reply: the tone evaluation counts them, and the instruction's wording is what fixes them.
+// Three kinds. HARD checks (output.ts) make a reply unusable, because each one guards a person or the scripture: a phrase from
+// the never-say list, and a devotional, prayer or validation line that points to a Bible passage (the app shows and reads the
+// passage on its own). SOFT checks cost at most a retry, never a reflection: a name the person wrote in a title or a headline
+// (both reach a lock screen, so a safe text takes its place), and since gen-v2.3 (step 36) a prayer that is not in the person's
+// own voice, a reply that uses nothing they told, a validation line that is missing, a template or private, a quotation that is
+// not their words, and the hook guard. STYLE measures (styleMeasures) never cost anything: the tone evaluation counts them.
 
 // ---- Never say ---------------------------------------------------------------------------------------------------------
 
@@ -72,15 +75,127 @@ function clauseBefore(text: string, index: number): string {
   return before.slice(start + 1);
 }
 
-// The id of the first never-say phrase in the text (in the order of the list), or null.
-export function firstNeverSay(text: string): string | null {
-  for (const item of NEVER_SAY) {
+// The id of the first phrase of `list` in the text (in the order of the list), or null.
+function firstPhrase(list: readonly NeverSay[], text: string): string | null {
+  for (const item of list) {
     for (const match of text.matchAll(item.pattern)) {
       if (item.negatable && NEGATION.test(clauseBefore(text, match.index ?? 0))) continue;
       return item.id;
     }
   }
   return null;
+}
+
+// The id of the first never-say phrase in the text (in the order of the list), or null.
+export function firstNeverSay(text: string): string | null {
+  return firstPhrase(NEVER_SAY, text);
+}
+
+// ---- A heavy moment (gen-v2.4, heavy.ts) -------------------------------------------------------------------------------
+
+// What a reflection for a heavy moment never says, on top of NEVER_SAY: death as a way home, as rest or as a release, and a
+// call to submit to, forgive, obey or stay with someone who does harm. Precise phrases again, never single words, so a
+// devotional that says "you are held" or "rest in his care" passes. A hard check: a reply that says one is asked for again,
+// and a second one is replaced by the written fallback (handler.ts), never kept.
+export const HEAVY_NEVER_SAY: readonly NeverSay[] = [
+  {
+    id: "home",
+    label: "God is calling you home",
+    pattern:
+      /\b(?:call(?:s|ing|ed)?|bring(?:s|ing)?|tak(?:e|es|ing)|welcom(?:e|es|ing))\s+you\s+home\b|\b(?:go(?:es|ing)?|went|gone)\s+home\s+to\s+(?:god|jesus|the\s+lord|heaven|be\s+with)\b/gi,
+    negatable: false,
+  },
+  {
+    id: "heaven_waiting",
+    label: "heaven is waiting for you",
+    pattern: /\bheaven\s+(?:is|will\s+be)\s+waiting\b|\bwaiting\s+for\s+you\s+in\s+heaven\b/gi,
+    negatable: false,
+  },
+  {
+    id: "at_last",
+    label: "rest or peace at last",
+    pattern: /\b(?:rest|peace)\s+at\s+last\b|\bfinally\s+(?:be\s+)?(?:at\s+)?(?:rest|peace|free)\b/gi,
+    negatable: true,
+  },
+  {
+    id: "release",
+    label: "a release or an escape from this life",
+    pattern:
+      /\b(?:escape|release|relief)\s+from\s+(?:this\s+)?(?:life|world)\b|\bno\s+longer\s+(?:be\s+)?(?:here|in\s+this\s+world|alive)\b/gi,
+    negatable: false,
+  },
+  {
+    // A person, never a pronoun: God's pronouns are lowercase ("submit to him" can be about God).
+    id: "submit",
+    label: "submit to the person who hurts you",
+    pattern:
+      /\b(?:submit(?:ting)?|be\s+submissive)\s+to\s+your\s+(?:husband|wife|partner|spouse|boyfriend|girlfriend|father|mother|parents?|abuser)\b/gi,
+    negatable: true,
+  },
+  {
+    // "You need to forgive yourself" is left alone; "you don't have to forgive them yet" is a denial and passes.
+    id: "must_forgive",
+    label: "you must forgive, obey or stay",
+    pattern:
+      /\b(?:must|have\s+to|has\s+to|need\s+to|needs\s+to|should|ought\s+to)\s+(?:forgive(?!\s+yourself)|obey|submit|(?:stay\s+with|go\s+back\s+to|return\s+to)\s+(?:him|her|them))\b/gi,
+    negatable: true,
+  },
+  // The four below (2026-11-08, found by the live check: a quiet heavy moment's first line said "never wake up", and its devotional
+  // that "wanting it all to stop makes human sense"). A heavy reflection speaks of the pain and of God, never of dying, harm, a
+  // method or the wish itself, in the person's words or in softer ones, and not even to deny it. None of them is negatable.
+  {
+    id: "dying",
+    label: "dying or death",
+    pattern: /\b(?:die|dies|died|dying|death|deaths|dead|kill\w*|suicid\w*)\b/gi,
+    negatable: false,
+  },
+  {
+    id: "self_harm",
+    label: "harming yourself",
+    pattern:
+      /\b(?:hurt(?:ing)?|harm(?:ing)?|cut(?:ting)?)\s+(?:yourself|myself|themselves|himself|herself)\b|\bself-?harm\w*\b/gi,
+    negatable: false,
+  },
+  {
+    id: "wish",
+    label: "wanting it all to stop, never waking up or disappearing",
+    pattern: new RegExp(
+      [
+        String
+          .raw`\b(?:want|wants|wanted|wanting|wish|wishes|wished|wishing|longing)\s+(?:for\s+)?(?:it\s+all|everything|things|it|life|living)\s+to\s+(?:stop|end|be\s+over)\b`,
+        String.raw`\b(?:never|not)\s+(?:wake|waking|woke)(?:\s+up)?\b`,
+        String.raw`\bsleep\s+forever\b`,
+        // Sleep as a longing, a relief or the only thing left, in one sentence: an entry's euphemism for dying (the live check's
+        // quiet heavy moment answered "Sleep feels like the only thing calling to you"). Sleep alone, as rest tonight, is left alone.
+        String
+          .raw`\b(?:sleep|sleeping|asleep)\b[^.?!]{0,60}\b(?:relief|escape|forever|only|calling|calls|long|longing|wants?|wish(?:es)?|end|peace)\b`,
+        String
+          .raw`\b(?:relief|escape|only|calling|longing|wants?|wanting|wish(?:es|ing)?)\b[^.?!]{0,60}\b(?:sleep|sleeping|asleep)\b`,
+        String.raw`\bonly\s+(?:relief|escape|way\s+out)\b`,
+        String.raw`\b(?:disappear|vanish)(?:ing)?\s+(?:forever|for\s+good|completely)\b`,
+        String.raw`\byou\s+(?:could|would|want\s+to|wanted\s+to|wish\s+you\s+could)\s+(?:disappear|vanish)\b`,
+      ].join("|"),
+      "gi",
+    ),
+    negatable: false,
+  },
+  {
+    id: "method",
+    label: "a method or a means",
+    pattern: /\b(?:pills?|overdos\w*|guns?|knife|knives|rope|noose|razors?|blades?)\b/gi,
+    negatable: false,
+  },
+];
+
+// The id of the first phrase a heavy moment never says, or null.
+export function firstHeavyNeverSay(text: string): string | null {
+  return firstPhrase(HEAVY_NEVER_SAY, text);
+}
+
+// A double quotation mark, straight or curly. In a heavy moment the devotional and the prayer quote nothing (no echo), so
+// nothing the person wrote about dying or harm can come back to them in their own words.
+export function hasQuotation(text: string): boolean {
+  return /["“”]/.test(text);
 }
 
 // ---- Verse references --------------------------------------------------------------------------------------------------
@@ -209,15 +324,16 @@ export function leaksPrivate(text: string, words: readonly string[]): boolean {
 
 export type ToneReflection = {
   title: string;
+  // The first line on the person's screen (gen-v2.3). Optional, so that a reflection of an older version can be measured.
+  validationLine?: string | null;
   devotional: string;
   closingPrayer: string;
   affirmations: { slot: TimeSlot; headline: string; text: string }[];
 };
 
-// The instruction's tone example (prompt.ts quotes it). The evaluation flags a reflection that copies one of its sentences.
-// gen-v2.1: the strong example is in the narrated voice (short lines that build, sure of God) and no longer opens with "It
-// sounds like", which the model had copied into 20 of 24 openings. gen-v2.2: it opens with a hook built from its entry
-// (working late all week, which the instruction names), not with a general truth.
+// The tone example gen-v2.2 put in its instruction. gen-v2.3 (step 36, decision 6) took it out: one example in every prompt is
+// a template the model copies. It stays here for the evaluation, which flags a reflection that copies one of its sentences
+// (gen-v2.2's saved replies and the frozen copy in eval/prompt_v2_2.ts still quote it).
 export const TONE_EXAMPLE = {
   weak: ["Don't worry!", "God has a plan and everything will work out.", "Just trust him."],
   strong: [
@@ -312,6 +428,11 @@ export type StyleMeasures = {
   titleEndPunctuation: boolean;
   headlinesOutOfRange: number; // a headline that is not 2 to 8 words, or is over 50 characters
   textsOutOfRange: number; // an affirmation text that is not 12 to 30 words
+  // gen-v2.3 (step 36). The content stems the entry shares with the line, the devotional and the prayer (0 with no entry);
+  // the prayer's voice; and the validation line's words (0 when there is none).
+  grounding: number;
+  prayerVoice: PrayerVoice;
+  validationWords: number;
 };
 
 const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
@@ -320,7 +441,9 @@ const count = (text: string, pattern: RegExp) => (text.match(pattern) ?? []).len
 const between = (value: number, min: number, max: number) => value >= min && value <= max;
 const comparable = (text: string) => text.toLowerCase().replace(/’/g, "'").replace(/\s+/g, " ");
 
-export function styleMeasures(reflection: ToneReflection): StyleMeasures {
+// `entry`: the words the reflection was written from, for the grounding count and the prayer's voice (optional, so a
+// reflection can be measured on its own).
+export function styleMeasures(reflection: ToneReflection, entry = ""): StyleMeasures {
   const spoken = `${reflection.devotional}\n\n${reflection.closingPrayer}`;
   const texts = reflection.affirmations.map((item) => item.text).join("\n");
   const everything = comparable(`${spoken}\n${texts}`);
@@ -358,6 +481,11 @@ export function styleMeasures(reflection: ToneReflection): StyleMeasures {
       reflection.affirmations.filter((item) => !between(countWords(item.headline), 2, 8) || item.headline.length > 50)
         .length,
     textsOutOfRange: reflection.affirmations.filter((item) => !between(countWords(item.text), 12, 30)).length,
+    grounding: entry.trim() === ""
+      ? 0
+      : groundingCount(entry, [reflection.validationLine ?? "", reflection.devotional, reflection.closingPrayer]),
+    prayerVoice: prayerVoice(reflection.closingPrayer, entry),
+    validationWords: countWords(reflection.validationLine ?? ""),
   };
 }
 
@@ -389,6 +517,14 @@ export function correctionNote(
     const item = NEVER_SAY.find((candidate) => `never_say:${candidate.id}` === reason);
     if (!item) return null;
     return `Your last reply said “${item.label}” or something that means the same. Write the whole reply again without it.`;
+  }
+  if (reason.startsWith("heavy_never_say:")) {
+    const item = HEAVY_NEVER_SAY.find((candidate) => `heavy_never_say:${candidate.id}` === reason);
+    if (!item) return null;
+    return `This is a heavy moment, and your last reply said “${item.label}” or something that means the same, which must never be said to them. Write the whole reply again without it, by "A heavy moment".`;
+  }
+  if (reason === "heavy_quote") {
+    return `This is a heavy moment, and your last reply quoted words in the devotional or the closing prayer. Write the whole reply again with no quotation marks at all in either, and never repeat what they wrote about dying or harm, by "A heavy moment".`;
   }
   if (reason === "title_private" || reason === "headline_private") {
     const listed = [...new Set([...leaked, ...words])].slice(0, MAX_NOTE_WORDS);
@@ -444,6 +580,243 @@ export function hookProblem(devotional: string, recentFirstWords: readonly strin
   return null;
 }
 
+// ---- gen-v2.3 (step 36): the person's own words, in the prayer, the devotional and the first line -------------------------
+//
+// Three customers reported on 2026-11-07 that reflections did not answer what they said. These checks make "written from this
+// entry" something code can see. Each costs at most a retry with a note, and never a reflection: when no clean reply comes,
+// output.ts keeps the reply as its salvage and the log line says which check it was. Every note names the rule; none holds a
+// word of the person's except the private-word note, which lists the words to avoid (as the title and headline notes do).
+
+// A soft check's result: the reason the log names, the salvage it sets, and the note the retry carries.
+export type SoftProblem = { reason: string; salvaged: SalvageReason; note: string };
+
+// -- The prayer's voice --
+
+// The person's own prayer is in the first person singular. "I’m" counts once; straight and curly apostrophes alike.
+const SINGULAR = /(?<![\p{L}\p{N}'’])(?:i(?:['’](?:m|ve|ll|d))?|me|my|mine|myself)(?![\p{L}\p{N}])/giu;
+const PLURAL = /(?<![\p{L}\p{N}'’])(?:we(?:['’](?:re|ve|ll|d))?|us|our|ours|ourselves)(?![\p{L}\p{N}])/giu;
+const countMatches = (text: string, pattern: RegExp) => (text.match(pattern) ?? []).length;
+
+export type PrayerVoice = "i" | "we" | "none";
+
+// "i": at least two first-person singular pronouns, and no plural one unless the entry itself holds one ("I lift our family to
+// you" after an entry about "our family"). "we": a plural one the entry does not explain, or a prayer the person themselves
+// prayed as "we". "none": neither (a prayer about others, or a single "I").
+export function prayerVoice(prayer: string, entry: string): PrayerVoice {
+  const singular = countMatches(prayer, SINGULAR);
+  const plural = countMatches(prayer, PLURAL);
+  const entryPlural = countMatches(entry, PLURAL) > 0;
+  if (singular >= 2 && (plural === 0 || entryPlural)) return "i";
+  return plural > 0 ? "we" : "none";
+}
+
+// Only "i" passes, and "we" too when the person wrote as "we" (decision 1).
+export function prayerVoiceProblem(prayer: string, entry: string): SoftProblem | null {
+  const voice = prayerVoice(prayer, entry);
+  if (voice === "i" || (voice === "we" && countMatches(entry, PLURAL) > 0)) return null;
+  if (voice === "we") {
+    return {
+      reason: "prayer_voice:we",
+      salvaged: "prayer_we",
+      note:
+        "Your last reply wrote the closing prayer as “we”. Write the whole reply again, and write the prayer as the person’s own prayer, in the first person singular: “I”, “my”, “me”, never “we”, “us” or “our”.",
+    };
+  }
+  return {
+    reason: "prayer_voice:none",
+    salvaged: "prayer_none",
+    note:
+      "Your last reply did not write the closing prayer in the person’s own voice. Write the whole reply again, and write the prayer as the person’s own prayer, in the first person singular: “I”, “my”, “me”.",
+  };
+}
+
+// -- Grounding --
+
+// Common English words of four letters or more: they carry no part of what a person told.
+export const STOPWORDS: ReadonlySet<string> = new Set([
+  ..."about above across after again against almost already also although always among another anybody anyone anything"
+    .split(" "),
+  ..."anyway aren around away back because become been before behind being below beside besides best better between both"
+    .split(" "),
+  ..."came cannot come comes coming could couldn didn does doesn doing done down during each either else enough even ever"
+    .split(" "),
+  ..."every everybody everyone everything first from gave gets getting give given gives giving goes going gone gotten"
+    .split(" "),
+  ..."hadn hasn have haven having help helped helps hers herself himself however into itself just keep keeping keeps kept"
+    .split(" "),
+  ..."last least less like little lots made make makes making many maybe might mine more most much must mustn myself need"
+    .split(" "),
+  ..."needn needs neither never next nobody none nothing often okay once only onto other others ourselves over please"
+    .split(" "),
+  ..."quite rather really said same says seem seemed seems shall should shouldn since some somebody someone something"
+    .split(" "),
+  ..."sometimes soon such sure take takes taking tell tells than thank thanks that their theirs them themselves then there"
+    .split(" "),
+  ..."these they think this those though through throughout thus till told took toward towards under unless until upon"
+    .split(" "),
+  ..."very want wanted wants wasn well went were weren what whatever when where whether which while whom whose will with"
+    .split(" "),
+  ..."within without would wouldn yeah your yours yourself yourselves bless blessed blessing blessings".split(" "),
+]);
+
+// The words any devotional holds (the step 36 prompt's list): sharing them says nothing about this entry.
+export const DEVOTIONAL_WORDS: ReadonlySet<string> = new Set(
+  ("god lord jesus christ father spirit holy pray prayer amen grace faith love peace hope heart hearts today tonight " +
+    "morning evening feel feeling feels felt moment carry carrying rest know knows hold holds held still here near close " +
+    "alone true truth breath breathe step small good real right world thing things time day days life").split(" "),
+);
+
+// A word's stem: a plural, -ed or -ing cut when at least four letters remain ("interviews" is "interview", "waiting" is
+// "wait"), "-ies" and "-ied" made "-y" ("surgeries" and "worried" meet "surgery" and "worry"), "-es" cut only after a sibilant
+// ("classes" is "class", "houses" is "house") and a double "s" kept ("class", "miss").
+export function stem(word: string): string {
+  const lower = word.toLowerCase();
+  if (lower.length >= 5 && /(?:ies|ied)$/.test(lower)) return `${lower.slice(0, -3)}y`;
+  if (lower.endsWith("ing") && lower.length - 3 >= 4) return lower.slice(0, -3);
+  if (lower.endsWith("ed") && lower.length - 2 >= 4) return lower.slice(0, -2);
+  if (/(?:ss|x|z|ch|sh)es$/.test(lower) && lower.length - 2 >= 4) return lower.slice(0, -2);
+  if (lower.endsWith("s") && !lower.endsWith("ss") && lower.length - 1 >= 4) return lower.slice(0, -1);
+  return lower;
+}
+
+const STOPWORD_STEMS = new Set([...STOPWORDS].map(stem));
+const DEVOTIONAL_STEMS = new Set([...DEVOTIONAL_WORDS].map(stem));
+
+// The content stems of a text: words of four letters or more (an apostrophe ends a word, so a possessive is cut: "surgery's"
+// is "surgery"), lowercased, never a common word or a word of any devotional, nor one of their stems.
+export function contentStems(text: string): Set<string> {
+  const found = new Set<string>();
+  for (const match of text.matchAll(/\p{L}+/gu)) {
+    const word = match[0].toLowerCase();
+    if (word.length < 4 || STOPWORDS.has(word) || DEVOTIONAL_WORDS.has(word)) continue;
+    const root = stem(word);
+    if (STOPWORD_STEMS.has(root) || DEVOTIONAL_STEMS.has(root)) continue;
+    found.add(root);
+  }
+  return found;
+}
+
+// How many of the entry's content stems the reply must share (decision 9): at least 2 when the entry has 8 or more, at least 1
+// with 3 to 7, and no check below 3 ("Thank you God for today" has nothing to share).
+export function groundingThreshold(entry: string): number {
+  const size = contentStems(entry).size;
+  return size >= 8 ? 2 : size >= 3 ? 1 : 0;
+}
+
+// The entry's content stems that the texts hold, together (the validation line, the devotional and the prayer).
+export function groundingCount(entry: string, texts: readonly string[]): number {
+  const written = new Set(texts.flatMap((text) => [...contentStems(text)]));
+  return [...contentStems(entry)].filter((root) => written.has(root)).length;
+}
+
+export function groundingProblem(entry: string, texts: readonly string[]): SoftProblem | null {
+  const threshold = groundingThreshold(entry);
+  if (threshold === 0 || groundingCount(entry, texts) >= threshold) return null;
+  return {
+    reason: "grounding_low",
+    salvaged: "grounding_low",
+    note:
+      "Your last reply did not use what the person told you. Write the whole reply again, and build the validation line, the devotional and the prayer from the specific things in their entry: what happened, who it involves, what they asked for, in their words.",
+  };
+}
+
+// -- The echo --
+
+// One short phrase of the person's own, word for word (decision 3): at most this many words, once.
+export const ECHO_MAX_WORDS = 8;
+
+// The text between curly double quotes, or between straight ones.
+const QUOTED = /“([^“”]*)”|"([^"]*)"/g;
+const echoWords = (text: string) =>
+  text.toLowerCase().replace(/’/g, "'").match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu) ?? [];
+
+function holdsRun(words: readonly string[], run: readonly string[]): boolean {
+  for (let start = 0; start + run.length <= words.length; start += 1) {
+    if (run.every((word, offset) => words[start + offset] === word)) return true;
+  }
+  return false;
+}
+
+// Every quotation in the devotional and the prayer together must be one run of the entry's words, at most eight, case,
+// punctuation and the apostrophe's shape aside. None at all passes.
+export function echoProblem(texts: readonly string[], entry: string): SoftProblem | null {
+  const spans = texts
+    .flatMap((text) => [...text.matchAll(QUOTED)].map((match) => echoWords(match[1] ?? match[2] ?? "")))
+    .filter((words) => words.length > 0);
+  if (spans.length === 0) return null;
+  if (spans.length === 1 && spans[0].length <= ECHO_MAX_WORDS && holdsRun(echoWords(entry), spans[0])) return null;
+  return {
+    reason: "echo_invented",
+    salvaged: "echo_invented",
+    note:
+      "The quoted words are not in the person’s entry. Write the whole reply again and quote only words they wrote, at most eight, once, or quote nothing.",
+  };
+}
+
+// -- The validation line --
+
+export type ValidationRule =
+  | "validation_missing"
+  | "validation_length"
+  | "validation_stock"
+  | "validation_person"
+  | "validation_private";
+
+const SECOND_PERSON = /(?<![\p{L}\p{N}])you(?:r|rs|rself|['’](?:re|ve|ll|d))?(?![\p{L}\p{N}])/iu;
+
+// The line, in this order: there; 5 to 24 words and at most 240 characters; not a template (a stock opening, or "It seems");
+// spoken to the person; and never a word the person capitalized (it is shown above the devotional, where anyone near the phone
+// can read it). `words`: the entry's private words (privateWords).
+export function validationProblem(line: string | null | undefined, words: readonly string[]): SoftProblem | null {
+  const text = (line ?? "").trim();
+  const problem = (reason: ValidationRule, note: string): SoftProblem => ({ reason, salvaged: reason, note });
+  if (text === "") {
+    return problem(
+      "validation_missing",
+      "Your last reply left validation_line empty. Write the whole reply again, with a validation_line of 8 to 18 words in the second person that names what the person is going through, in plain words from their entry.",
+    );
+  }
+  const count = countWords(text);
+  const limits = LIMITS.validationLine;
+  if (count < limits.minWords || count > limits.maxWords || text.length > limits.maxChars) {
+    return problem(
+      "validation_length",
+      "Your last reply wrote a validation_line that is too short or too long. Write the whole reply again, with a validation_line of one sentence and 8 to 18 words.",
+    );
+  }
+  if (hasStockOpening(text) || /^["“‘']*it\s+seems\b/i.test(text)) {
+    return problem(
+      "validation_stock",
+      'Your last reply began validation_line with a stock opening. Write the whole reply again, and begin validation_line with what the person is going through, never with “It sounds like”, “It feels like”, “It seems”, “Sometimes” or any first word that "The first line" forbids.',
+    );
+  }
+  if (!SECOND_PERSON.test(text)) {
+    return problem(
+      "validation_person",
+      "Your last reply did not write validation_line to the person. Write the whole reply again, and write validation_line in the second person, with “you” or “your”.",
+    );
+  }
+  const leaked = leakedWords(text, words);
+  if (leaked.length > 0) {
+    const listed = [...new Set([...leaked, ...words])].slice(0, MAX_NOTE_WORDS);
+    return problem(
+      "validation_private",
+      `Your last reply used a word from the entry in validation_line. Write the whole reply again, and do not use any of these words in validation_line: ${
+        listed.join(", ")
+      }.`,
+    );
+  }
+  return null;
+}
+
+// What stands in for a line the model could not get right: the devotional's first sentence, the hook, when it holds no private
+// word and fits the column; otherwise no line (the screen then shows the hook itself, from the devotional).
+export function salvageLine(devotional: string, words: readonly string[]): string | null {
+  const hook = openingSentence(devotional);
+  if (hook === "" || hook.length > LIMITS.validationLine.maxChars || leaksPrivate(hook, words)) return null;
+  return hook;
+}
+
 // ---- The safe texts (decision 17) --------------------------------------------------------------------------------------
 
 // Fixed texts for a title or a headline that kept a word from the entry after the retry. They hold nothing from any entry,
@@ -455,9 +828,19 @@ export const SAFE_HEADLINES: Readonly<Record<TimeSlot, string>> = {
   evening: "Rest in his care",
 };
 
-// title_private and headline_private: a safe text took the place of a word from the entry. hook_stock and hook_repeated: the
-// reply was kept as it was, with an opening the hook guard asked to change (below).
-export type SalvageReason = "title_private" | "headline_private" | HookProblem["reason"];
+// title_private and headline_private: a safe text took the place of a word from the entry. hook_stock, hook_repeated and
+// hook_long: the reply was kept as it was, with an opening the hook guard asked to change. gen-v2.3 (step 36): prayer_we and
+// prayer_none, the prayer as the reply wrote it; grounding_low and echo_invented, the reply as it was; validation_<rule>, the
+// devotional's first sentence (or nothing) in place of the line.
+export type SalvageReason =
+  | "title_private"
+  | "headline_private"
+  | HookProblem["reason"]
+  | "prayer_we"
+  | "prayer_none"
+  | "grounding_low"
+  | "echo_invented"
+  | ValidationRule;
 
 // The reflection with its title and each headline that leaks a private word replaced by its safe text; nothing else changes.
 // `salvaged` says which check it was (title_private when the title leaked, otherwise headline_private), or null when nothing

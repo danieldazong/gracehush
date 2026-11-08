@@ -84,7 +84,6 @@ const icons = {
   lock: { android: "lock", ios: "lock" },
   delete: { android: "delete", ios: "trash" },
   warning: { android: "warning", ios: "exclamationmark.triangle" },
-  support: { android: "favorite", ios: "heart" },
   help: { android: "help", ios: "questionmark.circle" },
   external: { android: "open_in_new", ios: "arrow.up.right.square" },
   signOut: { android: "logout", ios: "rectangle.portrait.and.arrow.right" },
@@ -908,14 +907,6 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
 
           <View className="gap-2">
             <SettingsGroup title={text.groups.about}>
-              <SettingsRow
-                icon={icons.support}
-                iconTone="bare"
-                title={text.about.support}
-                trailing={chevron}
-                onPress={() => navigation.navigate("CrisisResources", { source: "profile" })}
-                accessibilityLabel={text.about.support}
-              />
               <SettingsRow
                 icon={icons.help}
                 iconTone="bare"

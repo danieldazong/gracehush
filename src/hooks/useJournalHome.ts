@@ -210,7 +210,7 @@ export function useJournalHome(): HomeState {
         if (!page.ok) throw new Error(page.code);
         void askStreak(profile.timezone);
         const affirmations = await getLatestAffirmations();
-        // The newest reflection may be new to this phone (made on another phone, or a crisis entry): the affirmation
+        // The newest reflection may be new to this phone (made on another phone, say): the affirmation
         // notifications are planned again from what the phone now holds (step 28), once its affirmations are here too.
         requestAffirmationReschedule();
         if (request !== latestRequest.current) return;
@@ -253,7 +253,7 @@ export function useJournalHome(): HomeState {
           ? { ...previous, ...placeChangedEntry(previous, entryId, entry, nowMs), affirmations }
           : previous,
       );
-      if (entry !== null && entry.status === "ready" && !entry.isCrisis && !wasReady) {
+      if (entry !== null && entry.status === "ready" && entry.devotional !== null && !wasReady) {
         void askStreak(before.profile.timezone);
       }
     },

@@ -1,9 +1,15 @@
 import { assert, assertEquals } from "./testing/assert.ts";
 import {
+  contentStems,
   correctionNote,
+  DEVOTIONAL_WORDS,
+  echoProblem,
   estimatedSeconds,
   firstNeverSay,
   firstWord,
+  groundingCount,
+  groundingProblem,
+  groundingThreshold,
   hasStockOpening,
   hasVerseReference,
   HOOK_MAX_WORDS,
@@ -12,14 +18,19 @@ import {
   NEVER_SAY,
   openingSentence,
   openingStart,
+  prayerVoice,
+  prayerVoiceProblem,
   privateWords,
   SAFE_HEADLINES,
   SAFE_TITLE,
   salvageReflection,
   SCRIPT_CHARS_PER_SECOND,
+  stem,
+  STOPWORDS,
   styleMeasures,
   TONE_EXAMPLE,
   type ToneReflection,
+  validationProblem,
 } from "./tone.ts";
 
 Deno.test("never say: each phrase is caught, with straight and curly apostrophes and in any case", () => {
@@ -385,4 +396,196 @@ Deno.test("salvage: only the fields that leak are replaced, and the safe texts p
     assert(headline.length <= 50 && count >= 2 && count <= 8, headline);
   }
   assert(SAFE_TITLE.length <= 40 && SAFE_TITLE.split(" ").length <= 6);
+});
+
+// ---- gen-v2.3: the prayer's voice, grounding, the echo and the validation line --------------------------------------
+
+Deno.test('prayer voice: the person\'s own prayer in the first person singular, and "we" only when their entry said it', () => {
+  const plain = "I have an interview tomorrow and my car broke down. Lord, please help me find a way.";
+  const together = "Lord, our family needs a new home. Please guide us while we search.";
+  const prayers: [string, string, "i" | "we" | "none"][] = [
+    ["Lord, I bring you my worry about tomorrow. Hold me close tonight.", plain, "i"],
+    ["Father, I’m tired, and I ask you for rest.", plain, "i"],
+    ["Father, I'm tired and I ask you for rest.", plain, "i"],
+    ["Lord, we bring you this tired heart. Hold us close tonight.", plain, "we"],
+    ["Lord, I bring you my week. Give us rest.", plain, "we"],
+    ["Lord, we lift our family to you and ask you to guide us.", together, "we"],
+    ["Lord, I lift our family to you, and I ask you to guide us.", together, "i"],
+    ["Lord, hold this family close tonight and give them rest.", plain, "none"],
+    ["Lord, I’m here.", plain, "none"],
+    ["Jesus, MY heart is yours, and I trust you.", plain, "i"],
+    ["Lord, hear Mimi and Ivy tonight, and give them rest.", plain, "none"],
+    ["God, I’ll wait for you, and I'd rather wait with you than without.", plain, "i"],
+  ];
+  for (const [prayer, entry, expected] of prayers) assertEquals(prayerVoice(prayer, entry), expected, prayer);
+
+  // Only "i" passes, and "we" passes too when the person themselves wrote as "we".
+  assertEquals(prayerVoiceProblem(prayers[0][0], plain), null);
+  assertEquals(prayerVoiceProblem(prayers[3][0], plain)?.reason, "prayer_voice:we");
+  assertEquals(prayerVoiceProblem(prayers[3][0], plain)?.salvaged, "prayer_we");
+  assertEquals(prayerVoiceProblem(prayers[5][0], together), null, "the entry's own we");
+  assertEquals(prayerVoiceProblem(prayers[6][0], together), null);
+  assertEquals(prayerVoiceProblem(prayers[7][0], plain)?.reason, "prayer_voice:none");
+  assertEquals(prayerVoiceProblem(prayers[7][0], plain)?.salvaged, "prayer_none");
+  assert(prayerVoiceProblem(prayers[3][0], plain)?.note.includes("first person singular"));
+});
+
+Deno.test("grounding: content stems shared with the entry, never the common words or the words of any devotional", () => {
+  // A content word has four letters or more; the stem cuts a plural, -ed and -ing, and a possessive is cut at the apostrophe.
+  assertEquals(stem("surgeries"), stem("surgery"));
+  assertEquals(stem("interviews"), "interview");
+  assertEquals(stem("waiting"), "wait");
+  assertEquals(stem("worried"), stem("worries"));
+  assertEquals(stem("classes"), "class");
+  assertEquals(stem("houses"), "house");
+  assertEquals([...contentStems("My son’s surgery's on Thursday.")].sort(), [stem("surgery"), "thursday"].sort());
+
+  const two = "Pray for the surgery on Thursday.";
+  const five = "My manager moved the deadline and the client is angry.";
+  const twelve =
+    "The landlord raised my rent, my daughter starts school, the generator broke, the mechanic wants cash, and my stall is quiet.";
+  assertEquals(contentStems(two).size, 2);
+  assertEquals(contentStems(five).size, 5);
+  assertEquals(contentStems(twelve).size, 12);
+  // At least 2 shared when the entry has 8 or more content stems, at least 1 with 3 to 7, and no check below 3.
+  assertEquals([groundingThreshold(two), groundingThreshold(five), groundingThreshold(twelve)], [0, 1, 2]);
+
+  assertEquals(groundingCount(twelve, ["God is near, and his love holds you tonight."]), 0);
+  assertEquals(groundingCount(twelve, ["Your rent is not the measure of your worth."]), 1);
+  assertEquals(groundingCount(twelve, ["The landlord and the rent sit on your shoulders."]), 2);
+  assertEquals(
+    groundingCount(twelve, ["The landlord, the rent, the school, the generator and the mechanic all came at once."]),
+    5,
+  );
+  // The texts count together: the line, the devotional and the prayer.
+  assertEquals(groundingCount(twelve, ["The landlord came.", "Lord, I bring you my rent."]), 2);
+
+  // The words any devotional holds and the common words never count, whatever the entry says.
+  const devotionalWords = "My heart feels heavy and I keep praying for peace tonight.";
+  assertEquals(groundingCount(devotionalWords, ["Your heart can rest in his peace tonight as you pray."]), 0);
+  for (
+    const word
+      of "god lord jesus christ father spirit holy pray prayer amen grace faith love peace hope heart hearts today tonight morning evening feel feeling feels felt moment carry carrying rest know knows hold holds held still here near close alone true truth breath breathe step small good real right world thing things time day days life"
+        .split(" ")
+  ) {
+    assert(DEVOTIONAL_WORDS.has(word), word);
+  }
+  assert(STOPWORDS.size >= 120 && STOPWORDS.size <= 220, `${STOPWORDS.size} stopwords`);
+  // A possessive and a plural meet their plain word, and a day of the week counts.
+  assertEquals(groundingCount("Please pray for my son's surgery on Thursday.", ["The surgery’s date is Thursday."]), 2);
+  assertEquals(groundingCount("Two surgeries this month.", ["After the surgery, rest."]), 1);
+});
+
+Deno.test("the echo: one short phrase of theirs, word for word, in quotation marks, or none at all", () => {
+  const entry = "My boss said the report was late again, and I told him I am doing my best.";
+  const devotional = (sentence: string) => `${sentence}\n\nGod sees what you carry.`;
+  assertEquals(echoProblem([devotional("You said it yourself: “I am doing my best.”")], entry), null);
+  assertEquals(echoProblem([devotional('You said it yourself: "I am doing my best."')], entry), null);
+  assertEquals(
+    echoProblem([devotional("You told him, “I’m doing my best”, and you are.")], entry)?.reason,
+    "echo_invented",
+  );
+  assertEquals(echoProblem([devotional("No quotation at all.")], entry), null);
+  // Nine words, even the person's own, are too many.
+  assertEquals(
+    echoProblem([devotional("“the report was late again and I told him”")], entry)?.reason,
+    "echo_invented",
+  );
+  assertEquals(echoProblem([devotional("“the report was late again and I told”")], entry), null, "eight words");
+  // A changed word is not their words.
+  assertEquals(echoProblem([devotional("You said, “I am trying my best.”")], entry)?.reason, "echo_invented");
+  // Twice is once too many, and a quotation in the prayer counts too.
+  assertEquals(
+    echoProblem([devotional("“I am doing my best.” And “the report was late.”")], entry)?.reason,
+    "echo_invented",
+  );
+  assertEquals(
+    echoProblem([devotional("No quote here."), "Lord, you heard me say “I give up.”"], entry)?.reason,
+    "echo_invented",
+  );
+  // Case, apostrophes and punctuation do not matter; the words and their order do.
+  assertEquals(echoProblem(["You wrote “i can't SLEEP, Lord.”"], "I can’t sleep. Lord, I need you."), null);
+  const reversed = echoProblem(["You wrote “sleep can’t I.”"], "I can’t sleep. Lord, I need you.");
+  assertEquals([reversed?.reason, reversed?.salvaged], ["echo_invented", "echo_invented"]);
+  assert(reversed?.note.startsWith("The quoted words are not in the person’s entry."), reversed?.note);
+});
+
+Deno.test("the validation line: from the entry, second person, 5 to 24 words, never stock and never private", () => {
+  const entry = "Please pray for my sister Blessing, who moved to Ibadan. I miss her every day.";
+  const words = privateWords(entry);
+  assertEquals(words, ["blessing", "ibadan"]);
+  const line = (text: string | null) => validationProblem(text, words)?.reason ?? null;
+  assertEquals(line(null), "validation_missing");
+  assertEquals(line("  "), "validation_missing");
+  assertEquals(line("Your sister moved away."), "validation_length");
+  assertEquals(line(Array.from({ length: 25 }, () => "you").join(" ")), "validation_length");
+  assertEquals(line(`You ${"x".repeat(240)}`), "validation_length");
+  for (
+    const stock of [
+      "It sounds like you are carrying a lot this week, and that is real.",
+      "It seems your week has been long and you are tired.",
+      "Sometimes the quiet after a move is louder than you expected.",
+      "The move left you missing someone you love every single day.",
+      "Today you miss your sister more than you can say.",
+    ]
+  ) {
+    assertEquals(line(stock), "validation_stock", stock);
+  }
+  assertEquals(line("Missing a sister who moved far away is a real ache."), "validation_person");
+  assertEquals(line("Your sister Blessing moved away, and you miss her every day."), "validation_private");
+  assertEquals(line("Your sister moved to a new city, and you miss her every single day."), null);
+  // In this order: a line that is both stock and private is stock.
+  assertEquals(line("It hurts that Blessing moved away and you miss her."), "validation_stock");
+  // Every note names the rule; only the private one names words, and only the entry's private ones.
+  const problems = [
+    null,
+    "Your sister moved away.",
+    "It seems your week was long and you are tired.",
+    "Missing a sister far away is a real ache for anyone.",
+  ].map((text) => validationProblem(text, words)!);
+  for (const problem of problems) {
+    assertEquals(problem.salvaged, problem.reason);
+    assert(problem.note.includes("validation_line"), problem.note);
+    assert(!/blessing|ibadan|sister/i.test(problem.note), problem.note);
+  }
+  assert(
+    validationProblem("Your sister Blessing moved away, and you miss her.", words)!.note.endsWith(
+      ": blessing, ibadan.",
+    ),
+  );
+});
+
+Deno.test("step 36's correction notes name a rule and never a word of the person's (the private-word notes are step 32's)", () => {
+  const entry =
+    "Bartholomew drove to Kaduna for the cardiology appointment, and the generator broke down on Tuesday evening.";
+  const theirs = (entry.toLowerCase().match(/\p{L}{4,}/gu) ?? []).filter((word) => !STOPWORDS.has(word));
+  const words = privateWords(entry);
+  const notes = [
+    prayerVoiceProblem("Lord, we ask you to carry us through this week.", entry)?.note,
+    prayerVoiceProblem("Lord, carry them through this week.", entry)?.note,
+    groundingProblem(entry, ["A quiet word of comfort from God, with nothing of theirs in it."])?.note,
+    echoProblem(["You said it yourself: “the engine exploded on the highway”."], entry)?.note,
+    validationProblem(null, words)?.note,
+    validationProblem("Too short.", words)?.note,
+    validationProblem("It sounds like the generator broke down on Tuesday for you.", words)?.note,
+    validationProblem("A generator broke down on a long and cold Tuesday evening again.", words)?.note,
+  ];
+  assert(theirs.length >= 8, "the entry has words of its own to leak");
+  for (const note of notes) {
+    assert(note !== undefined && note.length > 0, "every problem has a note");
+    for (const word of theirs) assert(!note.toLowerCase().includes(word), `a note holds the person's word "${word}"`);
+  }
+});
+
+Deno.test("style measures of gen-v2.3: grounding, the prayer's voice and the validation line's words", () => {
+  const entry = "Work has been relentless and I keep lying awake before the client meeting.";
+  const measured = styleMeasures(
+    reflection({ validationLine: "The client meeting keeps you awake, and work will not let up." }),
+    entry,
+  );
+  assertEquals(measured.validationWords, 12);
+  assertEquals(measured.prayerVoice, "we", "the sample prayer says we");
+  assert(measured.grounding >= 2, `${measured.grounding}`);
+  const none = styleMeasures(reflection());
+  assertEquals([none.validationWords, none.grounding], [0, 0]);
 });

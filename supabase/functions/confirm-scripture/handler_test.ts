@@ -97,7 +97,21 @@ Deno.test(
 );
 
 Deno.test(
-  "a crisis entry, an unfinished one and one with no passage have nothing to confirm",
+  "a heavy moment (gen-v2.4) whose passage is still unverified is confirmed like any other",
+  flow(async (world) => {
+    const entry = seed(world, { is_crisis: true });
+    const response = await ask(world, entry.id);
+    assertEquals(response.status, 200);
+    assertEquals(await answer(response), {
+      scripture: { reference: "Philippians 4:6–7", text: PHP_4_6_7, translation: "BSB", verified: true },
+    });
+    assertEquals(world.entries[0].scripture_verified, true);
+    assertEquals(world.entries[0].is_crisis, true);
+  }),
+);
+
+Deno.test(
+  "a heavy moment saved before 2026-11-08 (no reflection), an unfinished one and one with no passage have nothing to confirm",
   flow(async (world) => {
     const cases = [
       seed(world, {
@@ -296,10 +310,12 @@ Deno.test(
       "dbMs",
       "fallbackAttempts",
       "geminiMs",
+      "grounding",
       "inputType",
       "limit",
       "limitUsed",
       "model",
+      "prayerVoice",
       "promptVersion",
       "reason",
       "requestId",
@@ -317,6 +333,7 @@ Deno.test(
       "ttsChars",
       "ttsMs",
       "user",
+      "validationLine",
     ]);
     assertEquals(line.status, 200);
     assertEquals(line.scripture, "verified");

@@ -19,12 +19,17 @@ export type EntryRow = {
   audio_path: string | null;
   processing_status: string;
   error_code: string | null;
+  // A heavy moment (gen-v2.4): the crisis screening or the model found a risk to the person. Since 2026-11-08 such an entry is
+  // a whole reflection too; one saved before that keeps only the person's words (no devotional, passage or affirmations).
   is_crisis: boolean;
   dominant_emotion: string | null;
   scripture_reference: string | null;
   scripture_text: string | null;
   scripture_verified: boolean;
   devotional_title: string | null;
+  // Step 36: one sentence the model wrote from the entry, the Reflection screen's first line. Null for a reflection made before
+  // the column existed, and for a heavy moment saved before 2026-11-08.
+  validation_line: string | null;
   devotional_script: string | null;
   closing_prayer: string | null;
   devotional_audio_path: string | null;
@@ -202,9 +207,13 @@ export async function saveTranscript(
   if (error) throw dbFailure("save_transcript", error);
 }
 
-// What the reflection is told about the person's earlier reflections (step 32), so that titles, openings and passages stop
-// repeating: only what the model wrote and the passage's reference. Never a transcript or any other words of theirs.
+// What the reflection is told about the person's earlier reflections (step 32), so that titles, first words and passages stop
+// repeating: only what the model wrote and the passage's reference. Never a transcript or any other words of theirs. Since
+// step 36 prompt.ts sends only the devotional's first word, the title's main words and the reference, never a sentence.
 export const RECENT_REFLECTION_COLUMNS = "devotional_title, devotional_script, scripture_reference";
+
+// How many earlier reflections the model is told about (step 36, decision 7; three before).
+export const RECENT_REFLECTIONS = 10;
 
 export type RecentReflectionRow = {
   devotional_title: string | null;
@@ -212,8 +221,8 @@ export type RecentReflectionRow = {
   scripture_reference: string | null;
 };
 
-// Up to three of this user's finished reflections (ready, not a crisis, with a devotional) made before this entry, newest
-// first. The caller treats a failure as "none": a reflection is never lost to it.
+// Up to ten of this user's finished reflections (ready, with a devotional, a heavy moment's included) made before this entry,
+// newest first. The caller treats a failure as "none": a reflection is never lost to it.
 export async function listRecentReflections(
   admin: SupabaseClient,
   userId: string,
@@ -221,9 +230,9 @@ export async function listRecentReflections(
   beforeIso: string,
 ): Promise<RecentReflectionRow[]> {
   const { data, error } = await admin.from("journal_entries").select(RECENT_REFLECTION_COLUMNS)
-    .eq("user_id", userId).eq("processing_status", "ready").eq("is_crisis", false)
+    .eq("user_id", userId).eq("processing_status", "ready")
     .not("devotional_script", "is", null).neq("id", entryId).lt("created_at", beforeIso)
-    .order("created_at", { ascending: false }).limit(3);
+    .order("created_at", { ascending: false }).limit(RECENT_REFLECTIONS);
   if (error) throw dbFailure("recent", error);
   // Only the three columns, whatever comes back.
   return (data as RecentReflectionRow[]).map((row) => ({
@@ -286,6 +295,8 @@ export type ReadyFields = {
   transcript: string | null;
   dominant_emotion: string;
   devotional_title: string;
+  // The model's own line, or the devotional's first sentence when the line could not be got right, or null (output.ts).
+  validation_line: string | null;
   devotional_script: string;
   closing_prayer: string;
   // The passage as scripture.ts resolved it: a verified reference with its exact text, an unverified reference with no
@@ -300,18 +311,20 @@ export type ReadyFields = {
 };
 
 // The last write of a good run is the status change: until it lands the entry is still "processing", so an entry is
-// never "ready" without its affirmations.
+// never "ready" without its affirmations. `heavy` (gen-v2.4) saves a heavy moment: is_crisis is set, and the entry is never
+// counted by the free tier's limit (checkDevotionalLimit skips is_crisis rows) and never marked a prayer by the server.
 export async function saveReadyEntry(
   admin: SupabaseClient,
   userId: string,
   entryId: string,
   fields: ReadyFields,
   affirmations: { slot: TimeSlot; headline: string; text: string }[],
+  heavy = false,
 ): Promise<EntryRow> {
   await replaceAffirmations(admin, userId, entryId, affirmations);
   const { data, error } = await admin.from("journal_entries").update({
     ...fields,
-    is_crisis: false,
+    is_crisis: heavy,
     // A reflection is saved without its audio. Speech is a later, best-effort step (speech.ts) that adds the path and the
     // length once the file is stored, so nothing about it can lose or fail a reflection.
     devotional_audio_path: null,
@@ -325,63 +338,17 @@ export async function saveReadyEntry(
   return rows[0];
 }
 
-// A crisis entry keeps only is_crisis and what the person said. Every devotional, scripture and prayer column is
-// cleared in the same statement, which is what the table's crisis checks require, and its affirmations are removed
-// (a retry of an entry that was once saved as a reflection starts from none). Nothing about why it is a crisis is kept:
-// no category, no source, no phrase.
-//
-// If any part of this fails, the whole thing is a plain 500 with the reason crisis_save_failed and the caller never
-// falls back to a devotional: the person can send the same entry again.
-//
-// A crisis entry never counts toward the free tier's limit (checkDevotionalLimit skips is_crisis rows, and a crisis is
-// answered before the limit is ever checked) and it never gets speech.
-// It gets no affirmations, so the phone schedules no notification for it, and none for an older reflection after it either
-// (step 28): nothing is sent until a newer reflection is ready.
-export async function saveCrisisEntry(
-  admin: SupabaseClient,
-  userId: string,
-  entryId: string,
-  transcript: string | null,
-): Promise<EntryRow> {
-  try {
-    await replaceAffirmations(admin, userId, entryId, []);
-    const { data, error } = await admin.from("journal_entries").update({
-      is_crisis: true,
-      transcript,
-      dominant_emotion: null,
-      devotional_title: null,
-      devotional_script: null,
-      closing_prayer: null,
-      devotional_audio_path: null,
-      devotional_duration_ms: null,
-      scripture_reference: null,
-      scripture_text: null,
-      scripture_verified: false,
-      is_active_prayer: false,
-      prayer_title: null,
-      prayer_category: null,
-      prayer_summary: null,
-      processing_status: "ready",
-      error_code: null,
-    }).eq("id", entryId).eq("user_id", userId).select();
-    if (error) throw dbFailure("save_crisis", error);
-    const rows = data as EntryRow[];
-    if (rows.length !== 1) throw new AppError("INTERNAL", "db:save_crisis:no_row");
-    return rows[0];
-  } catch {
-    throw new AppError("INTERNAL", "crisis_save_failed");
-  }
-}
-
 // A reflection that is ready, has its devotional and still has no audio: the one kind of finished entry that speech can
-// still be added to (step 22). A crisis entry never is, whatever else it holds.
+// still be added to (step 22). A heavy moment is read aloud like any other since gen-v2.4; one saved before that has no
+// devotional, so it never is.
 export function needsSpeech(
-  row: Pick<EntryRow, "is_crisis" | "processing_status" | "devotional_script" | "devotional_audio_path">,
+  row: Pick<EntryRow, "processing_status" | "devotional_script" | "devotional_audio_path">,
 ): boolean {
-  return !row.is_crisis && row.processing_status === "ready" && !!row.devotional_script && !row.devotional_audio_path;
+  return row.processing_status === "ready" && !!row.devotional_script && !row.devotional_audio_path;
 }
 
-// Stores where the audio is and how long it is. The update only matches a ready reflection that still has no audio, so of
+// Stores where the audio is and how long it is. The update only matches a ready reflection that has its devotional and still
+// has no audio, so of
 // two requests that add it at the same moment exactly one changes the row; the other gets null and reads the entry again
 // (and the file it uploaded replaced the first one's at the same path, which is harmless). A failure that went before is
 // cleared: error_code goes back to null.
@@ -396,16 +363,17 @@ export async function saveAudio(
     devotional_audio_path: path,
     devotional_duration_ms: durationMs,
     error_code: null,
-  }).eq("id", entryId).eq("user_id", userId).eq("is_crisis", false).eq("processing_status", "ready")
-    .is("devotional_audio_path", null).select();
+  }).eq("id", entryId).eq("user_id", userId).eq("processing_status", "ready")
+    .not("devotional_script", "is", null).is("devotional_audio_path", null).select();
   if (error) throw dbFailure("save_audio", error);
   const rows = data as EntryRow[];
   return rows.length === 1 ? rows[0] : null;
 }
 
 // Speech failed (Google or storage said no): the reflection stays ready as text and says so, so that the app can tell "no
-// audio yet" from "no audio". Guarded like saveAudio, so it never marks a crisis entry, an unfinished one or one that got
-// its audio from another request. Never throws, and returns the row as it now stands, or null when nothing was marked.
+// audio yet" from "no audio". Guarded like saveAudio, so it never marks an unfinished entry, one with no devotional (a heavy
+// moment saved before 2026-11-08) or one that got its audio from another request. Never throws, and returns the row as it
+// now stands, or null when nothing was marked.
 export async function markSpeechFailed(
   admin: SupabaseClient,
   userId: string,
@@ -413,8 +381,8 @@ export async function markSpeechFailed(
 ): Promise<EntryRow | null> {
   try {
     const { data, error } = await admin.from("journal_entries").update({ error_code: "TTS_FAILED" })
-      .eq("id", entryId).eq("user_id", userId).eq("is_crisis", false).eq("processing_status", "ready")
-      .is("devotional_audio_path", null).select();
+      .eq("id", entryId).eq("user_id", userId).eq("processing_status", "ready")
+      .not("devotional_script", "is", null).is("devotional_audio_path", null).select();
     if (error) return null;
     const rows = data as EntryRow[];
     return rows.length === 1 ? rows[0] : null;

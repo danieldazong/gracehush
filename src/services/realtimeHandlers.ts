@@ -138,16 +138,14 @@ async function reactToEntry(entryId: string, slot: EntrySlot): Promise<void> {
     return;
   }
   if (entry.status === "ready" && cached?.status !== "ready") {
-    // Newly finished. Its affirmations come before the notifications are planned again (a crisis entry has none), because the
-    // two kinds of message can arrive in either order.
-    if (!entry.isCrisis) {
-      try {
-        await fetchAffirmations(entryId, context.isCurrent);
-      } catch {
-        // The notifications are planned from what the phone has; the next load brings the affirmations.
-      }
-      if (!context.isCurrent()) return;
+    // Newly finished. Its affirmations come before the notifications are planned again, because the two kinds of message can
+    // arrive in either order.
+    try {
+      await fetchAffirmations(entryId, context.isCurrent);
+    } catch {
+      // The notifications are planned from what the phone has; the next load brings the affirmations.
     }
+    if (!context.isCurrent()) return;
     requestAffirmationReschedule();
     await wakeQueued(entry.clientEntryId);
     if (!context.isCurrent()) return;

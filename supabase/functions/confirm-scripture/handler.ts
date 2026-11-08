@@ -87,8 +87,11 @@ async function confirm(
 ): Promise<Scripture | null> {
   const db = <T>(work: () => Promise<T>) => timed(context, "dbMs", work);
 
-  // Nothing to confirm: a crisis entry has no passage, an unfinished entry has none yet, and a verified one is done.
-  if (row.is_crisis || row.processing_status !== "ready" || row.scripture_reference === null) return null;
+  // Nothing to confirm: an unfinished entry has no passage yet, an entry with no reflection (a heavy moment saved before
+  // 2026-11-08) has none, and a verified one is done. A heavy moment since then is confirmed like any other (gen-v2.4).
+  if (row.processing_status !== "ready" || row.devotional_script === null || row.scripture_reference === null) {
+    return null;
+  }
   if (row.scripture_verified) return toScripture(row);
 
   const now = Date.now();
@@ -225,6 +228,9 @@ export async function handle(req: Request): Promise<Response> {
       accountLeftOut: null,
       accountBytes: null,
       accountApple: null,
+      grounding: null,
+      prayerVoice: null,
+      validationLine: null,
     };
     writeLog(line);
   }

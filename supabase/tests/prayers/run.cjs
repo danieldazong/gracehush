@@ -122,7 +122,7 @@ function seedServer(w, count, build = () => ({})) {
   for (let n = 1; n <= count; n += 1) {
     const row = serverRow(n, build(n));
     w.server.state.entries.push(row);
-    if (row.processing_status === "ready" && !row.is_crisis) w.server.state.affirmations.push(...affirmationRows(row.id, row.user_id));
+    if (row.processing_status === "ready" && row.devotional_script !== null) w.server.state.affirmations.push(...affirmationRows(row.id, row.user_id));
   }
 }
 
@@ -261,14 +261,17 @@ async function patchChecks() {
       }),
       serverRow(6, { processing_status: "processing" }),
       serverRow(7, { processing_status: "failed", error_code: "AI_UNAVAILABLE" }),
+      // A heavy moment since 2026-11-08: a whole reflection its person may make a prayer.
+      serverRow(8, { is_crisis: true }),
     ];
     const changes = [p.trackPatch(true), p.trackPatch(false), p.answerPatch(AT, "a note"), p.answerPatch(AT, null), p.unanswerPatch(), p.notePatch("new"), p.notePatch(null), {}];
     for (const row of rows) {
       const before = toJournalEntry(row);
       for (const patch of changes) {
         const shown = p.applyPrayerPatch(before, patch);
-        // A crisis or unfinished entry is never changed by the app; the mapper says it is no prayer either way.
-        const real = before.status === "ready" && !before.isCrisis ? toJournalEntry({ ...row, ...patch }) : before;
+        // An unfinished entry is never changed by the app; the mapper says it is no prayer either way. A finished one, a heavy
+        // moment's included, is.
+        const real = before.status === "ready" ? toJournalEntry({ ...row, ...patch }) : before;
         assert.deepEqual(shown.prayer, real.prayer, `${row.id.slice(-2)} ${JSON.stringify(patch)}`);
         assert.deepEqual({ ...shown, prayer: null }, { ...before, prayer: null }, "nothing but the prayer changes");
       }
@@ -369,21 +372,16 @@ async function writeChecks() {
     assert.equal(updates(w).length, 0, "the sync engine sends it, not the write");
   });
 
-  await test("write: a crisis entry, an unfinished one and one not on the phone are refused, and nothing is written or kept", async (w) => {
-    await seedBoth(w, 3, (n) =>
-      n === 1
-        ? { is_crisis: true, dominant_emotion: null, scripture_reference: null, scripture_text: null, scripture_verified: false, devotional_title: null, devotional_script: null, closing_prayer: null }
-        : n === 2
-          ? { processing_status: "processing" }
-          : {},
-    );
+  await test("write: a heavy moment can be made a prayer by its person; an unfinished entry and one not on the phone are refused, and nothing is kept for them", async (w) => {
+    await seedBoth(w, 3, (n) => (n === 1 ? { is_crisis: true } : n === 2 ? { processing_status: "processing" } : {}));
     const r = repo(w);
-    assert.equal((await r.setPrayerTracked(idOf(1), true)).code, "NOT_FOUND");
+    const heavy = await r.setPrayerTracked(idOf(1), true);
+    assert.equal(heavy.ok, true, "a heavy moment is a reflection like any other (2026-11-08)");
     assert.equal((await r.setPrayerTracked(idOf(2), true)).code, "INVALID");
     assert.equal((await r.setPrayerTracked(idOf(9), true)).code, "NOT_FOUND");
     assert.equal((await r.markPrayerAnswered({ prayerId: idOf(3), answeredDate: "2026-10-25", note: null })).code, "NOT_FOUND", "not a prayer");
-    assert.equal(await r.countPendingPrayerChanges(), 0);
-    assert.equal(await cachedPrayer(w, 1), null);
+    assert.equal(await r.countPendingPrayerChanges(), 1, "only the heavy moment's change waits");
+    assert.notEqual(await cachedPrayer(w, 1), null);
     assert.equal(await cachedPrayer(w, 2), null);
   });
 
@@ -590,7 +588,7 @@ async function engineChecks() {
 
 // ================================================================== the reads
 async function readChecks() {
-  await test("read: the server is asked for the finished, non-crisis entries that are tracked or answered, newest first, at most 300, by the explicit columns", async (w) => {
+  await test("read: the server is asked for the finished entries that are tracked or answered, a heavy moment's included, newest first, at most 300, by the explicit columns", async (w) => {
     seedServer(w, 6, (n) =>
       n === 1
         ? PRAYER
@@ -598,21 +596,23 @@ async function readChecks() {
           ? { ...PRAYER, is_answered: true, answered_at: AT }
           : n === 3
             ? { processing_status: "processing", is_active_prayer: true }
-            : {},
+            : n === 4
+              ? { ...PRAYER, is_crisis: true }
+              : {},
     );
     const listed = await repo(w).listPrayers();
     assert.equal(listed.ok, true);
-    assert.deepEqual(listed.data.map((prayer) => prayer.id), [idOf(1), idOf(2)]);
+    assert.deepEqual(listed.data.map((prayer) => prayer.id), [idOf(1), idOf(2), idOf(4)]);
     const [request] = prayerReads(w);
     const query = new URLSearchParams(request.search);
-    assert.equal(query.get("is_crisis"), "eq.false");
+    assert.equal(query.get("is_crisis"), null, "a heavy moment its person marked is a prayer too (2026-11-08)");
     assert.equal(query.get("processing_status"), "eq.ready");
     assert.equal(query.get("or"), "(is_active_prayer.eq.true,is_answered.eq.true)");
     assert.equal(query.get("order"), "created_at.desc");
     assert.equal(query.get("limit"), "300");
     assert.equal(query.get("user_id"), "eq.user_a");
     assert.ok(!query.get("select").includes("*"));
-    assert.deepEqual((await repo(w).readCachedPrayers()).map((prayer) => prayer.id), [idOf(1), idOf(2)], "written to the phone");
+    assert.deepEqual((await repo(w).readCachedPrayers()).map((prayer) => prayer.id), [idOf(1), idOf(2), idOf(4)], "written to the phone");
   });
 
   await test("read: offline, Prayers is what the phone has, with no error; a refused session is an error", async (w) => {
@@ -793,6 +793,29 @@ async function otherChecks() {
     await database.deleteUserDatabase("user_a");
     await database.openUserDatabase("user_a");
     assert.equal(await queue(w).countMutations(), 0);
+  });
+
+  // 2026-11-08: a heavy moment may be a prayer its person marked, and no analytics event is about a heavy moment. Prayers asks the
+  // phone whether a prayer is one before it sends its three events; the screen is not loaded in Node, so its wiring is read.
+  await test("heavy: isHeavyMoment answers from the phone, and Prayers sends none of its events for a heavy moment", async (w) => {
+    await seedBoth(w, 3, (n) => (n === 1 ? { ...PRAYER, is_crisis: true } : n === 2 ? PRAYER : {}));
+    const r = repo(w);
+    assert.equal(await r.isHeavyMoment(idOf(1)), true);
+    assert.equal(await r.isHeavyMoment(idOf(2)), false);
+    assert.equal(await r.isHeavyMoment(idOf(9)), false, "an entry the phone does not have is not one");
+    w.use("@/store/devStore").useDevStore.getState().setDataSource("mock");
+    assert.equal(typeof (await r.isHeavyMoment("entry-crisis-six-days-ago")), "boolean");
+    const root = process.env.GRACEHUSH_REPO ?? path.resolve(__dirname, "../../..");
+    // Line endings and indentation set aside, so the checks read the code and not its layout.
+    const flat = (text) => text.replace(/\s+/g, " ");
+    const screen = flat(fs.readFileSync(path.join(root, "src/screens/prayers/PrayersScreen.tsx"), "utf8"));
+    assert.ok(screen.includes('if (!(await isHeavyMoment(prayer.id))) { track("prayer_marked_answered"'), "marked answered");
+    assert.ok(screen.includes('if (result.ok && !(await isHeavyMoment(prayer.id))) track("prayer_removed"'), "removed");
+    assert.ok(screen.includes("deletingHeavy.current = await isHeavyMoment(prayer.id); const opened = deletion.ask"), "asked before the entry is gone");
+    assert.ok(screen.includes('if (!deletingHeavy.current) track("reflection_deleted"'), "deleted");
+    assert.equal(screen.split("track(").length - 1, 3, "three call sites, each guarded");
+    const reflection = flat(fs.readFileSync(path.join(root, "src/screens/journal/ReflectionScreen.tsx"), "utf8"));
+    assert.ok(reflection.includes('if (result.ok && !heavy) track("prayer_tracked_changed"'), "Reflection's toggle");
   });
 }
 

@@ -674,14 +674,22 @@ Deno.test("a clean reply always wins over an earlier salvage, and a block still 
 
 Deno.test("with the real output rules: a name in a headline is asked for again, naming the word to avoid", async () => {
   const entry = "Please pray for my sister Blessing. She moved away last month and I miss her.";
-  const leaky = readyOutput({
+  // A reply written for this entry (gen-v2.3: the line and the prayer use what the person told).
+  const grounded = (over: Record<string, unknown> = {}) =>
+    readyOutput({
+      validation_line: "Your sister moved away last month, and you miss her every day.",
+      closing_prayer:
+        "Lord, I miss my sister since she moved. Keep her close to you, and keep my heart near hers. Amen.",
+      ...over,
+    });
+  const leaky = grounded({
     affirmations: [
       { time_slot: "morning", headline: "You are a blessing", text: "Begin the day knowing you are held." },
       { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
       { time_slot: "evening", headline: "It is enough", text: "You did what you could today." },
     ],
   });
-  await withWorld([geminiOk(leaky), geminiOk(readyOutput())], async (world) => {
+  await withWorld([geminiOk(leaky), geminiOk(grounded())], async (world) => {
     const result = await generate<Reflection>(
       {
         ...args(),

@@ -65,6 +65,7 @@ export interface Scripture {
 
 export interface Devotional {
   title: string;
+  validation: string | null; // the first line on the Reflection screen (step 36), written from the entry; null before it
   script: string; // plain text, paragraphs separated by a blank line
   closingPrayer: string | null; // stored without the final "Amen" (step 11 shows it)
   audioPath: string | null; // a storage path, never a URL
@@ -82,7 +83,7 @@ export interface Affirmation {
 
 // What the affirmation notifications are made from (step 28): the newest finished reflection on the phone and, when it is not
 // a crisis entry, its affirmations (a crisis entry has none).
-export type AffirmationSource = { entryId: string; isCrisis: boolean; affirmations: Affirmation[] };
+export type AffirmationSource = { entryId: string; affirmations: Affirmation[] };
 
 // The tabs of Reflection's carousel. A notification opens Reflection on "affirmations" (step 28).
 export type ReflectionTab = "devotional" | "affirmations" | "prayer";
@@ -364,31 +365,6 @@ export type PlaybackTrack = {
   audioPath: string;
 };
 export type AmbientDefault = Pick<UserProfile, "ambientSound" | "ambientVolume">;
-
-// Crisis support (step 13). The data is in constants/crisisResources.ts.
-export type CrisisActionKind = "call" | "text" | "web";
-export type CrisisIcon = "call" | "text" | "emergency" | "web";
-export type CrisisGroupId = "lifeline" | "other";
-
-// One way to reach help: a row on the Reflection crisis view and on Support Resources.
-export type CrisisResource = {
-  id: string;
-  title: string; // the service
-  detail: string; // what a tap does, one short line
-  group: CrisisGroupId; // the heading it sits under on Support Resources
-  // What the row says under its group heading, where the heading already names the service. Falls back to
-  // title and detail.
-  grouped?: { title: string; detail: string };
-  icon: CrisisIcon;
-  kind: CrisisActionKind;
-  value: string; // the number or the URL
-  body?: string; // SMS prefill, text only
-  urgent: boolean; // the crisis-red tile: only the lifeline call and 911
-  onReflection: boolean; // on the Reflection crisis view (all of them are on Support Resources)
-  accessibilityLabel: string; // says what the tap does
-};
-
-export type CrisisAction = Pick<CrisisResource, "kind" | "value" | "body">;
 
 // Realtime (step 33): the two messages the database sends to its owner's private channel, user:{userId}. They hold ids, an
 // operation, a status and a time, and nothing a person wrote. The guards in services/realtime.ts read only these keys (the

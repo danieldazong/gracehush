@@ -27,7 +27,10 @@ Deno.test("affirmations come back in the order of the day, whatever order the da
   ]);
 });
 
-Deno.test("a crisis row never returns affirmations, even if rows exist", () => {
-  const crisis = cases[2];
-  assertEquals(toResponse(crisis.row, cases[0].affirmations).affirmations, []);
+Deno.test("a heavy moment's row returns its affirmations like any other (gen-v2.4)", () => {
+  const heavy = cases.find((item) => item.row.is_crisis && item.row.devotional_script !== null);
+  assert(heavy !== undefined, "there is a fixture of a whole heavy moment");
+  assertEquals(toResponse(heavy.row, heavy.affirmations).affirmations.length, 3);
+  // One saved before 2026-11-08 has none, so none come back.
+  assertEquals(toResponse(cases[2].row, []).affirmations, []);
 });

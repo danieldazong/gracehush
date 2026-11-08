@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "./testing/assert.ts";
-import { crisisOutput, readyOutput, TEXT } from "./testing/fakes.ts";
+import { heavyOutput, readyOutput, TEXT, VALIDATION_LINE } from "./testing/fakes.ts";
 import {
   countWords,
   curlyApostrophes,
@@ -13,7 +13,7 @@ import {
   stripMarkup,
   tidyParagraphs,
 } from "./output.ts";
-import { SAFE_HEADLINES, SAFE_TITLE } from "./tone.ts";
+import { openingSentence, SAFE_HEADLINES, SAFE_TITLE } from "./tone.ts";
 
 const parse = (value: unknown, entry = TEXT) =>
   parseReflection(typeof value === "string" ? value : JSON.stringify(value), { entry });
@@ -32,15 +32,19 @@ function invalid(value: unknown, reason: string, entry = TEXT): OutputInvalid {
 const words = (count: number) => Array.from({ length: count }, (_, index) => `word${index}`).join(" ");
 // Filler prose of `count` words whose first sentence is ten words long, so the hook guard (gen-v2.2) leaves it alone.
 const prose = (count: number) => words(count).replace(/^((?:\S+ ){9}\S+)/, "$1.");
+// A filler prayer in the person's own voice (gen-v2.3 asks for the first person singular): "I", "my", then `count` words.
+const mine = (count: number) => `I lift my ${words(count)}`;
 
 Deno.test("a good written reflection is accepted and cleaned", () => {
   const result = parse(readyOutput());
   assert(result.kind === "ready");
   assertEquals(result.emotion, "anxious");
   assertEquals(result.title, "Peace in the Waiting");
+  assertEquals(result.validationLine, VALIDATION_LINE);
+  assertEquals(result.validationSource, "model");
   assertEquals(result.scripture, { bookId: "PHP", chapter: 4, verseStart: 6, verseEnd: 7 });
   assertEquals(/amen/i.test(result.closingPrayer), false);
-  assertEquals(result.closingPrayer.endsWith("hearts."), true);
+  assertEquals(result.closingPrayer.endsWith("my heart tonight."), true);
   assertEquals(result.prayer, {
     title: "Peace for the week",
     summary: "Peace and steadiness for a heavy week.",
@@ -53,14 +57,131 @@ Deno.test("a reply wrapped in a code fence is read", () => {
   assert(parse("```json\n" + JSON.stringify(readyOutput()) + "\n```").kind === "ready");
 });
 
-Deno.test("crisis wins over everything else the model said, and carries nothing but the flag", () => {
-  assertEquals(parse(crisisOutput()), { kind: "crisis" });
-  // Scripture, devotional and affirmations returned beside is_crisis are ignored.
-  assertEquals(parse({ ...readyOutput(), is_crisis: true }), { kind: "crisis" });
-  // Even a reply whose other fields are broken is a crisis if it says so: the flag is read first.
-  assertEquals(parse({ is_crisis: true, dominant_emotion: "angry", affirmations: "none", prayer: null }), {
-    kind: "crisis",
-  });
+Deno.test("a heavy moment (gen-v2.4) is a whole reflection: the model's flag or the app's marks it, and every field is read", () => {
+  const flagged = parse(heavyOutput());
+  assertEquals(flagged.heavy, true);
+  assertEquals(flagged.title, "Held Through the Night");
+  assertEquals(flagged.affirmations.length, 3);
+  assertEquals(flagged.scripture, { bookId: "PSA", chapter: 46, verseStart: 1, verseEnd: 1 });
+  // The app's check marks it too, whatever the reply says.
+  assertEquals(parseReflection(JSON.stringify(readyOutput()), { entry: TEXT, heavy: true }).heavy, true);
+  assertEquals(parse(readyOutput()).heavy, false);
+  // A flagged reply whose other fields are broken is no longer a crisis: it is an unusable reply, asked for again.
+  invalid({ is_crisis: true, dominant_emotion: "angry", affirmations: "none", prayer: null }, "emotion");
+});
+
+// A devotional with one sentence added before its second sentence, for the heavy checks.
+const withSentence = (sentence: string) =>
+  String(readyOutput().devotional_text).replace("About rest", `${sentence} About rest`);
+const heavyParse = (value: unknown, entry = TEXT) => parseReflection(JSON.stringify(value), { entry, heavy: true });
+
+function heavyFails(value: unknown, reason: string) {
+  try {
+    heavyParse(value);
+  } catch (error) {
+    assert(error instanceof OutputInvalid, `expected OutputInvalid, got ${String(error)}`);
+    assertEquals(error.reason, reason);
+    assert(error.note?.includes("heavy moment"), "the retry is told why");
+    assertEquals(error.salvage, undefined, "a reply that breaks a heavy rule is never kept");
+    return;
+  }
+  throw new Error(`expected "${reason}" but the heavy reply was accepted`);
+}
+
+Deno.test("a heavy moment quotes nothing: a quotation in the devotional or the prayer is a hard fault", () => {
+  // Their own words, which an ordinary reflection may echo once (gen-v2.3)...
+  const echo = "“I can not seem to rest,” you wrote.";
+  assertEquals(parse(readyOutput({ devotional_text: withSentence(echo) })).heavy, false);
+  // ... never come back in a heavy moment, in the devotional or in the prayer.
+  heavyFails(readyOutput({ devotional_text: withSentence(echo) }), "heavy_quote");
+  heavyFails(
+    readyOutput({ closing_prayer: "Lord, I said “I can not seem to rest” and I need you near me right now." }),
+    "heavy_quote",
+  );
+});
+
+Deno.test("a heavy moment never presents death as a way home, rest at last or a release, or tells someone to submit or forgive", () => {
+  const cases: [string, string][] = [
+    ["God is calling you home.", "home"],
+    ["He will welcome you home soon.", "home"],
+    ["Heaven is waiting for you.", "heaven_waiting"],
+    ["You will find rest at last.", "at_last"],
+    ["Soon you will finally be free.", "at_last"],
+    ["There is a release from this life.", "release"],
+    ["You will no longer be here to hurt.", "release"],
+    ["Submit to your husband and pray.", "submit"],
+    ["You must forgive him.", "must_forgive"],
+    ["You should go back to him.", "must_forgive"],
+    // 2026-11-08: dying, harm, a method or the wish itself, in any words (the live check's quiet heavy moment).
+    ["You will not die tonight.", "dying"],
+    ["Your thoughts of suicide are heavy.", "dying"],
+    ["You have wanted to hurt yourself.", "self_harm"],
+    ["Self-harm is not the answer.", "self_harm"],
+    ["When living hurts this much, wanting it all to stop makes human sense.", "wish"],
+    ["You want to close your eyes and never wake up.", "wish"],
+    ["Going to sleep feels like the only relief right now.", "wish"],
+    ["Sleep feels like the only thing calling to you right now.", "wish"],
+    ["All you want is to sleep.", "wish"],
+    ["You wish you could disappear.", "wish"],
+    ["Put the pills away tonight.", "method"],
+  ];
+  for (const [sentence, id] of cases) {
+    heavyFails(readyOutput({ devotional_text: withSentence(sentence) }), `heavy_never_say:${id}`);
+    // An ordinary reflection is not held to these: they are not on NEVER_SAY.
+    assertEquals(parse(readyOutput({ devotional_text: withSentence(sentence) })).heavy, false, sentence);
+  }
+  // A headline counts too.
+  heavyFails(
+    readyOutput({
+      affirmations: [
+        { time_slot: "morning", headline: "Peace at last", text: "Begin the day knowing you are held." },
+        { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
+        { time_slot: "evening", headline: "It is enough", text: "You did what you could today." },
+      ],
+    }),
+    "heavy_never_say:at_last",
+  );
+});
+
+Deno.test("what a heavy moment may still say: a denial, forgiving yourself, rest in his care, staying with God", () => {
+  for (
+    const sentence of [
+      "You don’t have to forgive him today.",
+      "You never have to go back to them.",
+      "You need to forgive yourself for nothing here.",
+      "Rest in his care tonight.",
+      "He will stay with you.",
+      "Submit to him in prayer, and let him carry you.",
+      "It is not your fault, and you deserve to be safe.",
+      // The pain itself may be named, and hope may be spoken (2026-11-08).
+      "You want the pain to stop, and that pain is real.",
+      "This moment is not the end of your story.",
+      "There is a way through this darkness, and he walks it with you.",
+      "The person who hurt you was wrong.",
+      "Sleep gently tonight, held by him.",
+      "You could not sleep last night, and your fear is real.",
+      "You are too tired to keep going on your own.",
+    ]
+  ) {
+    assertEquals(heavyParse(readyOutput({ devotional_text: withSentence(sentence) })).heavy, true, sentence);
+  }
+});
+
+Deno.test("a heavy moment is never held to grounding or the echo: its own words may be about dying or harm", () => {
+  const entry =
+    "My manager shouted at me in front of the whole team during the budget meeting and now everyone thinks I failed the project deadline completely.";
+  // An ordinary reflection that uses nothing from this long entry is asked for again (grounding_low)...
+  const ordinary = (() => {
+    try {
+      parse(readyOutput(), entry);
+      return "accepted";
+    } catch (error) {
+      return error instanceof OutputInvalid ? error.reason : String(error);
+    }
+  })();
+  assertEquals(ordinary, "grounding_low");
+  // ... a heavy moment is not.
+  assertEquals(heavyParse(readyOutput(), entry).heavy, true);
 });
 
 Deno.test("fields from the old spoken-entry flow are ignored: the reflection is text only now", () => {
@@ -162,7 +283,7 @@ Deno.test("devotional length: 79 words is too few, 80 and 220 pass, 221 is too m
 Deno.test("closing prayer: needs words, and loses a trailing Amen", () => {
   invalid({ ...readyOutput(), closing_prayer: "Lord, hear us." }, "closing_prayer_words");
   invalid({ ...readyOutput(), closing_prayer: words(101) }, "closing_prayer_words");
-  const result = parse({ ...readyOutput(), closing_prayer: `${words(20)}. Amen.` });
+  const result = parse({ ...readyOutput(), closing_prayer: `${mine(20)}. Amen.` });
   assert(result.kind === "ready");
   assertEquals(result.closingPrayer.endsWith("Amen"), false);
 });
@@ -174,12 +295,12 @@ Deno.test("closing prayer: a prayer that stops without punctuation is closed wit
     return result.closingPrayer;
   };
   // What the real model returned on 2026-10-23: no full stop, so the app would show "... restoration Amen.".
-  assertEquals(prayer(`${words(20)} for complete restoration`).endsWith("restoration."), true);
-  assertEquals(prayer(`${words(20)} for rest,`).endsWith("rest."), true);
+  assertEquals(prayer(`${mine(20)} for complete restoration`).endsWith("restoration."), true);
+  assertEquals(prayer(`${mine(20)} for rest,`).endsWith("rest."), true);
   // Punctuation the model already wrote is left alone.
-  assertEquals(prayer(`${words(20)} for rest!`).endsWith("rest!"), true);
-  assertEquals(prayer(`${words(20)} for rest.”`).endsWith("rest.”"), true);
-  assertEquals(prayer(`${words(20)} for rest…`).endsWith("rest…"), true);
+  assertEquals(prayer(`${mine(20)} for rest!`).endsWith("rest!"), true);
+  assertEquals(prayer(`${mine(20)} for rest.”`).endsWith("rest.”"), true);
+  assertEquals(prayer(`${mine(20)} for rest…`).endsWith("rest…"), true);
 });
 
 Deno.test("affirmation rules", () => {
@@ -244,22 +365,31 @@ Deno.test("cleaning: markup, emoji, apostrophes, paragraphs, Amen", () => {
 Deno.test("the cleaned reply never carries tags or emoji into the saved text", () => {
   const dirty = readyOutput({
     reflection_title: "Rest <i>now</i> 🙏",
+    validation_line: "Work has kept you <b>anxious</b> all week 🙏",
     devotional_text: `<speak>${prose(100)}</speak> 🙏`,
-    closing_prayer: `${words(20)} <break/> 🙏 Amen`,
+    closing_prayer: `${mine(20)} <break/> 🙏 Amen`,
   });
   const result = parse(dirty);
   assert(result.kind === "ready");
-  for (const field of [result.title, result.devotional, result.closingPrayer]) {
+  for (const field of [result.title, result.validationLine ?? "", result.devotional, result.closingPrayer]) {
     assertEquals(/[<>]|\p{Extended_Pictographic}/u.test(field), false);
   }
+  assertEquals(result.validationLine, "Work has kept you anxious all week");
 });
 
 // ---- The tone checks of step 32 -----------------------------------------------------------------------------------------
 
 const BLESSING = "Please pray for my sister Blessing. She moved to Ibadan last month and I miss her.";
+// A reply written for BLESSING (gen-v2.3 asks the line and the prayer to use what the person told), with no private word in it.
+const blessingOutput = (over: Record<string, unknown> = {}) =>
+  readyOutput({
+    validation_line: "Your sister moved away last month, and you miss her every day.",
+    closing_prayer: "Lord, I miss my sister since she moved. Keep her close to you, and keep my heart near hers. Amen.",
+    ...over,
+  });
 const devotionalWith = (sentence: string) => `${sentence}\n\n${readyOutput().devotional_text as string}`;
-const headlines = (morning: string, evening = "It is enough") => ({
-  ...readyOutput(),
+const headlines = (morning: string, evening = "It is enough", base: Record<string, unknown> = readyOutput()) => ({
+  ...base,
   affirmations: [
     { time_slot: "morning", headline: morning, text: "Begin the day knowing you are held." },
     { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
@@ -316,7 +446,11 @@ Deno.test("never_say: checked in the devotional, the prayer, the title, the head
 
 Deno.test("title_private and headline_private: a name the person wrote never reaches a lock screen", () => {
   // The headline leaks "blessing": the failure carries a note naming it and the reply with the safe headline.
-  const headline = invalid(headlines("You are a blessing"), "headline_private", BLESSING);
+  const headline = invalid(
+    headlines("You are a blessing", "It is enough", blessingOutput()),
+    "headline_private",
+    BLESSING,
+  );
   assert(headline.note?.endsWith("any headline: blessing, ibadan."), headline.note);
   const kept = headline.salvage as ReadyReflection;
   assertEquals(kept.salvaged, "headline_private");
@@ -329,7 +463,7 @@ Deno.test("title_private and headline_private: a name the person wrote never rea
 
   // The title leaks: title_private, whatever the headlines do, and the note puts the leaked word first.
   const both = invalid(
-    { ...headlines("You are a blessing", "Ibadan is near"), reflection_title: "Missing Ibadan" },
+    { ...headlines("You are a blessing", "Ibadan is near", blessingOutput()), reflection_title: "Missing Ibadan" },
     "title_private",
     BLESSING,
   );
@@ -345,7 +479,7 @@ Deno.test("title_private and headline_private: a name the person wrote never rea
 
   // The same words from an entry that never wrote the name are fine, and the devotional may say it (it stays in the app).
   assert(parse(headlines("You are a blessing")).kind === "ready");
-  assert(parse(readyOutput({ devotional_text: devotionalWith("Blessing is near.") }), BLESSING).kind === "ready");
+  assert(parse(blessingOutput({ devotional_text: devotionalWith("Blessing is near.") }), BLESSING).kind === "ready");
 });
 
 Deno.test("the checks run in order: shape, then scripture, then never-say, and privacy last", () => {
@@ -434,7 +568,10 @@ Deno.test("the hook guard comes last: a hard check or a private word wins over i
   // A name in a headline is the private-word salvage (its safe texts), not the hook's.
   try {
     parseReflection(
-      JSON.stringify({ ...headlines("You are a blessing"), devotional_text: devotionalWith("The night was long.") }),
+      JSON.stringify({
+        ...headlines("You are a blessing", "It is enough", blessingOutput()),
+        devotional_text: devotionalWith("The night was long."),
+      }),
       {
         entry: BLESSING,
         recentFirstWords: [],
@@ -454,4 +591,148 @@ Deno.test("the hook guard: a first sentence over sixteen words is asked for agai
   assert(error.note?.startsWith("Your last reply began the devotional with a first sentence of 17 words."), error.note);
   assertEquals((error.salvage as ReadyReflection).salvaged, "hook_long");
   assert(parseAfter(readyOutput({ devotional_text: devotionalWith(sentence(16)) }), []).kind === "ready");
+});
+
+// ---- gen-v2.3: the validation line, the prayer's voice, grounding and the echo -------------------------------------------
+
+Deno.test("the validation line is read and cleaned, and a good reply keeps the model's own line", () => {
+  const result = parse(
+    readyOutput({ validation_line: "  “Work has kept you anxious all week, and rest still won't come.”\n" }),
+  );
+  assert(result.kind === "ready");
+  assertEquals(result.validationLine, VALIDATION_LINE);
+  assertEquals([result.validationSource, result.salvaged], ["model", null]);
+});
+
+Deno.test("a missing, wrong-length, stock or impersonal line is asked for again, and the hook stands in when none is better", () => {
+  const cases: [unknown, string][] = [
+    [null, "validation_missing"],
+    [undefined, "validation_missing"],
+    [42, "validation_missing"],
+    ["Your week was long.", "validation_length"],
+    ["It sounds like work has kept you anxious all week.", "validation_stock"],
+    ["Sometimes work keeps you anxious all week long.", "validation_stock"],
+    ["Work has kept everyone anxious all week long.", "validation_person"],
+  ];
+  for (const [line, reason] of cases) {
+    const error = invalid(readyOutput({ validation_line: line }), reason);
+    assert(error.note?.includes("validation_line"), error.note);
+    const kept = error.salvage as ReadyReflection;
+    assertEquals(kept.salvaged, reason);
+    assertEquals(kept.validationLine, openingSentence(kept.devotional), "the hook takes the line's place");
+    assertEquals(kept.validationSource, "salvage");
+  }
+});
+
+Deno.test("a private word in the line is asked for again; the hook stands in, or no line when the hook holds one too", () => {
+  const leaky = "Your sister Blessing moved away last month, and you miss her.";
+  const error = invalid(blessingOutput({ validation_line: leaky }), "validation_private", BLESSING);
+  assert(error.note?.endsWith("in validation_line: blessing, ibadan."), error.note);
+  assertEquals((error.salvage as ReadyReflection).validationLine, "Paragraph 1 holds a quiet thought.");
+  const both = invalid(
+    blessingOutput({ validation_line: leaky, devotional_text: devotionalWith("Blessing moved last month.") }),
+    "validation_private",
+    BLESSING,
+  );
+  assertEquals((both.salvage as ReadyReflection).validationLine, null, "a hook with the name is no line at all");
+  // A hook over 240 characters cannot be stored as a line either.
+  const long = invalid(
+    readyOutput({ validation_line: null, devotional_text: `${"Word ".repeat(60)}end.\n\n${prose(90)}` }),
+    "validation_missing",
+  );
+  assertEquals((long.salvage as ReadyReflection).validationLine, null);
+});
+
+Deno.test("the line meets the hard checks too: a verse or a never-say phrase fails it, with no salvage", () => {
+  const verse = invalid(
+    readyOutput({ validation_line: "Psalm 23 is for you after this anxious week at work." }),
+    "verse_reference",
+  );
+  assertEquals(verse.salvage, undefined);
+  const never = invalid(
+    readyOutput({ validation_line: "Your week at work was hard, but everything happens for a reason." }),
+    "never_say:reason",
+  );
+  assertEquals(never.salvage, undefined);
+});
+
+Deno.test('a prayer prayed as "we", or in no voice, is asked for again and kept as it was when none is better', () => {
+  const we = invalid(
+    readyOutput({ closing_prayer: "Lord, we bring you this anxious week of work and ask for peace on our hearts." }),
+    "prayer_voice:we",
+  );
+  assert(we.note?.includes("first person singular"), we.note);
+  const kept = we.salvage as ReadyReflection;
+  assertEquals([kept.salvaged, kept.closingPrayer], [
+    "prayer_we",
+    "Lord, we bring you this anxious week of work and ask for peace on our hearts.",
+  ]);
+  const none = invalid(
+    readyOutput({ closing_prayer: "Lord, hold this anxious week of work and give rest tonight." }),
+    "prayer_voice:none",
+  );
+  assertEquals((none.salvage as ReadyReflection).salvaged, "prayer_none");
+  // A person who wrote as "we" may pray as "we".
+  const together = "Lord, our work has kept us anxious all week and we cannot rest.";
+  assert(
+    parse(readyOutput({ closing_prayer: "Lord, we bring you our anxious week of work and ask for rest." }), together)
+      .kind === "ready",
+  );
+});
+
+Deno.test("a reply that uses nothing the person told is asked for again, and kept as it was when none is better", () => {
+  // Twelve content stems, none of them in the sample reply ("quiet" would be: its devotional holds "a quiet thought").
+  const entry =
+    "The landlord raised my rent, my daughter starts school, the generator broke, the mechanic wants cash, and my stall is empty.";
+  const error = invalid(readyOutput(), "grounding_low", entry);
+  assert(error.note?.startsWith("Your last reply did not use what the person told you."), error.note);
+  assertEquals((error.salvage as ReadyReflection).salvaged, "grounding_low");
+  // One shared word is not enough for an entry this long; two are.
+  invalid(
+    readyOutput({ validation_line: "Your rent went up again, and you are tired of counting." }),
+    "grounding_low",
+    entry,
+  );
+  assert(
+    parse(readyOutput({ validation_line: "Your rent went up and the generator broke, and you are tired." }), entry)
+      .kind ===
+      "ready",
+  );
+  // A short entry is never measured.
+  assert(parse(readyOutput(), "Thank you God for today.").kind === "ready");
+});
+
+Deno.test("a quotation that is not the person's own words is asked for again, and kept as it was when none is better", () => {
+  const error = invalid(
+    readyOutput({ devotional_text: devotionalWith("You said it yourself, “I am done with work.”") }),
+    "echo_invented",
+  );
+  assert(error.note?.startsWith("The quoted words are not in the person’s entry."), error.note);
+  assertEquals((error.salvage as ReadyReflection).salvaged, "echo_invented");
+  assert(
+    parse(readyOutput({ devotional_text: devotionalWith("You said it yourself, “I can not seem to rest.”") })).kind ===
+      "ready",
+  );
+});
+
+Deno.test("several soft faults at once: one retry carries every note, and the first fault names the salvage", () => {
+  const error = invalid(
+    readyOutput({
+      validation_line: "It sounds like work has kept you anxious all week.",
+      closing_prayer: "Lord, we bring you this anxious week of work and ask for peace on our hearts.",
+    }),
+    "prayer_voice:we",
+  );
+  assert(error.note?.includes("closing prayer") && error.note?.includes("validation_line"), error.note);
+  const kept = error.salvage as ReadyReflection;
+  assertEquals(kept.salvaged, "prayer_we");
+  assertEquals(kept.validationLine, openingSentence(kept.devotional), "the line is replaced too");
+  // A private title comes first, and its safe title is in the salvage with the line's replacement.
+  const title = invalid(
+    blessingOutput({ reflection_title: "Missing Blessing", validation_line: "It sounds like you miss your sister." }),
+    "title_private",
+    BLESSING,
+  );
+  const saved = title.salvage as ReadyReflection;
+  assertEquals([saved.title, saved.validationSource], [SAFE_TITLE, "salvage"]);
 });

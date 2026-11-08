@@ -79,9 +79,11 @@ export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const satisfies
 // What the model is allowed to write. Out of range counts as invalid (nothing is truncated). These are the hard bounds that
 // stop a runaway reply; the targets the instruction asks for are tighter (step 32: a devotional of 110 to 150 words, a title of
 // at most 40 characters), and the tone evaluation measures how close the model comes. A headline is a notification's whole
-// body (step 28), so its 50 characters are a hard limit.
+// body (step 28), so its 50 characters are a hard limit. The validation line (step 36) asks for 8 to 18 words; a line outside
+// 5 to 24, or over the column's 240 characters, is asked for again and never stored (tone.ts validationProblem).
 export const LIMITS = {
   title: { maxChars: 60 },
+  validationLine: { minWords: 5, maxWords: 24, maxChars: 240 },
   devotional: { minWords: 80, maxWords: 220 },
   closingPrayer: { minWords: 10, maxWords: 100 },
   affirmationHeadline: { maxWords: 8, maxChars: 50 },

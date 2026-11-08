@@ -126,7 +126,7 @@ export async function selectAffirmations(entryId: string): Promise<RepoResult<Af
 }
 
 // The run of reflection days for Journal Home's chip (step 33): reflection_streak_days counts the user's own entries in the
-// database (consecutive days in the zone `tz`, ending today or yesterday, each with a finished entry that is not a crisis entry),
+// database (consecutive days in the zone `tz`, ending today or yesterday, each with a finished reflection, a heavy moment's included),
 // so the number does not depend on how many entries the phone holds. A zone the database does not know is refused (22023).
 export async function selectReflectionStreak(tz: string): Promise<RepoResult<number>> {
   const message = copy.journal.error.message;
@@ -142,8 +142,8 @@ export async function selectReflectionStreak(tz: string): Promise<RepoResult<num
   return { ok: true, data };
 }
 
-// The entries that are prayers, tracked or answered, newest first, at most PRAYERS_LIMIT (step 29). A crisis entry and an
-// unfinished one never are: the table's rules say so too.
+// The entries that are prayers, tracked or answered, newest first, at most PRAYERS_LIMIT (step 29). An unfinished entry never is.
+// A heavy moment is when its person marked it (since 2026-11-08: the server never makes one a prayer by itself).
 // TODO: paginate if a user passes 300 prayers.
 export async function selectPrayerRows(): Promise<RepoResult<EntryRow[]>> {
   const supabase = getSupabase();
@@ -153,7 +153,6 @@ export async function selectPrayerRows(): Promise<RepoResult<EntryRow[]>> {
     .from("journal_entries")
     .select(ENTRY_COLUMNS)
     .eq("user_id", userId)
-    .eq("is_crisis", false)
     .eq("processing_status", "ready")
     .or("is_active_prayer.eq.true,is_answered.eq.true")
     .order("created_at", { ascending: false })

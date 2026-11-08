@@ -738,7 +738,7 @@ async function handlerChecks() {
     assert.deepEqual(w.services.forgotten, [idOf(2)]);
   });
 
-  await test("handler: a newly finished reflection reads its affirmations before the notifications are planned again; a crisis entry plans them without reading any; a change to a finished one does neither", async (w) => {
+  await test("handler: a newly finished reflection reads its affirmations before the notifications are planned again, a heavy moment's too; a change to a finished one does neither", async (w) => {
     seedServer(w, 1, () => ({ processing_status: "processing", devotional_title: null, devotional_script: null }));
     const rt = await fakeChannels(w);
     const channel = await startLive(w, rt);
@@ -758,11 +758,14 @@ async function handlerChecks() {
     await advance(1_000);
     assert.equal(affirmationReads(w, idOf(1)), 1, "a change to a finished reflection reads no affirmations");
     assert.deepEqual(seen, [1], "and plans nothing");
-    const crisis = serverRow(9, { processing_status: "ready", is_crisis: true, devotional_title: null, devotional_script: null, closing_prayer: null, scripture_reference: null, scripture_text: null, scripture_verified: false, dominant_emotion: null, created_at: stamp(clock.now), updated_at: stamp(clock.now) });
-    w.server.state.entries.push(crisis);
-    channel.deliver("entry_changed", entryMessage(crisis.id, "INSERT", "ready", crisis.updated_at));
+    // A heavy moment is a whole reflection since 2026-11-08, with its three affirmations.
+    const heavy = serverRow(9, { processing_status: "ready", is_crisis: true, created_at: stamp(clock.now), updated_at: stamp(clock.now) });
+    w.server.state.entries.push(heavy);
+    w.server.state.affirmations.push(...affirmationRows(heavy.id));
+    channel.deliver("entry_changed", entryMessage(heavy.id, "INSERT", "ready", heavy.updated_at));
     await advance(1_000);
-    assert.equal(affirmationReads(w, crisis.id), 0, "a crisis entry has no affirmations to read");
+    assert.equal(affirmationReads(w, heavy.id), 1, "a heavy moment's affirmations are read like any other's");
+    assert.equal((await cache(w).listAffirmationsForEntry(heavy.id)).length, 3);
     assert.equal(seen.length, 2, "and the notifications are planned again");
   });
 

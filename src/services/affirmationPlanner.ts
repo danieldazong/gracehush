@@ -52,12 +52,13 @@ function fnv1a(text: string): string {
 
 const pad = (value: number, size: number) => String(value).padStart(size, "0");
 
-// Nothing is planned while the switch is off, the phone will not show notifications, there is no finished reflection, or the
-// newest one is a crisis entry: then nothing at all is sent until a newer reflection is ready, and an older reflection's
-// affirmations are not used either. A reflection without all three headlines is skipped the same way.
+// Nothing is planned while the switch is off, the phone will not show notifications, or there is no finished reflection. A heavy
+// moment's affirmations are sent like any other's (2026-11-08: they are written to speak hope). The newest reflection without all
+// three headlines (a heavy moment saved before then has none) sends nothing at all until a newer one is ready, and an older
+// reflection's affirmations are not used either.
 export function planAffirmations(input: PlanInput): PlannedAffirmation[] {
   const { source } = input;
-  if (!input.enabled || input.permission !== "granted" || source === null || source.isCrisis) return [];
+  if (!input.enabled || input.permission !== "granted" || source === null) return [];
   if (!USER_HASH.test(input.userHash)) return [];
   const headlines = new Map<TimeSlot, string>();
   for (const affirmation of source.affirmations) headlines.set(affirmation.slot, affirmation.headline.trim());

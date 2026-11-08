@@ -57,6 +57,7 @@ function toDevotional(row: EntryRow): Devotional | null {
   if (!row.devotional_script) return null;
   return {
     title: row.devotional_title || "",
+    validation: row.validation_line ?? null,
     script: row.devotional_script,
     closingPrayer: row.closing_prayer ?? null,
     audioPath: row.devotional_audio_path || null,
@@ -91,9 +92,11 @@ function toAffirmation(row: AffirmationRow): Affirmation {
   };
 }
 
+// gen-v2.4: a heavy moment (is_crisis) is a whole reflection like any other, so it is mapped like one. One saved before
+// 2026-11-08 has no emotion, devotional, passage or affirmations in its row, so those come out empty from the row alone.
 export function toResponse(row: EntryRow, affirmations: AffirmationRow[]): ProcessEntryResponse {
   const status = pick(STATUSES, row.processing_status) ?? "ready";
-  const finished = status === "ready" && row.is_crisis !== true;
+  const finished = status === "ready";
   const entry: JournalEntry = {
     id: row.id,
     clientEntryId: row.client_entry_id ?? null,
@@ -113,9 +116,6 @@ export function toResponse(row: EntryRow, affirmations: AffirmationRow[]): Proce
   const slotOrder = (item: Affirmation) => TIME_SLOTS.indexOf(item.slot);
   return {
     entry,
-    // A crisis entry never has affirmations.
-    affirmations: row.is_crisis === true
-      ? []
-      : affirmations.map(toAffirmation).sort((a, b) => slotOrder(a) - slotOrder(b)),
+    affirmations: affirmations.map(toAffirmation).sort((a, b) => slotOrder(a) - slotOrder(b)),
   };
 }

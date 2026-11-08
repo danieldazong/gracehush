@@ -56,11 +56,11 @@ import { calendarDayIn, isTimeZone } from "@/utils/zonedTime";
 
 const SLOT_ORDER: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 
-// Where the real server answers: a crisis check runs before the devotional, and the free limit is
-// checked before any AI call, so those outcomes stop earlier.
+// Where the real server answers: the free limit is checked before the devotional is written, so a "limit" outcome stops
+// earlier. A heavy moment ("crisis") is a whole reflection since 2026-11-08, so it goes through every stage.
 const STAGES: Record<MockSubmitOutcome, readonly ProcessingStage[]> = {
   ready: ["receiving", "reflecting", "preparing"],
-  crisis: ["receiving", "reflecting"],
+  crisis: ["receiving", "reflecting", "preparing"],
   failed: ["receiving", "reflecting"],
   limit: ["receiving"],
   too_short: ["receiving"],
@@ -80,9 +80,7 @@ function readEntries(): JournalEntry[] {
 }
 
 function readAffirmations(entryId: string): Affirmation[] {
-  const { entries, affirmations } = getMockDb();
-  // Safety net: a crisis entry never has affirmations, whatever the rows hold.
-  if (entries.find((row) => row.id === entryId)?.is_crisis === true) return [];
+  const { affirmations } = getMockDb();
   return affirmations
     .filter((row) => row.entry_id === entryId)
     .map(toAffirmation)
@@ -218,6 +216,15 @@ export async function readCachedEntries(): Promise<JournalEntry[]> {
   return getDataSource() === "mock" ? [] : live.readCachedEntries(getEntriesPageSize());
 }
 
+// Whether an entry is a heavy moment, as this phone has it (2026-11-08). Since then a heavy moment may be a prayer its person
+// marked, and Prayers asks before it sends an analytics event, because no event is about a heavy moment (Analytics Rules). It
+// never throws, and an entry the phone does not have is not one.
+export async function isHeavyMoment(entryId: string): Promise<boolean> {
+  if (getDataSource() === "mock") return readEntries().some((entry) => entry.id === entryId && entry.isCrisis);
+  const entry = await live.readCachedEntry(entryId).catch(() => null);
+  return entry?.isCrisis === true;
+}
+
 export async function readCachedEntry(id: string): Promise<JournalEntry | null> {
   return getDataSource() === "mock" ? null : live.readCachedEntry(id);
 }
@@ -230,16 +237,15 @@ export async function readCachedLatestAffirmations(): Promise<Affirmation[]> {
   return getDataSource() === "mock" ? [] : live.readCachedLatestAffirmations();
 }
 
-// What the affirmation notifications are made from (step 28): the newest finished entry this phone has, a crisis entry
-// included (so that nothing is scheduled after one), with its affirmations when it is not one. Null when there is none. It
-// reads this phone only, never the network, and the real source throws when the cache cannot be read, so the scheduler then
-// changes nothing. The mock data's own rows in development.
+// What the affirmation notifications are made from (step 28): the newest finished entry this phone has, with its affirmations
+// (a heavy moment's are sent like any other's; one saved before 2026-11-08 has none, so nothing is scheduled after it). Null when
+// there is none. It reads this phone only, never the network, and the real source throws when the cache cannot be read, so the
+// scheduler then changes nothing. The mock data's own rows in development.
 export async function readAffirmationSource(): Promise<AffirmationSource | null> {
   if (getDataSource() === "mock") {
     const latest = readEntries().find((entry) => entry.status === "ready");
     if (latest === undefined) return null;
-    const affirmations = latest.isCrisis ? [] : readAffirmations(latest.id);
-    return { entryId: latest.id, isCrisis: latest.isCrisis, affirmations };
+    return { entryId: latest.id, affirmations: readAffirmations(latest.id) };
   }
   return live.readCachedAffirmationSource();
 }
@@ -381,7 +387,7 @@ function cleanNote(note: string | null): string | null {
 }
 
 // What a prayer write does to its entry: the change of journal_entries columns, or why there is none. It sees the entry as the
-// phone has it, a finished reflection that is not a crisis (anything else is NOT_FOUND before it is asked).
+// phone has it, a finished reflection, a heavy moment's included (anything else is NOT_FOUND before it is asked).
 type BuildChange = (entry: JournalEntry) => RepoResult<PrayerPatch>;
 
 // The mock data: the mock row changes at once, after a short wait so a sheet or a dialog shows its spinner, and the developer
@@ -391,7 +397,7 @@ async function changeMockPrayer(entryId: string, build: BuildChange): Promise<Re
   if (takeMockPrayerMutationFailure()) return failure("NETWORK", copy.prayers.errors.save);
   const row = getMockDb().entries.find((candidate) => candidate.id === entryId);
   const entry = row === undefined ? null : toJournalEntry(row);
-  if (row === undefined || entry === null || entry.isCrisis || entry.status !== "ready") {
+  if (row === undefined || entry === null || entry.status !== "ready") {
     return failure("NOT_FOUND", copy.prayers.errors.save);
   }
   const built = build(entry);
@@ -563,12 +569,12 @@ export async function listAffirmationsForEntry(entryId: string): Promise<Affirma
   return live.fetchAffirmations(entryId);
 }
 
-// From the newest ready, non-crisis entry. The real source never throws: with no answer it is the cached copy (fetchAffirmations
-// falls back to it), or nothing when there is none, and Journal Home then shows no affirmation card.
+// From the newest finished reflection (getNewestReadyEntry's rule). The real source never throws: with no answer it is the cached
+// copy (fetchAffirmations falls back to it), or nothing when there is none, and Journal Home then shows no affirmation card.
 export async function getLatestAffirmations(): Promise<Affirmation[]> {
   if (getDataSource() === "mock") {
     await simulateLatency();
-    const latest = readEntries().find((entry) => entry.status === "ready" && !entry.isCrisis);
+    const latest = readEntries().find((entry) => entry.status === "ready" && entry.devotional !== null);
     return latest ? readAffirmations(latest.id) : [];
   }
   try {
@@ -606,8 +612,8 @@ function toMockRequest(item: OutboxItem): ProcessEntryRequest {
 
 // A mock run for the sync engine, used while the data source is the mock (services/entryProcessor.ts): it reports each
 // stage 1.2 s apart, then answers with what the dev store asked for (one shot, see takeMockSubmitOutcome), or with no answer at
-// all when the dev panel failed the network. A finished or crisis outcome adds an entry to the mock database and answers with
-// it, as the server does.
+// all when the dev panel failed the network. A finished outcome, a heavy moment's included, adds an entry to the mock database
+// and answers with it, as the server does.
 export async function processMock(
   item: OutboxItem,
   onStage: (stage: ProcessingStage) => void,
@@ -620,7 +626,7 @@ export async function processMock(
   const taken = takeMockSubmitOutcome();
   // A paid plan never hits the free limit, so there a "limit" run finishes like a normal one.
   const outcome = taken === "limit" && getMockSubscriptionTier() !== "free" ? "ready" : taken;
-  // The outcome is never logged: a crisis outcome must leave no log line (AGENTS.md Crisis Safety Rules).
+  // The outcome is never logged: a heavy moment must leave no log line (AGENTS.md Crisis Safety Rules).
   for (const stage of STAGES[outcome]) {
     if (__DEV__) console.log(`[process] stage ${stage}`);
     onStage(stage);

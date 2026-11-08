@@ -3,7 +3,12 @@
 // Change it only together with a run of eval/run_eval.ts: every crisis case must still come back as a crisis (100%). The
 // wording describes kinds of language and does not copy the eval's sentences, so the eval stays a test of the model and
 // not of a memorized answer. It holds no method or means of any kind, and nothing here may ever be extended with one.
-export const SCREEN_PROMPT_VERSION = "screen-v1";
+//
+// screen-v2 (step 36): the transcription rule asks for the words as they were said, in the language and dialect spoken, with
+// [unclear] for a word the model cannot make out, and the audio turn says the same. Every classification rule is screen-v1's,
+// word for word: screen_test.ts compares them with the frozen copy in eval/screen_prompt_v1.ts. eval/run_transcription.ts
+// measures the transcription against scripts that were read aloud.
+export const SCREEN_PROMPT_VERSION = "screen-v2";
 
 const ROLE =
   `You are a safety screener for a private Christian prayer journal. You never reply to the person who wrote the entry. You only classify it.`;
@@ -17,11 +22,12 @@ const RULES = [
   `Set risk to "none" for sadness, grief (including grief over a death), anxiety, anger, doubt, exhaustion or burnout, struggles that are clearly described as past, and prayer for someone else's safety or healing when nothing is happening right now. Everyday figures of speech are not a crisis, and neither is the language of Christian devotion: offering one's life to God, dying to self or to sin, or not wanting to go on living in fear or shame.`,
   `When you are unsure between two levels, choose the higher one.`,
   `In categories, list each kind of concern you see: self_harm, suicide, harm_to_others, abuse_or_danger_now, medical_emergency. Leave it empty when risk is "none".`,
-  `For audio, first transcribe exactly what was said, word for word, into transcript. If there is no intelligible speech, set no_speech to true, transcript to "", risk to "none" and categories to an empty list. For a written entry set no_speech to false and transcript to "".`,
+  `For audio, first transcribe exactly what was said, word for word, into transcript: in the language and dialect spoken, keeping non-English words, repetitions, false starts and filler words as they were said. Never translate, summarize, tidy the grammar or guess a word: write [unclear] for a word you cannot make out. If there is no intelligible speech, set no_speech to true, transcript to "", risk to "none" and categories to an empty list. For a written entry set no_speech to false and transcript to "".`,
   `Respond only with JSON that matches the schema.`,
 ];
 
 export const SCREEN_SYSTEM_INSTRUCTION = [ROLE, INPUT_SAFETY, ...RULES].join("\n\n");
 
 // The user turn that goes with a recording (a written entry is sent as the wrapped text itself).
-export const SCREEN_AUDIO_TURN = "Transcribe the attached spoken journal entry exactly, then classify it.";
+export const SCREEN_AUDIO_TURN =
+  "Transcribe the attached spoken journal entry exactly as it was said, word for word, then classify it.";

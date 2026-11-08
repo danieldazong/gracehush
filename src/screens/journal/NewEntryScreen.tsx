@@ -221,10 +221,10 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     switch (result.kind) {
       case "ready":
         leaving.current = true;
-        // Only a finished devotional gets the success tap: a crisis result is as calm as the screen it opens.
+        // A heavy moment gets no success tap: it is met as calmly as the reflection it opens.
         if (!result.isCrisis) haptics.success();
-        // Reflection decides what to show; the crisis state is a data state (step 13). A crisis is checked before the
-        // free limit, so it never reaches the Paywall.
+        // Reflection shows a heavy moment like any other reflection, with its quiet help line. The server never counts or
+        // limits a heavy moment, so it never reaches the Paywall.
         navigation.replace("Reflection", { entryId: result.entryId });
         break;
       case "limit":
@@ -449,7 +449,6 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
         <AiPermissionSheet
           onAllow={() => setAllowed(true)}
           onNotNow={() => leaveToJournal("permission")}
-          onOpenSupport={() => navigation.navigate("CrisisResources", { source: "newEntry" })}
           onOpenPrivacy={() => void openLegalPage(PRIVACY_POLICY_URL)}
         />
       )}

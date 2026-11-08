@@ -222,12 +222,19 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
     const count = words(entry.devotional?.script);
     const verse = entry.scripture?.text ?? "";
     const length = entry.devotional?.durationMs;
+    // Step 36: the first line on the screen was written from the entry: present, 5 to 24 words, and not a stock
+    // opening. Only its length is printed, never its words.
+    const line = entry.devotional?.validation ?? "";
+    const lineWords = words(line);
+    const stockLine =
+      /^["“‘']*(?:it|i|the|today|sometimes|dear|let[’']s|in this moment|you are not alone|you[’']re not alone)(?![A-Za-z0-9])/i
+        .test(line);
     const ok =
       entry.status === "ready" && !entry.isCrisis && affirmations.length === 3 && count >= 80 && count <= 260 &&
-      entry.scripture?.verified === true && verse.length > 0;
+      entry.scripture?.verified === true && verse.length > 0 && lineWords >= 5 && lineWords <= 24 && !stockLine;
     return {
       ok,
-      note: `${entry.status}, ${count} words, ${affirmations.length} affirmations, ${entry.scripture?.reference ?? "no passage"} (${entry.scripture?.verified ? `verified, ${verse.length} characters` : "NOT verified"}), title "${entry.devotional?.title ?? ""}", audio ${entry.devotional?.audioPath ? (length ? seconds(length) : "of unknown length") : "none"}`,
+      note: `${entry.status}, ${count} words, first line ${lineWords} words${stockLine ? " (a stock opening)" : ""}, ${affirmations.length} affirmations, ${entry.scripture?.reference ?? "no passage"} (${entry.scripture?.verified ? `verified, ${verse.length} characters` : "NOT verified"}), title "${entry.devotional?.title ?? ""}", audio ${entry.devotional?.audioPath ? (length ? seconds(length) : "of unknown length") : "none"}`,
     };
   });
 
@@ -408,20 +415,26 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
     refused(400, "INVALID_REQUEST"),
   );
 
-  // 7. The crisis screening (step 21): an explicit sentence is decided by its phrase list alone, and a quiet one only its
-  // model can find. Neither may get a devotional or affirmations. (The first needs no model, so it answers fast.) A crisis
-  // is answered even by an account over its free limit (step 22): it is never counted and never blocked.
+  // 7. A heavy moment (gen-v2.4): the crisis screening still finds both, an explicit sentence by its phrase list and a quiet one
+  // by its model, and each now gets a whole reflection written with extra care (a devotional and three affirmations), never made a
+  // prayer. A heavy moment is answered even by an account over its free limit (step 22): it is never counted and never blocked.
   for (
     const [label, text] of [
-      ["made-up crisis sentence", CRISIS],
-      ["made-up quiet crisis (found by the model)", QUIET_CRISIS],
+      ["made-up heavy sentence", CRISIS],
+      ["made-up quiet heavy moment (found by the model)", QUIET_CRISIS],
     ] as const
   ) {
     await step(label, { clientEntryId: randomUUID(), inputType: "text", text }, (reply) => {
       const body = asSuccess(reply);
       if (!body) return { ok: false, note: `expected 200, got ${reply.status} ${codeOf(reply)}` };
-      const ok = body.entry.isCrisis && body.entry.devotional === null && body.affirmations.length === 0;
-      return { ok, note: ok ? "crisis entry, no devotional, no affirmations" : "it was not saved as a crisis entry" };
+      const ok = body.entry.isCrisis && body.entry.devotional !== null && body.affirmations.length === 3 &&
+        body.entry.prayer === null;
+      return {
+        ok,
+        note: ok
+          ? "a heavy moment with its devotional and three affirmations, not a prayer"
+          : "it was not saved as a heavy moment with its reflection",
+      };
     });
   }
 
@@ -453,7 +466,7 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
 
   // 10. The free limit (step 22).
   // A free account that has used its three: a new entry is a 402 that carries the entry and the week's numbers, and a
-  // crisis is still answered as a crisis. A free account that has not used them yet gets a normal answer, which is a skip.
+  // heavy moment is still answered with its reflection. A free account that has not used them yet gets a normal answer, which is a skip.
   if (plan === "free") {
     const limited = await step("free limit", { clientEntryId: randomUUID(), inputType: "text", text: WRITTEN }, (reply) => {
       if (reply.status === 200) {
@@ -471,13 +484,18 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
       };
     });
     if (limited.status === 402 && codeOf(limited) === "LIMIT_REACHED") {
-      await step("free limit, a crisis is still answered", { clientEntryId: randomUUID(), inputType: "text", text: CRISIS }, (reply) => {
+      await step("free limit, a heavy moment is still answered", { clientEntryId: randomUUID(), inputType: "text", text: CRISIS }, (reply) => {
         const body = asSuccess(reply);
-        const ok = !!body?.entry.isCrisis && body.entry.devotional === null;
-        return { ok, note: ok ? "a crisis entry, not a 402, over the limit" : `expected a crisis entry, got ${reply.status} ${codeOf(reply)}` };
+        const ok = !!body?.entry.isCrisis && body.entry.devotional !== null;
+        return {
+          ok,
+          note: ok
+            ? "a heavy moment with its reflection, not a 402, over the limit"
+            : `expected a heavy moment, got ${reply.status} ${codeOf(reply)}`,
+        };
       });
     } else {
-      skip("free limit, a crisis is still answered", "the account is not over its limit, so there is nothing to compare");
+      skip("free limit, a heavy moment is still answered", "the account is not over its limit, so there is nothing to compare");
     }
   } else {
     skip("free limit", `this account is ${plan ?? "of unknown plan"}, and the limit applies to free accounts (set it to free to run this case: prompt 22, step H)`);

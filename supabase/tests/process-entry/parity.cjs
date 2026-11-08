@@ -21,8 +21,8 @@ const failures = [];
 for (const fixture of fixtures) {
   try {
     assert.deepStrictEqual(toJournalEntry(fixture.row), fixture.expected.entry);
-    // The repository returns no affirmations for a crisis entry, even if rows exist.
-    const affirmations = fixture.row.is_crisis ? [] : fixture.affirmations.map(toAffirmation);
+    // Every entry's affirmations map the same way, a heavy moment's included (2026-11-08: it is a whole reflection).
+    const affirmations = fixture.affirmations.map(toAffirmation);
     assert.deepStrictEqual(affirmations, fixture.expected.affirmations);
     passed += 1;
   } catch (error) {

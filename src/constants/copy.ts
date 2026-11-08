@@ -32,12 +32,11 @@ export const copy = {
     notNow: "Not now",
     learnMore: "Learn more",
     showLess: "Show less",
-    support: "Support resources",
     privacy: "Privacy Policy",
     details: [
       {
         label: "Why we ask",
-        body: "To write your devotional, read it aloud, and show support resources if your words suggest you need them.",
+        body: "To write your devotional and read it aloud, with extra care when your words carry something very heavy.",
       },
       { label: "What Google keeps", body: "Google can keep your words for a limited time to check for misuse." },
       {
@@ -254,14 +253,12 @@ export const copy = {
       // Curly quotes around the transcript excerpt.
       quote: (text: string) => `“${text}”`,
       voiceReflection: "Voice reflection",
-      crisis: "A heavy moment. Tap to see support.",
       textOnly: "Text only",
       preparing: "Preparing your devotional…",
       saving: "Saving your reflection…",
       waiting: "Waiting to sync",
       failed: "We couldn’t finish this one.",
       tryAgain: "Try again",
-      support: "Support resources",
       // A reflection that is only on this phone never shows its words.
       writtenReflection: "Written reflection",
       review: "Review",
@@ -300,7 +297,6 @@ export const copy = {
         preparing: "Preparing your devotional",
         saving: "Saving your reflection",
         failed: "We couldn’t finish this one",
-        support: "Support resources are available",
       },
     },
     offline: {
@@ -333,9 +329,6 @@ export const copy = {
       retry: "Saved. We’ll finish your reflection as soon as we can.",
       permission: "Nothing was sent. You can allow Google’s AI anytime in Profile, or the next time you start a reflection.",
     },
-    // A text link under every note: nothing has been screened yet (offline, the service had no answer, or nothing was sent), so a
-    // way to reach someone stays one tap away. It opens Support Resources, which works offline (step 25 follow-up).
-    noteSupport: "Support resources",
     synced: "All reflections synced",
     empty: {
       title: "No reflections yet",
@@ -492,7 +485,9 @@ export const copy = {
   },
   reflection: {
     back: "Go back",
-    // By dominant emotion. An emotion the app does not know gets `unknown`: the raw AI string is never shown.
+    // The headline's last fallback (step 36), by dominant emotion, for a reflection with neither a validation line nor
+    // a devotional to take a first sentence from. An emotion the app does not know gets `unknown`: the raw AI string is
+    // never shown.
     headlines: {
       anxious: "It sounds like you’re feeling anxious, and that’s okay.",
       weary: "It sounds like you’re feeling weary, and that’s okay.",
@@ -502,8 +497,8 @@ export const copy = {
       unknown: "It sounds like you’re carrying a lot right now, and that’s okay.",
     },
     subline: {
-      audio: "A sanctuary moment curated from your voice journal.",
-      text: "A sanctuary moment curated from your written journal.",
+      audio: "Written from what you spoke.",
+      text: "Written from what you wrote.",
     },
     player: {
       subtitle: (minutes: number) => `${minutes} min • Personalized devotional`,
@@ -540,7 +535,8 @@ export const copy = {
       empty: "No affirmations were created for this reflection.",
     },
     words: {
-      titleAudio: "Your spoken prayer",
+      // Step 36: a person whose recording was misheard can see why in one tap.
+      titleAudio: "What we heard you say",
       titleText: "Your written prayer",
       private: "Private to you",
       label: (title: string) => `${title}, private to you`,
@@ -559,6 +555,22 @@ export const copy = {
     footer: {
       returnToJournal: "Return to Journal",
       share: "Share scripture",
+    },
+    // The one quiet line under a heavy moment's devotional (2026-11-08, when Support Resources was removed). The numbers come from
+    // constants/crisisResources.ts. Availability only: never a claim about cost, confidentiality or what a service will do.
+    help: {
+      line: (helpline: string, emergency: string) =>
+        `You don’t have to carry this alone. Call or text ${helpline} any time, or ${emergency} if you’re in danger.`,
+      call: (helpline: string) => `Call ${helpline}`,
+      callLabel: (helpline: string) => `Call ${helpline}, the Suicide and Crisis Lifeline`,
+      callHint: "Opens your phone app",
+      failed: (helpline: string) => `Your phone couldn’t open this. Dial ${helpline} from your phone app.`,
+    },
+    // A heavy moment saved before 2026-11-08, which kept only the person's words: no devotional was written for it.
+    wordsOnly: {
+      title: "Thank you for bringing this here.",
+      body: "This reflection was saved without a devotional.",
+      words: "What you shared",
     },
     // Only the verse and its reference: never the transcript, the emotion or the devotional. The verse
     // arrives already in quotes (quoteVerse).
@@ -583,39 +595,6 @@ export const copy = {
         message: "We couldn’t load this reflection.",
         retry: "Try again",
       },
-    },
-  },
-  // The Reflection crisis view and Support Resources (step 13). No number and no URL in here: they are in
-  // constants/crisisResources.ts. Never a claim about confidentiality, cost or what a service will do.
-  crisis: {
-    // The design’s words (AGENTS.md Crisis Safety Rules).
-    title:
-      "It sounds like you’re going through something really heavy. You don’t have to carry this alone.",
-    body: "You can reach a trained counselor any time, day or night.",
-    talkNow: "Talk to someone now",
-    talkNowHint: "Calls the 988 Suicide and Crisis Lifeline",
-    moreWays: "More ways to get help",
-    listLabel: "Ways to reach someone",
-    note: {
-      eyebrow: "About this reflection",
-      body: "We’ve paused the devotional and affirmations for this entry so you can focus on getting support. Reaching out for help is not a lack of faith. God often meets us through the people around us.",
-    },
-    words: "What you shared",
-    resources: {
-      title: "Support Resources",
-      close: "Close support resources",
-      intro: "Ways to reach a real person, any time of day.",
-      footer: (date: string) =>
-        `GraceHush is not a crisis service. Resources last checked ${date}. Message and data rates may apply when you text.`,
-    },
-    // Shown when the phone cannot open a link (no phone app, no messaging app).
-    fallback: {
-      title: "Your phone couldn’t open this.",
-      call: "Dial this number from your phone app.",
-      text: "Send a text to this number from your messaging app.",
-      textWithBody: (body: string) => `Send “${body}” to this number from your messaging app.`,
-      web: "Open this address in your browser.",
-      close: "Close",
     },
   },
   ambient: {
@@ -792,7 +771,8 @@ export const copy = {
     body: "This permanently deletes the reflection, its devotional audio, its affirmations and any recording. This can’t be undone.",
     bodyAnswered:
       "This permanently deletes the reflection, its devotional audio, its affirmations, any recording and your gratitude note. This can’t be undone.",
-    // A crisis entry holds nothing but the person's words (2026-11-01).
+    // A heavy moment saved before 2026-11-08 holds nothing but the person's words. One saved since is a whole reflection and
+    // gets `body` like any other.
     bodyCrisis: "This permanently deletes what you shared. This can’t be undone.",
     confirm: "Delete forever",
     cancel: "Keep",
@@ -908,7 +888,6 @@ export const copy = {
       exportPartial: "Some audio didn’t fit. The README in your download lists it.",
     },
     about: {
-      support: "Support & Helpline Resources",
       help: "Help & Feedback",
       helpHint: "Opens your email app",
       privacyPolicy: "Privacy Policy",

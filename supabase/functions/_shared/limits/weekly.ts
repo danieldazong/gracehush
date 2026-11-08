@@ -137,7 +137,7 @@ export type LimitDecision =
 //              failed, one devotional is counted twice until the delete is sent again. That can only make the limit stricter.)
 //
 // A failed entry (an AI error, or one the limit itself held back) holds no devotional and is not being made, so it never
-// counts; a crisis entry never counts and never reaches this code; another user's entries are never read.
+// counts; a heavy moment (is_crisis) never counts and never reaches this code; another user's entries are never read.
 //
 // Only the entries started first are counted among those in flight. Two requests that arrive together as the third and the
 // fourth devotional would otherwise each count the other and both be refused; now the older one sees only the two that are

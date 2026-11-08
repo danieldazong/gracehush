@@ -5,7 +5,7 @@ import type { DailyAffirmationRow, JournalEntryRow, JournalEntryUpdate } from "@
 // filter uses it, nothing displays it). The lists are literal types, so supabase-js gives each query the exact row type,
 // and the two types below make the compiler check that a list still holds every column the mappers read.
 export const ENTRY_COLUMNS =
-  "id, client_entry_id, input_type, transcript, dominant_emotion, processing_status, error_code, is_crisis, scripture_reference, scripture_text, scripture_verified, devotional_title, devotional_script, closing_prayer, devotional_audio_path, devotional_duration_ms, is_active_prayer, is_answered, answered_at, answered_notes, prayer_title, prayer_category, prayer_summary, created_at, updated_at" as const;
+  "id, client_entry_id, input_type, transcript, dominant_emotion, processing_status, error_code, is_crisis, scripture_reference, scripture_text, scripture_verified, devotional_title, validation_line, devotional_script, closing_prayer, devotional_audio_path, devotional_duration_ms, is_active_prayer, is_answered, answered_at, answered_notes, prayer_title, prayer_category, prayer_summary, created_at, updated_at" as const;
 
 export const AFFIRMATION_COLUMNS = "id, entry_id, time_slot, headline, affirmation_text, is_favorite" as const;
 

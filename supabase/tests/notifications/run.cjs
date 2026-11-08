@@ -93,7 +93,7 @@ function planner() {
 }
 
 function source(entryId = "entry-1", headlines) {
-  return { entryId, isCrisis: false, affirmations: W.affirmationsFor(entryId, headlines) };
+  return { entryId, affirmations: W.affirmationsFor(entryId, headlines) };
 }
 
 function planInput(overrides = {}) {
@@ -183,15 +183,16 @@ async function zoneChecks() {
 
 // ================================================================== the plan
 async function planChecks() {
-  await test("plan: nothing while the switch is off, the phone will not show it, there is no reflection, or the newest is a crisis", async () => {
+  await test("plan: nothing while the switch is off, the phone will not show it, there is no reflection, or the newest has no affirmations", async () => {
     const p = planner();
     assert.equal(p.planAffirmations(planInput({ enabled: false })).length, 0);
     assert.equal(p.planAffirmations(planInput({ permission: "denied" })).length, 0);
     assert.equal(p.planAffirmations(planInput({ permission: "undetermined" })).length, 0);
     assert.equal(p.planAffirmations(planInput({ source: null })).length, 0);
-    assert.equal(p.planAffirmations(planInput({ source: { entryId: "entry-2", isCrisis: true, affirmations: [] } })).length, 0);
-    // A crisis entry is never planned, even if affirmations somehow came with it.
-    assert.equal(p.planAffirmations(planInput({ source: { ...source("entry-2"), isCrisis: true } })).length, 0);
+    // A heavy moment saved before 2026-11-08 has no affirmations, so nothing is sent while it is the newest.
+    assert.equal(p.planAffirmations(planInput({ source: { entryId: "entry-2", affirmations: [] } })).length, 0);
+    // One since then has its three, written to speak hope: they are planned like any other reflection's.
+    assert.equal(p.planAffirmations(planInput({ source: source("entry-2") })).length, 21);
     assert.equal(p.planAffirmations(planInput()).length, 21);
   });
 
@@ -373,9 +374,9 @@ async function scheduleChecks() {
     assert.equal(planned(w).length, 21);
   });
 
-  await test("schedule: a crisis reflection stops every notification, and the next reflection brings them back with its own headlines", async () => {
+  await test("schedule: a newest reflection with no affirmations (a heavy moment saved before 2026-11-08) stops every notification, and the next reflection brings them back with its own headlines", async () => {
     const w = await signedIn();
-    w.repository.state.source = { entryId: "entry-2", isCrisis: true, affirmations: [] };
+    w.repository.state.source = { entryId: "entry-2", affirmations: [] };
     w.sync.finished("entry-2", true);
     await W.advance(1_000);
     assert.equal(planned(w).length, 0);
@@ -709,7 +710,7 @@ async function repositoryChecks() {
     for (const row of rows) {
       const model = mappers.toJournalEntry(row);
       await cache.upsertEntry(model);
-      if (model.status === "ready" && !model.isCrisis) {
+      if (model.status === "ready" && model.devotional !== null) {
         await cache.upsertAffirmations(model.id, J.affirmationRows(model.id).map(mappers.toAffirmation));
       }
     }
@@ -722,16 +723,16 @@ async function repositoryChecks() {
     assert.fail(`${label}: never reached`);
   }
 
-  await test("repository: the source is the newest finished reflection on the phone with its affirmations; a crisis has none", async () => {
+  await test("repository: the source is the newest finished reflection on the phone with its affirmations, a heavy moment's included; one saved before 2026-11-08 has none", async () => {
     await live(async (w) => {
       const repo = w.use("@/data/journalRepository");
       assert.equal(await repo.readAffirmationSource(), null);
       await cacheRows(w, [J.serverRow(5)]);
       const got = await repo.readAffirmationSource();
       assert.equal(got.entryId, J.serverRow(5).id);
-      assert.equal(got.isCrisis, false);
+      assert.deepEqual(Object.keys(got).sort(), ["affirmations", "entryId"]);
       assert.deepEqual(got.affirmations.map((item) => item.slot), ["morning", "afternoon", "evening"]);
-      // A newer failed entry is not a reflection; a newer crisis entry is the source, with no affirmations.
+      // A newer failed entry is not a reflection; a newer heavy moment saved before 2026-11-08 is the source, with no affirmations.
       await cacheRows(w, [J.serverRow(4, { processing_status: "failed", error_code: "AI_UNAVAILABLE" })]);
       assert.equal((await repo.readAffirmationSource()).entryId, J.serverRow(5).id);
       // A reflection still being prepared (on another phone, minutes ago) has no affirmations yet: it must not stop them.
@@ -739,7 +740,12 @@ async function repositoryChecks() {
       await cacheRows(w, [J.serverRow(4, preparing)]);
       assert.equal((await repo.readAffirmationSource()).entryId, J.serverRow(5).id);
       await cacheRows(w, [J.serverRow(3, CRISIS)]);
-      assert.deepEqual(await repo.readAffirmationSource(), { entryId: J.serverRow(3).id, isCrisis: true, affirmations: [] });
+      assert.deepEqual(await repo.readAffirmationSource(), { entryId: J.serverRow(3).id, affirmations: [] });
+      // A heavy moment since then is the source with its three affirmations, like any other reflection.
+      await cacheRows(w, [J.serverRow(2, { is_crisis: true })]);
+      const heavy = await repo.readAffirmationSource();
+      assert.equal(heavy.entryId, J.serverRow(2).id);
+      assert.deepEqual(heavy.affirmations.map((item) => item.slot), ["morning", "afternoon", "evening"]);
     });
   });
 
@@ -761,7 +767,7 @@ async function repositoryChecks() {
       const repo = w.use("@/data/journalRepository");
       const got = await repo.readAffirmationSource();
       assert.equal(typeof got.entryId, "string");
-      assert.equal(got.affirmations.length, got.isCrisis ? 0 : 3);
+      assert.ok(got.affirmations.length === 0 || got.affirmations.length === 3);
       assert.equal(typeof repo.getKnownAffirmationsEnabled("user_a"), "boolean");
     });
   });

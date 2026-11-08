@@ -100,9 +100,11 @@ function getStatus(row: EntryRow): ProcessingStatus {
   return pick(STATUSES, row.processing_status) ?? "ready";
 }
 
-// Scripture, devotional, prayer and emotion exist only on a finished entry that is not a crisis.
+// Scripture, devotional, prayer and emotion exist only on a finished entry. A heavy moment (is_crisis) is a whole reflection
+// since 2026-11-08 and is mapped like any other; one saved before then holds none of them, so they come out empty from the row
+// alone. The server's response.ts has the same rule.
 function isFinished(row: EntryRow): boolean {
-  return getStatus(row) === "ready" && row.is_crisis !== true;
+  return getStatus(row) === "ready";
 }
 
 function toScripture(row: EntryRow): Scripture | null {
@@ -121,6 +123,7 @@ function toDevotional(row: EntryRow): Devotional | null {
   if (!row.devotional_script) return null;
   return {
     title: row.devotional_title || copy.common.defaultDevotionalTitle,
+    validation: row.validation_line ?? null,
     script: row.devotional_script,
     closingPrayer: row.closing_prayer ?? null,
     audioPath: row.devotional_audio_path || null,

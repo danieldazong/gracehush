@@ -45,6 +45,7 @@ function entryRow(id: string, createdAt: Date, fields: Partial<JournalEntryRow>)
     devotional_duration_ms: null,
     scripture_verified: false,
     devotional_title: null,
+    validation_line: null,
     closing_prayer: null,
     prayer_title: null,
     prayer_category: null,
@@ -63,6 +64,8 @@ interface ReadyEntrySpec {
   transcript: string;
   reference: BsbReference;
   title: string;
+  // The first line on the Reflection screen (step 36). Left out, the screen shows the devotional's first sentence instead.
+  validation?: string;
   script: [string, string]; // two paragraphs
   closing: string; // without the final "Amen"
   // null: the voice could not be generated (TTS_FAILED). The entry stays ready and the text still shows.
@@ -87,6 +90,7 @@ function readyEntry(spec: ReadyEntrySpec): JournalEntryRow {
     scripture_text: bsb[spec.reference],
     scripture_verified: true,
     devotional_title: spec.title,
+    validation_line: spec.validation ?? null,
     devotional_script: spec.script.join("\n\n"),
     closing_prayer: spec.closing,
     devotional_audio_path: hasAudio ? `${MOCK_USER_ID}/devotionals/${spec.id}.wav` : null,
@@ -120,6 +124,8 @@ export function buildEntries(now: Date): JournalEntryRow[] {
         "Lord, work has been so overwhelming lately and I feel like I’m dropping every ball. Help me remember where my peace comes from. I woke up with my heart pounding and I just need to breathe.",
       reference: "Philippians 4:6–7",
       title: "Peace in the Midst",
+      validation:
+        "Work has been overwhelming, you feel like you’re dropping every ball, and you just need to breathe.",
       script: [
         "Sarah, your spirit feels weary because you’ve been carrying responsibilities meant for hands far larger than your own. Taking a breath right now isn’t quitting—it is reverence.",
         "Peace isn’t the absence of tomorrow’s unanswered questions; it is the presence of an unwavering Shepherd sitting with you in this very hour. Rest your palms open.",
@@ -143,6 +149,8 @@ export function buildEntries(now: Date): JournalEntryRow[] {
         "Just feeling exhausted down to my bones this morning. Give me strength for the tasks today and quiet my restless thoughts. I keep waking before the alarm with my mind already running.",
       reference: "Matthew 11:28–30",
       title: "Rest for the Weary",
+      validation:
+        "You keep waking before the alarm, exhausted down to your bones, with your mind already running.",
       script: [
         "You do not have to be strong before you come to Him. Weariness is not a failure of faith; it is simply the weight of a long road.",
         "Set the day’s list down for a moment. His yoke is easy because He carries the heavier end beside you.",

@@ -349,10 +349,12 @@ Deno.test(
       "dbMs",
       "fallbackAttempts",
       "geminiMs",
+      "grounding",
       "inputType",
       "limit",
       "limitUsed",
       "model",
+      "prayerVoice",
       "promptVersion",
       "reason",
       "requestId",
@@ -370,6 +372,7 @@ Deno.test(
       "ttsChars",
       "ttsMs",
       "user",
+      "validationLine",
     ]);
     assertEquals(line.status, 200);
     assertEquals([line.code, line.reason], [null, null]);

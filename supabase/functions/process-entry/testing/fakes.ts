@@ -11,8 +11,9 @@ import type { EntryRow } from "../lifecycle.ts";
 // Text-to-Speech), PostgREST and Storage that is installed as `globalThis.fetch`. The real handler, the real jose and the
 // real supabase-js run unchanged on top of it, so a test sees the same requests the hosted function would send.
 //
-// The fake database enforces what the step 18 migration enforces for these tables (check constraints, the unique keys,
-// the foreign keys, the crisis trigger) and refuses a column that does not exist, so a wrong column name fails here.
+// The fake database enforces what the migrations enforce for these tables (check constraints, the unique keys, the foreign
+// keys; the crisis rules and trigger are gone since 2026-11-08) and refuses a column that does not exist, so a wrong column
+// name fails here.
 
 export const ISSUER = "https://clerk.test";
 export const SUPABASE_URL = "https://project.supabase.test";
@@ -121,6 +122,8 @@ const ENTRY_DEFAULTS = (): Row => ({
   prayer_title: null,
   prayer_category: null,
   prayer_summary: null,
+  // Step 36: the sentence the Reflection screen shows first.
+  validation_line: null,
 });
 
 const COLUMNS: Record<string, string[]> = {
@@ -263,7 +266,7 @@ function jsonResponse(status: number, body: unknown, headers: HeadersInit = {}):
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
 }
 
-function check(table: string, row: Row, world: World, isInsert: boolean): void {
+function check(table: string, row: Row, world: World): void {
   const fail = (code: string, message: string): never => {
     throw new PgError(code === "23505" || code === "23503" ? 409 : 400, code, message);
   };
@@ -278,23 +281,10 @@ function check(table: string, row: Row, world: World, isInsert: boolean): void {
     if (typeof row.prayer_summary === "string" && row.prayer_summary.length > 200) {
       fail("23514", "journal_entries_prayer_summary_check");
     }
-    if (row.is_crisis === true) {
-      for (
-        const column of [
-          "devotional_title",
-          "devotional_script",
-          "closing_prayer",
-          "devotional_audio_path",
-          "scripture_reference",
-          "scripture_text",
-        ]
-      ) {
-        if (row[column] !== null) fail("23514", "journal_entries_crisis_check");
-      }
-      if (
-        row.is_active_prayer === true || row.is_answered === true || row.prayer_title !== null ||
-        row.prayer_category !== null || row.prayer_summary !== null
-      ) fail("23514", "crisis_not_prayer");
+    // A heavy moment (is_crisis) may hold everything a reflection holds since the migration of 2026-11-08, which dropped
+    // journal_entries_crisis_check, crisis_not_prayer, validation_line_crisis and the affirmations trigger.
+    if (typeof row.validation_line === "string" && row.validation_line.length > 240) {
+      fail("23514", "validation_line_length");
     }
     if (row.is_answered !== (row.answered_at !== null)) fail("23514", "answered_fields_match");
     if (row.scripture_verified === true && (row.scripture_reference === null || row.scripture_text === null)) {
@@ -316,7 +306,6 @@ function check(table: string, row: Row, world: World, isInsert: boolean): void {
     }
     const entry = world.entries.find((candidate) => candidate.id === row.entry_id && candidate.user_id === row.user_id);
     if (!entry) fail("23503", "daily_affirmations_entry_user_fkey");
-    if (isInsert && entry?.is_crisis === true) fail("23514", "a crisis entry never has affirmations");
     const clash = world.affirmations.some((other) =>
       other.id !== row.id && other.entry_id === row.entry_id && other.time_slot === row.time_slot
     );
@@ -489,7 +478,7 @@ function rest(world: World, table: string, request: Recorded): Response {
       if (table === "users_profile" && rows.some((other) => other.id === row.id)) {
         throw new PgError(409, "23505", "users_profile_pkey");
       }
-      check(table, row, world, true);
+      check(table, row, world);
       rows.push(row);
       created.push(row);
     }
@@ -504,7 +493,7 @@ function rest(world: World, table: string, request: Recorded): Response {
     unknownColumns(request.json as Row);
     const targets = rows.filter((row) => matches(row, filters));
     const updated = targets.map((row) => ({ ...row, ...(request.json as Row), updated_at: world.now() }));
-    for (const next of updated) check(table, next, world, false);
+    for (const next of updated) check(table, next, world);
     targets.forEach((row, index) => Object.assign(row, updated[index]));
     return representation ? jsonResponse(200, updated.map((row) => ({ ...row }))) : new Response(null, { status: 204 });
   }
@@ -1104,15 +1093,20 @@ export function devotionalStartingWith(word: string): string {
   return DEVOTIONAL.replace(/^Paragraph/, word);
 }
 
+// A reply that passes every check of gen-v2.3 for TEXT: a validation line and a prayer in the person's own words (the first person
+// singular), which share "anxious", "work" and "week" with it.
+export const VALIDATION_LINE = "Work has kept you anxious all week, and rest still won’t come.";
+
 export function readyOutput(overrides: Row = {}): Row {
   return {
     is_crisis: false,
     dominant_emotion: "anxious",
     reflection_title: "Peace in the Waiting",
+    validation_line: VALIDATION_LINE,
     scripture: { book_id: "PHP", chapter: 4, verse_start: 6, verse_end: 7 },
     devotional_text: DEVOTIONAL,
     closing_prayer:
-      "Lord, we bring you the weight of this week and ask for your quiet peace to settle on our hearts. Amen.",
+      "Lord, I bring you this anxious week of work and ask for your quiet peace to settle on my heart tonight. Amen.",
     prayer: {
       is_active_prayer: true,
       title: "Peace for the week",
@@ -1137,19 +1131,26 @@ export function screenOutput(overrides: Row = {}): Row {
   return { no_speech: false, transcript: "", risk: "none", categories: [], ...overrides };
 }
 
-// A reflection request that comes back flagged as a crisis (the last of the three layers).
-export function crisisOutput(): Row {
-  return {
+// A reflection the model flags as a heavy moment (the last of the three layers): since gen-v2.4 still written in full, by
+// "A heavy moment". It passes the heavy rules: no quotation and nothing a heavy moment never says. It sets a prayer, which the
+// server never keeps for a heavy moment.
+export const HEAVY_LINE = "Work has worn you down to nothing this week, and that is real.";
+
+export function heavyOutput(overrides: Row = {}): Row {
+  return readyOutput({
     is_crisis: true,
     dominant_emotion: "weary",
-    reflection_title: null,
-    scripture: null,
-    devotional_text: null,
-    closing_prayer: null,
-    prayer: { is_active_prayer: false, title: "", summary: "", category: "NONE" },
-    affirmations: [],
-  };
+    reflection_title: "Held Through the Night",
+    validation_line: HEAVY_LINE,
+    scripture: { book_id: "PSA", chapter: 46, verse_start: 1, verse_end: 1 },
+    closing_prayer:
+      "Lord, I am worn down and I need you near me right now. Give me the courage to reach out to someone today, and hold me close.",
+    ...overrides,
+  });
 }
+
+// The old name, for the tests that only need a flagged reply.
+export const crisisOutput = heavyOutput;
 
 // Turns speech on in the world's environment: the test service account (a real RSA key) and a Chirp 3 HD voice.
 // world.restore() puts the environment back. The Google counters start again from here.

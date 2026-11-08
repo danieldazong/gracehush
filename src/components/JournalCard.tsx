@@ -17,18 +17,17 @@ const icons = {
   play: { android: "play_arrow", ios: "play.fill" },
   hourglass: { android: "hourglass_top", ios: "hourglass" },
   refresh: { android: "refresh", ios: "arrow.clockwise" },
-  support: { android: "favorite", ios: "heart" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
-// Every status has its own card. A crisis entry is a finished one in the data, but it is never
-// shown as ready: no emotion, no scripture, no transcript.
-type CardKind = "ready" | "textOnly" | "processing" | "uploading" | "pending" | "failed" | "crisis";
+// Every status has its own card. A heavy moment is a reflection like any other since 2026-11-08 and gets the same card. One
+// saved before then has no devotional, so its card is the person's words only ("words").
+type CardKind = "ready" | "textOnly" | "words" | "processing" | "uploading" | "pending" | "failed";
 
 function getKind(entry: JournalEntry): CardKind {
-  if (entry.isCrisis) return "crisis";
   switch (entry.status) {
     case "ready":
-      return entry.devotional?.audioPath ? "ready" : "textOnly";
+      if (entry.devotional === null) return "words";
+      return entry.devotional.audioPath ? "ready" : "textOnly";
     case "processing":
     case "uploading":
     case "pending":
@@ -83,20 +82,16 @@ function getLabel(entry: HomeEntry, kind: CardKind, timestamp: string, pendingLi
     case "failed":
       parts.push(a11y.failed);
       break;
-    case "crisis":
-      parts.push(a11y.support);
+    case "words":
       break;
   }
   return `${parts.join(". ")}.`;
 }
 
 // The two lines of the card's body. An audio entry has no transcript until the server has processed
-// it, and a crisis entry's transcript is never shown. A reflection that is only on this phone never
-// shows its words (the screen can be seen by someone else), so a written one says only that it is one.
+// it. A reflection that is only on this phone never shows its words (the screen can be seen by someone
+// else), so a written one says only that it is one.
 function Excerpt({ entry }: { entry: HomeEntry }) {
-  if (entry.isCrisis) {
-    return <Text className="text-body text-ink">{copy.journal.card.crisis}</Text>;
-  }
   const transcript = entry.transcript?.trim();
   if (!transcript) {
     return (
@@ -336,15 +331,9 @@ function CardFooter({
           </Pressable>
         </View>
       );
-    case "crisis":
-      return (
-        <View className="flex-row pt-0.5">
-          <View className="chip gap-1.5">
-            <Icon name={icons.support} size={12} color={colors.mauve} />
-            <Text className="chip__label">{card.support}</Text>
-          </View>
-        </View>
-      );
+    case "words":
+      // A heavy moment saved before 2026-11-08: the person's words, and nothing under them.
+      return null;
   }
 }
 
@@ -378,7 +367,7 @@ export function JournalCard({
   const timestamp = formatEntryTimestamp(entry.createdAt, now);
   const pendingLine = getPendingLine(entry, online, heldForPermission);
   const label = getLabel(entry, kind, timestamp, pendingLine);
-  const isFinished = kind === "ready" || kind === "textOnly";
+  const isFinished = kind === "ready" || kind === "textOnly" || kind === "words";
   // A card with a button of its own is not one grouped element: a button inside it must be reachable on its own.
   const hasButton =
     entry.pending?.status === "needs_action" || entry.pending?.status === "limit_reached";
@@ -409,9 +398,9 @@ export function JournalCard({
     </View>
   );
 
-  // Only a finished entry and a crisis entry open Reflection. The others are one labelled element and
-  // not a button. The Pressable carries only the style function: classes go on the inner View.
-  if (!isFinished && kind !== "crisis") {
+  // Only a finished entry opens Reflection. The others are one labelled element and not a button. The
+  // Pressable carries only the style function: classes go on the inner View.
+  if (!isFinished) {
     return (
       <View accessible={!hasButton} accessibilityLabel={hasButton ? undefined : label}>
         {card}

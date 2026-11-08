@@ -260,6 +260,6 @@ Deno.test(
       }
     }
     const line = lastLog(world);
-    assertEquals(Object.keys(line).length, 39);
+    assertEquals(Object.keys(line).length, 42);
   }),
 );

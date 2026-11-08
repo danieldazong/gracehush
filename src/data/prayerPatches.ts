@@ -52,11 +52,11 @@ export function sanitizePatch(value: unknown): PrayerPatch | null {
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
-// The entry once the patch is applied, by the rule of toPrayer (data/mappers.ts) on the changed row: only a finished entry that
-// is not a crisis can be a prayer, so any other entry comes back unchanged. What the model wrote (the title, the summary, the
-// category) stays as the entry had it; an entry that was not a prayer has none of it.
+// The entry once the patch is applied, by the rule of toPrayer (data/mappers.ts) on the changed row: only a finished entry can be
+// a prayer (a heavy moment included, since 2026-11-08), so any other entry comes back unchanged. What the model wrote (the title,
+// the summary, the category) stays as the entry had it; an entry that was not a prayer has none of it.
 export function applyPrayerPatch(entry: JournalEntry, patch: PrayerPatch): JournalEntry {
-  if (entry.status !== "ready" || entry.isCrisis) return entry;
+  if (entry.status !== "ready") return entry;
   const before = entry.prayer;
   const wasPrayer = before !== null;
   const tracked = patch.is_active_prayer ?? wasPrayer;

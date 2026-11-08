@@ -45,17 +45,16 @@ function TextLink({ label, onPress, expanded }: { label: string; onPress: () => 
 type AiPermissionSheetProps = {
   onAllow: () => void;
   onNotNow: () => void;
-  onOpenSupport: () => void;
   onOpenPrivacy: () => void;
 };
 
 // What New Entry puts over the screen until this account has answered (Apple's guideline 5.1.2(i), 2026-11-07): one short
 // question that says what is sent and to whom, answers the training worry in plain words, and asks first. The details (what Google
-// keeps, why it is asked, where to change it) are one tap away. It is drawn inside the screen and not as a system Modal, so the
-// Support Resources link, Not now and the keyboard that follows Allow never meet iOS's rule of one Modal at a time. The answers and
-// the links are pinned under the text, so they are on screen at every text size. Someone may reach it at a very hard moment, so
-// it stays calm: one slide, no haptic, no event, no log line, and nothing red.
-export function AiPermissionSheet({ onAllow, onNotNow, onOpenSupport, onOpenPrivacy }: AiPermissionSheetProps) {
+// keeps, why it is asked, where to change it) are one tap away. It is drawn inside the screen and not as a system Modal, so Not now
+// and the keyboard that follows Allow never meet iOS's rule of one Modal at a time. The answers and the link are pinned under the
+// text, so they are on screen at every text size. Someone may reach it at a very hard moment, so it stays calm: one slide, no
+// haptic, no event, no log line, and nothing red.
+export function AiPermissionSheet({ onAllow, onNotNow, onOpenPrivacy }: AiPermissionSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const reduceMotion = useReduceMotion();
@@ -163,7 +162,6 @@ export function AiPermissionSheet({ onAllow, onNotNow, onOpenSupport, onOpenPriv
               expanded={expanded}
               onPress={() => setExpanded((open) => !open)}
             />
-            <TextLink label={text.support} onPress={onOpenSupport} />
           </View>
         </View>
       </Animated.View>

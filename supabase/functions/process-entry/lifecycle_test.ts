@@ -17,7 +17,6 @@ import {
   readProfile,
   RECENT_REFLECTION_COLUMNS,
   saveAudio,
-  saveCrisisEntry,
   saveReadyEntry,
   saveTranscript,
 } from "./lifecycle.ts";
@@ -35,6 +34,7 @@ const fields = {
   transcript: "a written prayer for tonight",
   dominant_emotion: "anxious",
   devotional_title: "Peace",
+  validation_line: "Your prayer for tonight is written, and you are heard.",
   devotional_script: "Words.",
   closing_prayer: "Lord, hear us.",
   scripture_reference: "John 3:16",
@@ -240,6 +240,7 @@ Deno.test(
     assert(claim.kind === "claimed");
     const saved = await saveReadyEntry(admin, USER, claim.row.id, fields, [...three]);
     assertEquals(saved.processing_status, "ready");
+    assertEquals(saved.validation_line, "Your prayer for tonight is written, and you are heard.");
     assertEquals(saved.scripture_reference, "John 3:16");
     assertEquals(saved.scripture_text, "For God so loved the world.");
     assertEquals(saved.scripture_verified, true);
@@ -251,49 +252,64 @@ Deno.test(
 );
 
 Deno.test(
-  "a crisis entry keeps only the flag and the words, and loses any affirmations",
+  "a heavy moment is saved whole (gen-v2.4): the flag, every reflection field and its three affirmations, and saved again it is still one",
   withWorld(async (world, admin) => {
     const claim = await claimEntry(admin, USER, text, null, Date.now());
     assert(claim.kind === "claimed");
-    await saveReadyEntry(admin, USER, claim.row.id, {
-      ...fields,
-      is_active_prayer: true,
-      prayer_title: "T",
-      prayer_category: "GUIDANCE",
-      prayer_summary: "S",
-    }, [...three]);
-    const crisis = await saveCrisisEntry(admin, USER, claim.row.id, "the words");
-    assertEquals(crisis.is_crisis, true);
-    assertEquals(crisis.processing_status, "ready");
-    assertEquals(crisis.transcript, "the words");
-    for (
-      const column of [
-        "dominant_emotion",
-        "devotional_title",
-        "devotional_script",
-        "closing_prayer",
-        "scripture_reference",
-        "prayer_title",
-        "prayer_category",
-        "prayer_summary",
-      ]
-    ) {
-      assertEquals(crisis[column as keyof typeof crisis], null, column);
-    }
-    assertEquals(crisis.is_active_prayer, false);
-    assertEquals(world.affirmations.length, 0);
+    const heavy = await saveReadyEntry(admin, USER, claim.row.id, fields, [...three], true);
+    assertEquals(heavy.is_crisis, true);
+    assertEquals(heavy.processing_status, "ready");
+    assertEquals(heavy.devotional_script, fields.devotional_script);
+    assertEquals(heavy.validation_line, fields.validation_line);
+    assertEquals(heavy.scripture_reference, "John 3:16");
+    assertEquals(heavy.scripture_verified, true);
+    assertEquals(world.affirmations.length, 3);
+    const again = await saveReadyEntry(admin, USER, claim.row.id, fields, [...three], true);
+    assertEquals(again.is_crisis, true);
+    assertEquals(world.entries.length, 1);
+    assertEquals(world.affirmations.length, 3);
+    // Saved without the flag, it is an ordinary reflection again: the flag is whatever the last save says.
+    assertEquals((await saveReadyEntry(admin, USER, claim.row.id, fields, [...three])).is_crisis, false);
   }),
 );
 
 Deno.test(
-  "the fake database enforces the table's crisis rule, so the test above means something",
+  "the fake database keeps the validation line's length rule, and lets a heavy moment hold a line (the 2026-11-08 migration)",
   withWorld(async (world, admin) => {
     const claim = await claimEntry(admin, USER, text, null, Date.now());
     assert(claim.kind === "claimed");
-    const { error } = await admin.from("journal_entries").update({ is_crisis: true, devotional_script: "still here" })
+    const heavy = await admin.from("journal_entries").update({ is_crisis: true, validation_line: "a line" })
       .eq("id", claim.row.id).eq("user_id", USER);
-    assertEquals(error?.code, "23514");
-    assertEquals(world.entries[0].is_crisis, false);
+    assertEquals(heavy.error, null);
+    const long = await admin.from("journal_entries").update({ validation_line: "x".repeat(241) })
+      .eq("id", claim.row.id).eq("user_id", USER);
+    assertEquals(long.error?.code, "23514");
+    assertEquals(world.entries[0].validation_line, "a line");
+  }),
+);
+
+Deno.test(
+  "the fake database lets a heavy moment hold a devotional, a prayer and affirmations, as the 2026-11-08 migration does",
+  withWorld(async (world, admin) => {
+    const claim = await claimEntry(admin, USER, text, null, Date.now());
+    assert(claim.kind === "claimed");
+    const { error } = await admin.from("journal_entries").update({
+      is_crisis: true,
+      devotional_script: "still here",
+      is_active_prayer: true,
+      prayer_title: "T",
+    }).eq("id", claim.row.id).eq("user_id", USER);
+    assertEquals(error, null);
+    const inserted = await admin.from("daily_affirmations").insert({
+      user_id: USER,
+      entry_id: claim.row.id,
+      time_slot: "morning",
+      headline: "You are not alone today",
+      affirmation_text: "God is already here.",
+    });
+    assertEquals(inserted.error, null);
+    assertEquals(world.entries[0].is_crisis, true);
+    assertEquals(world.affirmations.length, 1);
   }),
 );
 
@@ -326,52 +342,16 @@ Deno.test(
 );
 
 Deno.test(
-  "a crisis entry saved twice is still one crisis entry with the words it was given and no affirmations",
+  "a heavy moment whose words were never read (a blocked recording) is saved with no transcript",
   withWorld(async (world, admin) => {
-    const claim = await claimEntry(admin, USER, text, null, Date.now());
+    const claim = await claimEntry(admin, USER, audio, null, Date.now());
     assert(claim.kind === "claimed");
-    const first = await saveCrisisEntry(admin, USER, claim.row.id, "the words");
-    const second = await saveCrisisEntry(admin, USER, claim.row.id, "the words");
-    assertEquals([first.is_crisis, second.is_crisis], [true, true]);
-    assertEquals(second.transcript, "the words");
-    assertEquals(world.entries.length, 1);
-    assertEquals(world.affirmations.length, 0);
-    // A recording that was never read has no words, and that is saved as such.
-    const blocked = await saveCrisisEntry(admin, USER, claim.row.id, null);
-    assertEquals(blocked.transcript, null);
-    assertEquals(blocked.processing_status, "ready");
-    assertEquals(blocked.error_code, null);
-  }),
-);
-
-Deno.test(
-  "a crisis that cannot be saved is crisis_save_failed and leaves the entry as it was",
-  withWorld(async (world, admin) => {
-    const claim = await claimEntry(admin, USER, text, null, Date.now());
-    assert(claim.kind === "claimed");
-    const real = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
-      const request = new Request(input, init);
-      if (request.method === "PATCH" && request.url.includes("/rest/v1/journal_entries")) {
-        return new Response(JSON.stringify({ code: "XX000", message: "a secret detail" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return await real(input, init);
-    };
-    try {
-      const error = await expectAppError(
-        () => saveCrisisEntry(admin, USER, claim.row.id, "the words"),
-        "INTERNAL",
-        "crisis_save_failed",
-      );
-      assert(!error.reason.includes("secret"), "a database's words never reach the reason");
-    } finally {
-      globalThis.fetch = real;
-    }
-    assertEquals(world.entries[0].is_crisis, false);
-    assertEquals(world.entries[0].processing_status, "processing");
+    const saved = await saveReadyEntry(admin, USER, claim.row.id, { ...fields, transcript: null }, [...three], true);
+    assertEquals(saved.transcript, null);
+    assertEquals(saved.is_crisis, true);
+    assertEquals(saved.processing_status, "ready");
+    assertEquals(saved.error_code, null);
+    assertEquals(world.affirmations.length, 3);
   }),
 );
 
@@ -430,7 +410,6 @@ Deno.test(
 
 Deno.test("needsSpeech is true only for a ready reflection that has its devotional and no audio", () => {
   const row = {
-    is_crisis: false,
     processing_status: "ready",
     devotional_script: "Words.",
     devotional_audio_path: null as string | null,
@@ -443,8 +422,6 @@ Deno.test("needsSpeech is true only for a ready reflection that has its devotion
   for (const status of ["pending", "uploading", "processing", "failed"]) {
     assertEquals(needsSpeech({ ...row, processing_status: status }), false, status);
   }
-  // A crisis entry never needs speech, whatever else it holds.
-  assertEquals(needsSpeech({ ...row, is_crisis: true }), false);
 });
 
 Deno.test(
@@ -472,7 +449,7 @@ Deno.test(
 );
 
 Deno.test(
-  "saveAudio and markSpeechFailed never touch a crisis entry, an unfinished one or another user's",
+  "saveAudio and markSpeechFailed never touch an entry with no devotional (a heavy moment saved before 2026-11-08), an unfinished one or another user's",
   withWorld(async (world, admin) => {
     const crisis = world.seedEntry({
       user_id: USER,
@@ -494,6 +471,11 @@ Deno.test(
       assertEquals(await markSpeechFailed(admin, USER, String(entry.id)), null, String(entry.id));
       assertEquals([entry.devotional_audio_path, entry.error_code], [null, null], String(entry.id));
     }
+    // A heavy moment that has its devotional (gen-v2.4) is read aloud like any other.
+    const heavy = seedDevotional(world, USER, { is_crisis: true });
+    const saved = await saveAudio(admin, USER, String(heavy.id), "h.wav", 1);
+    assert(saved !== null);
+    assertEquals(saved.devotional_audio_path, "h.wav");
   }),
 );
 
@@ -522,15 +504,14 @@ Deno.test(
 );
 
 Deno.test(
-  "listRecentReflections: this user's three newest finished reflections made before this entry, and only three columns",
+  "listRecentReflections: this user's ten newest finished reflections made before this entry, and only three columns",
   withWorld(async (world, admin) => {
-    const older = ["One", "Two", "Three", "Four"].map((title, index) =>
+    const older = Array.from({ length: 12 }, (_, index) =>
       seedDevotional(world, USER, {
-        devotional_title: title,
+        devotional_title: `Title ${index + 1}`,
         scripture_reference: `Psalm ${index + 1}:1`,
         transcript: `PRIVATE-WORDS-${index}`,
-      })
-    );
+      }));
     seedDevotional(world, "user_b", { devotional_title: "Someone else" });
     world.seedEntry({
       user_id: USER,
@@ -550,12 +531,13 @@ Deno.test(
     seedDevotional(world, USER, { devotional_title: "Made later" });
 
     const rows = await listRecentReflections(admin, USER, String(current.id), String(current.created_at));
-    assertEquals(rows.map((row) => row.devotional_title), ["Four", "Three", "Two"]);
-    assertEquals(rows.map((row) => row.scripture_reference), ["Psalm 4:1", "Psalm 3:1", "Psalm 2:1"]);
+    const newestTen = Array.from({ length: 10 }, (_, index) => 12 - index);
+    assertEquals(rows.map((row) => row.devotional_title), newestTen.map((n) => `Title ${n}`));
+    assertEquals(rows.map((row) => row.scripture_reference), newestTen.map((n) => `Psalm ${n}:1`));
     for (const row of rows) {
       assertEquals(Object.keys(row).sort(), ["devotional_script", "devotional_title", "scripture_reference"]);
     }
-    assertEquals(older.length, 4);
+    assertEquals(older.length, 12);
 
     const [request] = world.requests.filter((item) =>
       item.method === "GET" && item.url.pathname.endsWith("/journal_entries")
@@ -565,12 +547,13 @@ Deno.test(
     assert(!request.url.search.includes("transcript"), "the person's words are never asked for");
     assertEquals(params.get("user_id"), `eq.${USER}`);
     assertEquals(params.get("processing_status"), "eq.ready");
-    assertEquals(params.get("is_crisis"), "eq.false");
+    // A heavy moment's reflection counts as any other since gen-v2.4; one with no devotional is left out by the next filter.
+    assertEquals(params.get("is_crisis"), null);
     assertEquals(params.get("devotional_script"), "not.is.null");
     assertEquals(params.get("id"), `neq.${current.id}`);
     assertEquals(params.get("created_at"), `lt.${current.created_at}`);
     assertEquals(params.get("order"), "created_at.desc");
-    assertEquals(params.get("limit"), "3");
+    assertEquals(params.get("limit"), "10");
 
     // A database that refuses is reported like every other read; the handler turns it into no recent reflections.
     world.fail.recentRead = 1;

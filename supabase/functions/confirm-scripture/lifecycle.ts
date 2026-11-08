@@ -19,8 +19,9 @@ export type ScriptureFields = {
 };
 
 // Writes the passage of a finished entry that has not been verified yet. The update only matches while the entry is
-// still ready, still not a crisis entry and still unverified, so a second request that got there first is not
-// overwritten and a crisis entry is never given a passage. Null when nothing matched.
+// still ready, still has its reflection and is still unverified, so a second request that got there first is not
+// overwritten and an entry with no reflection (a heavy moment saved before 2026-11-08) is never given a passage. Null when
+// nothing matched.
 export async function saveScripture(
   admin: SupabaseClient,
   userId: string,
@@ -29,7 +30,7 @@ export async function saveScripture(
 ): Promise<EntryRow | null> {
   const { data, error } = await admin.from("journal_entries").update(fields)
     .eq("id", entryId).eq("user_id", userId)
-    .eq("processing_status", "ready").eq("is_crisis", false).eq("scripture_verified", false)
+    .eq("processing_status", "ready").not("devotional_script", "is", null).eq("scripture_verified", false)
     .select();
   if (error) throw dbFailure("save_scripture", error);
   const rows = data as EntryRow[];

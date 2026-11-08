@@ -14,7 +14,7 @@ import type { JournalEntry, Scripture } from "@/types";
 const asked = new Map<string, number>();
 
 export function needsScriptureConfirmation(entry: JournalEntry): boolean {
-  return entry.status === "ready" && !entry.isCrisis && entry.scripture !== null && !entry.scripture.verified;
+  return entry.status === "ready" && entry.scripture !== null && !entry.scripture.verified;
 }
 
 function same(a: Scripture | null, b: Scripture | null): boolean {

@@ -5,8 +5,9 @@ import type { UserData, UserEntry, UserRow } from "../_shared/account/userData.t
 // The pure half of export-data (step 31): the README, the JSON and the Markdown, which audio goes first and under what name,
 // how many bytes a ZIP will take, and the ZIP itself. Nothing here reads, writes or logs.
 //
-// A crisis entry is never labelled: in the Markdown it is its day and the person's own words, like an entry that never
-// finished; the JSON keeps every column, `is_crisis` included, because it is the person's own data.
+// A heavy moment is never labelled. Since 2026-11-08 it is a whole reflection, exported like any other; one saved before then
+// has no devotional, so in the Markdown it is its day and the person's own words, like an entry that never finished. The JSON
+// keeps every column, `is_crisis` included, because it is the person's own data.
 
 export const DOWNLOAD_NAME = "gracehush-journal.zip";
 export const README_NAME = "README.txt";
@@ -182,11 +183,15 @@ function entrySection(entry: UserEntry, zone: string): string[] {
   const made = new Date(String(entry.created_at));
   const heading = `## ${weekdayDay(made, zone)}, ${clockTime(made, zone)}`;
   const shared = words(entry.transcript);
-  // A crisis entry, and one that never finished: the day and the person's words, nothing else.
-  if (entry.processing_status !== "ready" || entry.is_crisis === true) {
+  // An entry with no reflection (one that never finished, or a heavy moment saved before 2026-11-08): the day and the
+  // person's words, nothing else.
+  if (entry.processing_status !== "ready" || words(entry.devotional_script) === null) {
     return shared === null ? [heading] : [heading, "", shared];
   }
   const out = [heading, "", `### ${words(entry.devotional_title) ?? words(entry.prayer_title) ?? "Reflection"}`];
+  // The first line of the Reflection screen (step 36), when the reflection has one: a reflection made before it has none.
+  const line = words(entry.validation_line);
+  if (line !== null) out.push("", line);
   if (shared !== null) out.push("", "**What you shared**", "", shared);
   const reference = words(entry.scripture_reference);
   if (reference !== null) {

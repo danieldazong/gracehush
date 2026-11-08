@@ -29,6 +29,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { MODAL_HANDOFF_FALLBACK_MS } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors, emotionColors, layout, radii, shadows } from "@/constants/theme";
+import { isHeavyMoment } from "@/data/journalRepository";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useDeleteReflection } from "@/hooks/useDeleteReflection";
 import { usePrayers } from "@/hooks/usePrayers";
@@ -262,8 +263,10 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
   const [removeTarget, setRemoveTarget] = useState<Prayer | null>(null);
   const [removing, setRemoving] = useState(false);
   // Delete reflection… (step 29b). The dialog is shared with Reflection. With no connection nothing opens and the banner says why.
+  // A heavy moment its person made a prayer sends no event (Analytics Rules): askDelete reads that before the entry is gone.
+  const deletingHeavy = useRef(false);
   const deletion = useDeleteReflection(() => {
-    track("reflection_deleted", { source: "prayers" });
+    if (!deletingHeavy.current) track("reflection_deleted", { source: "prayers" });
     setNotice("deleted");
   });
 
@@ -319,7 +322,9 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
       note: values.note,
     });
     if (result.ok) {
-      track("prayer_marked_answered", { has_note: (values.note ?? "").trim() !== "" });
+      if (!(await isHeavyMoment(prayer.id))) {
+        track("prayer_marked_answered", { has_note: (values.note ?? "").trim() !== "" });
+      }
       setNotice("marked");
     }
     return result;
@@ -351,7 +356,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
     if (action === "editNote") openSheet(prayer, "editNote");
     else if (action === "moveBack") setMoveTarget(prayer);
     else if (action === "remove") askRemove(prayer);
-    else askDelete(prayer);
+    else void askDelete(prayer);
   }
 
   // Remove from Prayers: the reflection stays in the Journal. An Active prayer loses only its flag, so it goes at once; an
@@ -364,7 +369,7 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
   async function removeNow(prayer: Prayer) {
     if (ready === null) return;
     const result = await ready.removeFromPrayers(prayer.id);
-    if (result.ok) track("prayer_removed", { was_answered: prayer.isAnswered });
+    if (result.ok && !(await isHeavyMoment(prayer.id))) track("prayer_removed", { was_answered: prayer.isAnswered });
     setNotice(result.ok ? "removed" : "failed");
   }
 
@@ -377,7 +382,8 @@ export function PrayersScreen({ navigation }: MainTabScreenProps<"Prayers">) {
   }
 
   // Delete reflection…: permanent, so it always asks, and only while there is a connection.
-  function askDelete(prayer: Prayer) {
+  async function askDelete(prayer: Prayer) {
+    deletingHeavy.current = await isHeavyMoment(prayer.id);
     const opened = deletion.ask({ entryId: prayer.id, answered: prayer.isAnswered });
     if (!opened) setNotice("offline");
   }

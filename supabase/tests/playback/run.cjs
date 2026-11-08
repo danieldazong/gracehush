@@ -1364,7 +1364,7 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
   });
 
   // ============================================================ F. a devotional is a track only with a path and a length
-  await test("track: getPlaybackTrack carries the audio path, and a crisis entry, an unfinished one or one with no audio is no track", async () => {
+  await test("track: getPlaybackTrack carries the audio path, a heavy moment's too; an unfinished entry or one with no audio is no track", async () => {
     const w = rig();
     const { getPlaybackTrack } = w.env.use("@/data/selectors");
     const entry = (patch = {}, devotional = {}) => ({
@@ -1382,7 +1382,10 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       durationMs: 113_200,
       audioPath: PATH(1),
     });
-    assert.equal(getPlaybackTrack(entry({ isCrisis: true })), null);
+    // A heavy moment is a whole reflection since 2026-11-08, so its devotional plays like any other.
+    assert.equal(getPlaybackTrack(entry({ isCrisis: true }))?.audioPath, PATH(1));
+    // One saved before then has no devotional, so nothing plays.
+    assert.equal(getPlaybackTrack(entry({ isCrisis: true, devotional: null })), null);
     assert.equal(getPlaybackTrack(entry({ status: "processing" })), null);
     assert.equal(getPlaybackTrack(entry({ devotional: null })), null);
     assert.equal(getPlaybackTrack(entry({}, { audioPath: null })), null);

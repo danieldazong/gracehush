@@ -1,0 +1,32 @@
+[
+  {
+    "id": "work-nigerian-english",
+    "kind": "A prayer about work in Nigerian English, read at your normal pace in a quiet room.",
+    "script": "Father, I thank you for this morning. You know how my office has been since the new manager resumed. He shouts at everybody and nobody can talk. I have been trying my best, I submitted the report before the deadline. Please give me grace to keep my calm and favour before him. Let this month end well for me. Amen."
+  },
+  {
+    "id": "pidgin-mixed",
+    "kind": "Pidgin mixed with English, spoken the way you would say it to a friend.",
+    "script": "Lord, I no know wetin to do again. My landlord don give me quit notice, he say make I pack out before month end. Money no dey, business slow well well. Abeg, open door for me. I dey trust you say you go provide. Make my children no suffer for this matter. Thank you Jesus."
+  },
+  {
+    "id": "name-and-place",
+    "kind": "Names of people and places, read clearly.",
+    "script": "God, please be with my aunty Ngozi. She travelled to Enugu yesterday for my cousin Chidi's wedding, and the road was bad. Keep her safe on the way back on Sunday. Also remember Pastor Femi at our church in Surulere, his wife just had a baby. Let them rest well this week. Thank you, Lord."
+  },
+  {
+    "id": "moving-car",
+    "kind": "Recorded in a moving car, with the engine and the road audible (not while you are the one driving).",
+    "script": "I'm driving home from work and the traffic on the bridge is not moving at all. I'm tired, Lord, really tired. Today the meeting went long and I still have to cook when I get home. Help me not to shout at the kids tonight. Give me patience and a little strength for the evening. Thank you for bringing me this far."
+  },
+  {
+    "id": "pauses-restarts",
+    "kind": "Long pauses and restarts: stop for three or four seconds at each … and say the repeated words as written.",
+    "script": "Lord, I want to, I want to say thank you. … It has been a long week. … My mother, my mother came out of the hospital on Tuesday and she is, she is walking again. … I didn't think, I didn't think I would see it so soon. … Thank you. Thank you for the nurses too."
+  },
+  {
+    "id": "whisper",
+    "kind": "Whispered, as late at night when the house is asleep.",
+    "script": "Father, it's late and everyone is asleep, so I'm whispering. I couldn't sleep again. My mind keeps going back to the exam results that come out on Friday. I studied hard but I'm still afraid. Please quiet my heart. Whatever the result is, help me to trust you with it. Goodnight, Lord."
+  }
+]

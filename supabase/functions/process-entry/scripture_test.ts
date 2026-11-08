@@ -1,11 +1,11 @@
 import type { ScriptureRef } from "../_shared/bible/reference.ts";
 import { assert, assertEquals } from "./testing/assert.ts";
 import {
-  crisisOutput,
   ENTRY_ID,
   geminiError,
   geminiOk,
   type GeminiReply,
+  heavyOutput,
   installWorld,
   post,
   readyOutput,
@@ -16,6 +16,7 @@ import {
 import { newStats, timing } from "./gemini.ts";
 import { handle } from "./handler.ts";
 import { type ResolveArgs, resolveScripture } from "./scripture.ts";
+import { HEAVY_REPLACEMENT_NOTE } from "./prompt.ts";
 import type { ProcessEntryResponse } from "./contracts.ts";
 
 const USER = "user_test";
@@ -297,26 +298,82 @@ Deno.test(
   }),
 );
 
+// Isaiah 41:10 in the Berean Standard Bible, as the fixture serves it: the heavy moment's fallback passage (heavy.ts).
+const ISA_41_10 =
+  "Do not fear, for I am with you;\ndo not be afraid, for I am your God.\nI will strengthen you; I will surely help you;\nI will uphold you with My righteous right hand.";
+
 Deno.test(
-  "a crisis entry never touches the Bible, whichever layer finds it",
-  flow([geminiOk(crisisOutput())], async (world) => {
-    // The model's own flag, after a clear screening.
+  "a heavy moment never gets a passage from heavy.ts's list: it is replaced, unread, and the replacement is told why",
+  flow([pick("PSA", 23, 1, 3)], async (world) => {
+    const stats = newStats();
+    const result = await resolveScripture(resolveArgs({ ref: ref("PHP", 1, 21, 23), heavy: true, stats }));
+    assertEquals(
+      { ...result, bibleMs: 0 },
+      { outcome: "replaced", reference: "Psalm 23:1–3", text: PSA_23_1_3, verified: true, bibleMs: 0 },
+    );
+    assertEquals(world.bibleCalls.length, 1, "the denied passage is never even read");
+    const input = (world.geminiCalls[0].json as { input: string }).input;
+    assert(input.startsWith("The passage Philippians 1:21–23 is not right for this reflection."));
+    assert(input.includes(HEAVY_REPLACEMENT_NOTE));
+    assert(!input.includes("Philippians 1:21–23 does not exist"));
+  }),
+);
+
+Deno.test(
+  "a heavy moment whose replacement is denied too, or cannot be had, gets Isaiah 41:10 from the Bible: never no passage",
+  flow([pick("JON", 4, 3), geminiError(503)], async () => {
+    const denied = await resolveScripture(resolveArgs({ ref: ref("1KI", 19, 4), heavy: true }));
+    assertEquals(
+      { ...denied, bibleMs: 0 },
+      { outcome: "replaced", reference: "Isaiah 41:10", text: ISA_41_10, verified: true, bibleMs: 0 },
+    );
+    const failed = await resolveScripture(resolveArgs({ ref: ref("JOB", 3, 1, 3), heavy: true }));
+    assertEquals([failed.outcome, failed.reference, failed.verified], ["replaced", "Isaiah 41:10", true]);
+    // A passage that does not exist, for a heavy moment, also ends with one.
+    const missing = await resolveScripture(resolveArgs({ ref: ref("PHP", 4, 24, 25), heavy: true }));
+    assertEquals([missing.outcome, missing.reference], ["replaced", "Isaiah 41:10"]);
+    // An ordinary reflection keeps the old rule: a follow-up that cannot be had leaves it without a passage.
+    const ordinary = await resolveScripture(resolveArgs({ ref: ref("PHP", 4, 24, 25) }));
+    assertEquals([ordinary.outcome, ordinary.reference], ["dropped", null]);
+  }),
+);
+
+Deno.test(
+  "a heavy moment's fallback passage that cannot be read yet is kept as an unverified reference",
+  flow([geminiError(503)], async (world) => {
+    world.bible.set("ISA/41", { kind: "status", status: 503 });
+    const result = await resolveScripture(resolveArgs({ ref: ref("1KI", 19, 4), heavy: true }));
+    assertEquals(
+      { ...result, bibleMs: 0 },
+      { outcome: "unverified", reference: "Isaiah 41:10", text: null, verified: false, bibleMs: 0 },
+    );
+  }),
+);
+
+Deno.test(
+  "an ordinary reflection may have a passage that is on heavy.ts's list: the list is only for a heavy moment",
+  flow([], async () => {
+    const result = await resolveScripture(resolveArgs({ ref: ref("PSA", 46, 1) }));
+    assertEquals(result.outcome, "verified");
+    const heavy = await resolveScripture(resolveArgs({ ref: ref("PSA", 46, 1), heavy: true }));
+    assertEquals(heavy.outcome, "verified", "Psalm 46:1 is not on the list: a heavy moment keeps it");
+  }),
+);
+
+Deno.test(
+  "a heavy moment through the whole request: the model's denied passage is replaced before anything is saved",
+  flow([
+    geminiOk(heavyOutput({ scripture: { book_id: "PHP", chapter: 1, verse_start: 21, verse_end: 21 } })),
+    pick("PSA", 23, 1, 3),
+  ], async (world) => {
     const response = await post(world, handle, textBody());
     assertEquals(response.status, 200);
-    assertEquals(world.bibleCalls.length, 0);
-    assertEquals(world.entries[0].scripture_reference, null);
-    assertEquals(lastLog(world).scripture, null);
-
-    // The screening, by a phrase: no model call and no Bible call at all.
-    const other = await post(
-      world,
-      handle,
-      textBody({ clientEntryId: "9c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f", text: "I do not want to be alive anymore." }),
-    );
-    assertEquals(other.status, 200);
-    assertEquals(world.bibleCalls.length, 0);
-    assertEquals(world.geminiCalls.length, 1);
-    assertEquals(lastLog(world).scripture, null);
+    const { entry } = await response.json() as ProcessEntryResponse;
+    assertEquals(entry.isCrisis, true);
+    assertEquals(entry.scripture?.reference, "Psalm 23:1–3");
+    assertEquals(world.entries[0].scripture_reference, "Psalm 23:1–3");
+    assertEquals(lastLog(world).scripture, "replaced");
+    assertEquals(lastLog(world).attempts, 3, "the screening, the reflection and the replacement");
   }),
 );
 

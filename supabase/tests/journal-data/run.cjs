@@ -546,7 +546,10 @@ async function queryChecks() {
       const start = types.indexOf(`      ${table}: {`);
       assert.ok(start > 0, `${table} is in the generated types`);
       const row = types.indexOf("Row: {", start);
-      const end = types.indexOf("};", row);
+      // The Row block ends at its own closing brace, with or without a semicolon: the dashboard's download writes none.
+      const close = /\r?\n {8}\};?\r?\n/.exec(types.slice(row));
+      assert.ok(close, `${table}'s Row ends`);
+      const end = row + close.index;
       return [...types.slice(row, end).matchAll(/^\s{10}(\w+)\??:/gm)].map((m) => m[1]);
     };
     const { ENTRY_COLUMNS, AFFIRMATION_COLUMNS } = w.use("@/data/columns");
@@ -557,6 +560,52 @@ async function queryChecks() {
       rowKeys("daily_affirmations").filter((c) => !["user_id", "is_delivered", "scheduled_for", "created_at"].includes(c)).sort(),
     );
     assert.ok(!ENTRY_COLUMNS.includes("*") && !AFFIRMATION_COLUMNS.includes("*"));
+  }, { signIn: false });
+
+  await test("mapper: the validation line (step 36) reaches the devotional as the server wrote it, and a row from before it gives null", async (w) => {
+    const { toJournalEntry } = w.use("@/data/mappers");
+    const line = "Your interview is tomorrow and the car broke down, and that is real.";
+    assert.equal(toJournalEntry(serverRow(1, { validation_line: line })).devotional.validation, line);
+    assert.equal(toJournalEntry(serverRow(2, { validation_line: null })).devotional.validation, null);
+    const older = serverRow(3);
+    delete older.validation_line;
+    assert.equal(toJournalEntry(older).devotional.validation, null, "a cached row written before the column existed");
+  }, { signIn: false });
+
+  await test("headline: the validation line first, then the devotional's first sentence, then the fixed line of the emotion (step 36)", async (w) => {
+    const { getReflectionHeadline, firstSentence, getValidationHeadline } = w.use("@/utils/format");
+    const { copy } = w.use("@/constants/copy");
+    const devotional = (validation, script) => ({ title: "T", validation, script, closingPrayer: null, audioPath: null, durationMs: null });
+    const line = "Your son's surgery is Thursday and your hands won't stop shaking, and that's real.";
+    const script = "Tears came in the driveway over a warm meal. Then more words.\n\nA second paragraph.";
+    // The line wins, never the stock line of the emotion.
+    assert.equal(getReflectionHeadline({ dominantEmotion: "anxious", devotional: devotional(line, script) }), line);
+    assert.notEqual(getReflectionHeadline({ dominantEmotion: "anxious", devotional: devotional(line, script) }), copy.reflection.headlines.anxious);
+    // No line, or an empty one: the devotional's first sentence, before the fixed line.
+    for (const missing of [null, undefined, "   "]) {
+      assert.equal(
+        getReflectionHeadline({ dominantEmotion: "weary", devotional: devotional(missing, script) }),
+        "Tears came in the driveway over a warm meal.",
+      );
+    }
+    // Neither: the fixed line of the emotion, and the generic one for an emotion the app does not know.
+    assert.equal(getReflectionHeadline({ dominantEmotion: "weary", devotional: null }), getValidationHeadline("weary"));
+    assert.equal(getReflectionHeadline({ dominantEmotion: "overwhelmed", devotional: null }), copy.reflection.headlines.unknown);
+    // The first sentence by the server's rule: a closing quote stays with it, a decimal point does not end it.
+    assert.equal(firstSentence("“You said it.” Then more."), "“You said it.”");
+    assert.equal(firstSentence("It cost 2.50 today. Then more."), "It cost 2.50 today.");
+    assert.equal(firstSentence("No end mark at all"), "No end mark at all");
+    assert.equal(firstSentence("  "), null);
+    // A first sentence over 160 characters is cut at a word boundary, with an ellipsis, 160 characters at most.
+    const long = `${"word ".repeat(60).trim()}.`;
+    const cut = firstSentence(long);
+    assert.ok(cut.length <= 160 && cut.endsWith("…") && !cut.includes(" …"), cut);
+    assert.ok(long.startsWith(cut.slice(0, -1)));
+    // The words around the headline (step 36): the sublines say where it came from, and the transcript row's title.
+    assert.equal(copy.reflection.subline.audio, "Written from what you spoke.");
+    assert.equal(copy.reflection.subline.text, "Written from what you wrote.");
+    assert.equal(copy.reflection.words.titleAudio, "What we heard you say");
+    assert.equal(copy.reflection.words.titleText, "Your written prayer");
   }, { signIn: false });
 }
 
@@ -1089,17 +1138,20 @@ async function engineChecks() {
     assert.equal((await w.use("@/data/journalRepository").getEntry(result.entryId)).id, result.entryId, "Reflection opens it at once");
   });
 
-  await test("engine: a crisis answer is cached as it is, with no affirmations, and logged like any other", async (w) => {
+  await test("engine: a heavy moment is cached whole, with its three affirmations and no prayer, and logged like any other", async (w) => {
     w.server.state.makeEntry = crisisResult;
     await w.startEngine();
     const engine = w.use("@/services/syncEngine");
-    await w.use("@/db/outbox").enqueue(text("c1", "words that mean a crisis"));
+    await w.use("@/db/outbox").enqueue(text("c1", "words that carry something very heavy"));
     const result = await engine.syncAndWait("c1", { waitMs: 60_000 });
     assert.deepEqual({ kind: result.kind, isCrisis: result.isCrisis }, { kind: "ready", isCrisis: true });
     const cache = w.use("@/db/cache");
-    assert.equal((await cache.getEntry(result.entryId)).isCrisis, true);
-    assert.deepEqual(await cache.listAffirmationsForEntry(result.entryId), []);
-    assert.ok(w.logs.every((line) => !/crisis/i.test(line)), "the app logs nothing about a crisis entry");
+    const entry = await cache.getEntry(result.entryId);
+    assert.equal(entry.isCrisis, true);
+    assert.notEqual(entry.devotional, null, "a heavy moment is a whole reflection (2026-11-08)");
+    assert.equal(entry.prayer, null, "never made a prayer by the server");
+    assert.equal((await cache.listAffirmationsForEntry(result.entryId)).length, 3);
+    assert.ok(w.logs.every((line) => !/crisis|heavy/i.test(line)), "the app logs nothing about a heavy moment");
   });
 
   await test("engine: the free limit holds the reflection, keeps the saved entry's id and the reset time, and caches nothing", async (w) => {
@@ -1775,9 +1827,10 @@ async function reflectionChecks() {
     handle.unmount();
   });
 
-  await test("reflection: no confirmation is asked for a verified passage, a crisis entry, an unfinished one, the mock data, or while offline", async (w) => {
+  await test("reflection: no confirmation is asked for a verified passage, an entry with no passage, an unfinished one, the mock data, or while offline", async (w) => {
     seedServer(w, 4, (n) => {
-      if (n === 2) return { is_crisis: true, scripture_verified: false, scripture_text: null };
+      // A heavy moment saved before 2026-11-08: no reflection, so no passage to confirm.
+      if (n === 2) return { is_crisis: true, dominant_emotion: null, scripture_reference: null, scripture_text: null, scripture_verified: false, devotional_title: null, devotional_script: null, closing_prayer: null };
       if (n === 3) return { processing_status: "processing", ...unverified };
       return n === 4 ? unverified : {};
     });
@@ -1803,7 +1856,7 @@ async function reflectionChecks() {
     assert.equal(confirm.needsScriptureConfirmation(model), true);
     assert.equal(confirm.needsScriptureConfirmation({ ...model, scripture: { ...model.scripture, verified: true } }), false);
     assert.equal(confirm.needsScriptureConfirmation({ ...model, scripture: null }), false);
-    assert.equal(confirm.needsScriptureConfirmation({ ...model, isCrisis: true }), false);
+    assert.equal(confirm.needsScriptureConfirmation({ ...model, isCrisis: true }), true, "a heavy moment's passage is confirmed like any other");
     assert.equal(confirm.needsScriptureConfirmation({ ...model, status: "processing" }), false);
   });
 
@@ -1903,14 +1956,16 @@ async function selectorChecks() {
     assert.deepEqual(selectors.mergeEntries([], []), []);
   }, { signIn: false });
 
-  await test("selectors: the newest finished entry that is not a crisis, or none", async (w) => {
+  await test("selectors: the newest finished reflection, a heavy moment's included; one with no devotional is passed over; or none", async (w) => {
     const selectors = w.use("@/data/selectors");
-    const crisis = modelOf(w, 1, { is_crisis: true });
+    const heavy = modelOf(w, 1, { is_crisis: true });
+    const legacy = modelOf(w, 1, { is_crisis: true, dominant_emotion: null, scripture_reference: null, scripture_text: null, scripture_verified: false, devotional_title: null, devotional_script: null, closing_prayer: null });
     const processing = modelOf(w, 2, { processing_status: "processing" });
     const ready1 = modelOf(w, 3);
     const ready2 = modelOf(w, 4);
-    assert.equal(selectors.getNewestReadyEntry([crisis, processing, ready1, ready2]).id, ready1.id);
-    assert.equal(selectors.getNewestReadyEntry([crisis, processing]), null);
+    assert.equal(selectors.getNewestReadyEntry([heavy, processing, ready1, ready2]).id, heavy.id);
+    assert.equal(selectors.getNewestReadyEntry([legacy, processing, ready1, ready2]).id, ready1.id);
+    assert.equal(selectors.getNewestReadyEntry([legacy, processing]), null);
     assert.equal(selectors.getNewestReadyEntry([]), null);
   }, { signIn: false });
 }

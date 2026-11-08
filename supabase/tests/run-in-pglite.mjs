@@ -38,6 +38,8 @@ const DELETED = migrations.find((name) => name.includes("deleted_devotionals"));
 const SUBSCRIPTION = migrations.find((name) => name.includes("subscription_sync"));
 const EXPORTS = migrations.find((name) => name.includes("exports_bucket"));
 const REALTIME = migrations.find((name) => name.includes("realtime_broadcast"));
+const VALIDATION = migrations.find((name) => name.includes("validation_line"));
+const HEAVY = migrations.find((name) => name.includes("heavy_moments"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -259,7 +261,6 @@ if (process.argv.includes("--negative")) {
     ["no service_role grants", "off", dropLine(/grant select, insert, update, delete\s+on public\.users_profile, public\.journal_entries, public\.daily_affirmations to service_role;/), [34, 35]],
     ["table-wide UPDATE for authenticated on journal_entries", "off", (sql) => sql + "\ngrant update on public.journal_entries to authenticated;", [15]],
     ["row level security off on daily_affirmations", "off", (sql) => sql + "\nalter table public.daily_affirmations disable row level security;", [23, 26]],
-    ["no crisis trigger on affirmations", "off", dropLine(/create trigger daily_affirmations_no_crisis[\s\S]*?execute function public\.reject_affirmation_for_crisis_entry\(\);/), [31]],
     ["storage insert policy lets anyone upload anywhere", "off", (sql) => sql.replace(/with check \(\s*bucket_id = 'journal_media'\s*and \(storage\.foldername\(name\)\)\[1\] = \(select public\.requesting_user_id\(\)\)\s*and \(storage\.foldername\(name\)\)\[2\] = 'raw'\s*and array_length\(storage\.foldername\(name\), 1\) = 2\s*\)/, "with check (true)"), [38, 39]],
     ["a delete policy for the app on storage (masked by the hosted guard)", "off", (sql) => sql + "\ncreate policy journal_media_delete_own on storage.objects for delete to authenticated using (bucket_id = 'journal_media' and (storage.foldername(name))[1] = (select public.requesting_user_id()));", [41]],
     ["the app may insert entries", "off", (sql) => sql + "\ngrant insert on public.journal_entries to authenticated;\ncreate policy journal_entries_insert_any on public.journal_entries for insert to authenticated with check (true);", [13]],
@@ -269,7 +270,6 @@ if (process.argv.includes("--negative")) {
     ["the app may change the plan again", "off", (sql) => sql + "\ngrant update (subscription_tier) on public.users_profile to authenticated;", [3, 35]],
     ["no rule that an answered prayer has its date", "off", (sql) => sql.replace("answered_fields_match check (is_answered = (answered_at is not null))", "answered_fields_match check (true)"), [43]],
     ["no limit on the gratitude note", "off", (sql) => sql.replace("answered_note_length check (answered_notes is null or char_length(answered_notes) <= 1000)", "answered_note_length check (true)"), [43]],
-    ["a crisis entry may be a prayer", "off", (sql) => sql.replace(/constraint crisis_not_prayer\s+check \(not is_crisis or \([\s\S]*?prayer_summary is null\)\)/, "constraint crisis_not_prayer check (true)"), [44]],
     ["verified scripture without its text", "off", (sql) => sql.replace("check (not scripture_verified or (scripture_reference is not null and scripture_text is not null))", "check (true)"), [45]],
     ["the bucket does not take WAV (the migration adds another type instead)", "off", (sql) => sql.replaceAll("'audio/wav'", "'audio/flac'"), [46], WAV],
     ["ON: the new tables keep anon's default grants", "on", dropLine("revoke all on public.users_profile, public.journal_entries, public.daily_affirmations from anon;"), [33]],
@@ -304,10 +304,20 @@ if (process.argv.includes("--negative")) {
     ["the affirmations message carries the headline", "off", (sql) => sql.replace("jsonb_build_object('id', new.id, 'entry_id', new.entry_id)", "jsonb_build_object('id', new.id, 'entry_id', new.entry_id, 'headline', new.headline)"), [61], REALTIME],
     ["anyone signed in may join any topic", "off", (sql) => sql.replace(/using \(\s+\(select realtime\.topic\(\)\) = 'user:' \|\| \(select public\.requesting_user_id\(\)\)\s+and realtime\.messages\.extension = 'broadcast'\s+\);/, "using (true);"), [62], REALTIME],
     ["the app may send on its own topic", "off", (sql) => sql + "\ncreate policy user_broadcast_insert_own on realtime.messages for insert to authenticated with check ((select realtime.topic()) = 'user:' || (select public.requesting_user_id()));", [63], REALTIME],
-    ["the run counts every day with a reflection", "off", (sql) => sql.replace("(select count(*)::int from ranked where local_day = start_day - (n - 1))", "(select count(*)::int from days)"), [64], REALTIME],
-    ["the run counts crisis entries", "off", (sql) => sql.replace(/\s+and not e\.is_crisis/, ""), [64], REALTIME],
-    ["visitors may ask for the run of reflection days", "off", (sql) => sql + "\ngrant execute on function public.reflection_streak_days(text) to anon;", [64], REALTIME],
     ["the entry trigger misses deletes", "off", (sql) => sql.replace("after insert or update or delete on public.journal_entries", "after insert or update on public.journal_entries"), [57, 60], REALTIME],
+    // The validation line (step 36, its own migration).
+    ["a validation line of any length", "off", dropLine(/alter table public\.journal_entries add constraint validation_line_length\s+check \(validation_line is null or char_length\(validation_line\) <= 240\);/), [65], VALIDATION],
+    ["the app may write the validation line", "off", (sql) => sql + "\ngrant update (validation_line) on public.journal_entries to authenticated;", [66], VALIDATION],
+    // Heavy moments (2026-11-08, their own migration): each rule that kept a crisis entry empty, left in place, and the run of
+    // reflection days, which this migration defines last (so the variants of step 33's function are made here).
+    ["the crisis check stays (a heavy moment cannot hold its reflection)", "off", dropLine("alter table public.journal_entries drop constraint if exists journal_entries_crisis_check;"), [21, 67], HEAVY],
+    ["a heavy moment is never a prayer (crisis_not_prayer stays)", "off", dropLine("alter table public.journal_entries drop constraint if exists crisis_not_prayer;"), [44, 67], HEAVY],
+    ["a heavy moment has no first line (validation_line_crisis stays)", "off", dropLine("alter table public.journal_entries drop constraint if exists validation_line_crisis;"), [65, 67], HEAVY],
+    ["a heavy moment gets no affirmations (the old trigger stays)", "off", (sql) => sql.replace("drop trigger if exists daily_affirmations_no_crisis on public.daily_affirmations;", "").replace("drop function if exists public.reject_affirmation_for_crisis_entry();", ""), [31, 67], HEAVY],
+    ["the run skips heavy moments", "off", (sql) => sql.replace("and e.devotional_script is not null", "and not e.is_crisis"), [64], HEAVY],
+    ["the run counts entries with no devotional", "off", (sql) => sql.replace(/\s+and e\.devotional_script is not null/, ""), [64], HEAVY],
+    ["the run counts every day with a reflection", "off", (sql) => sql.replace("(select count(*)::int from ranked where local_day = start_day - (n - 1))", "(select count(*)::int from days)"), [64], HEAVY],
+    ["visitors may ask for the run of reflection days", "off", (sql) => sql + "\ngrant execute on function public.reflection_streak_days(text) to anon;", [64], HEAVY],
     // Not a broken migration: the hosted project before the day's first Realtime connection. Nothing may fail, the checks that need
     // a message table say skipped, and a change is still saved (59).
     ["no message table today (nobody has connected yet)", "off", null, { skipped: [60, 61, 62], passed: [59, 63, 64] }, REALTIME, { stub: NO_MESSAGE_TABLE_TODAY }],

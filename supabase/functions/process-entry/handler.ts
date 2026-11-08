@@ -10,10 +10,12 @@ import {
   type CrisisSource,
   type LimitStatus,
   type LogLine,
+  type PrayerVoiceStatus,
   type ScreenStatus,
   type ScriptureOutcome,
   shortHash,
   type SpeechStatus,
+  type ValidationLineStatus,
   writeLog,
 } from "../_shared/log.ts";
 import { screenEntry, type ScreenInput, type ScreenResult, screenTiming } from "../_shared/safety/screen.ts";
@@ -22,6 +24,7 @@ import { downloadRecording } from "./audio.ts";
 import { EXPIRY_CHECK, GEMINI_DEADLINE_MS, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./constants.ts";
 import type { ProcessEntryRequest } from "./contracts.ts";
 import { GeminiBlocked, type GeminiStats, generate, newStats } from "./gemini.ts";
+import { heavyFallback } from "./heavy.ts";
 import {
   claimEntry,
   countRecentEntries,
@@ -34,13 +37,12 @@ import {
   needsSpeech,
   readProfile,
   type RecentReflectionRow,
-  saveCrisisEntry,
   saveReadyEntry,
   saveTranscript,
   type StoredProfile,
 } from "./lifecycle.ts";
-import { parseReflection, type Reflection } from "./output.ts";
-import { firstWord } from "./tone.ts";
+import { checkReflection, readReflection, type Reflection } from "./output.ts";
+import { firstWord, groundingCount, prayerVoice } from "./tone.ts";
 import { buildSystemInstruction, buildUserTurn, PROMPT_VERSION, type RecentReflection } from "./prompt.ts";
 import { toResponse } from "./response.ts";
 import { buildSchema } from "./schema.ts";
@@ -54,10 +56,12 @@ import { readJsonBody, validateRequest } from "./validate.ts";
 // marks it failed, whatever goes wrong while the answer is built.
 //
 // The order matters for safety. A crisis screening comes first (_shared/safety): nothing is written for the person, no
-// limit is counted and no reflection is asked for until the entry has been screened, and a crisis is answered at once.
-// Only an entry the screening called clear meets the free tier's limit (a crisis is therefore never counted and never
-// blocked) and is turned into a reflection, from its words alone. Speech comes last and is best effort: a reflection that
-// was saved is never lost to it.
+// limit is counted and no reflection is asked for until the entry has been screened. Only an entry the screening called
+// clear meets the free tier's limit. An entry it found a risk in is a heavy moment (gen-v2.4, heavy.ts, the owner's decision of
+// 2026-11-08): it is never counted and never blocked, and it is written in full by the instruction's "A heavy moment", from its
+// words alone. A heavy moment is never failed for want of a reply: when the model cannot write one (a safety filter blocks the
+// request, a recording was blocked before its words were read, or no usable reply comes in time) it gets the written
+// fallback. Speech comes last and is best effort: a reflection that was saved is never lost to it.
 
 type Counters = { authMs: number; dbMs: number };
 
@@ -84,9 +88,15 @@ type Context = {
   limitUsed: number | null;
   billing: BillingStatus | null;
   billingMs: number;
-  // "salvaged:title_private" or "salvaged:headline_private" when the reflection was saved with a safe title or headline
-  // (step 32). It is the 200 line's `reason`: one word, never what the model wrote or a word of the person's.
+  // "salvaged:<check>" when the reflection was saved after a soft check still failed on the last try (step 32: a safe title or
+  // headline, the hook; step 36: the prayer's voice, grounding, the line, the echo), and "fallback:<why>" when a heavy moment got
+  // the written fallback (gen-v2.4: no_words, blocked or unwritten). It is the 200 line's `reason`: one word, never what the
+  // model wrote or a word of the person's.
   salvaged: string | null;
+  // Step 36, set once a reflection is saved: the shared content stems as a count, the prayer's voice, the line's source.
+  grounding: number | null;
+  prayerVoice: PrayerVoiceStatus | null;
+  validationLine: ValidationLineStatus | null;
   counters: Counters;
 };
 
@@ -125,7 +135,7 @@ async function respond(
   userId: string,
   row: EntryRow,
 ): Promise<Response> {
-  const affirmations = row.is_crisis ? [] : await timed(context, "dbMs", () => listAffirmations(admin, userId, row.id));
+  const affirmations = await timed(context, "dbMs", () => listAffirmations(admin, userId, row.id));
   return jsonResponse(200, toResponse(row, affirmations), corsHeaders);
 }
 
@@ -229,7 +239,7 @@ async function run(req: Request, context: Context): Promise<Response> {
 
   // An entry that already finished is answered as it is. The one exception is a reflection that has its devotional and no
   // audio, when speech is on: then the same request adds the audio, and only that (no screening, no limit, no model
-  // call). A crisis entry is always answered as it is.
+  // call). A heavy moment saved before 2026-11-08 has no devotional, so it is always answered as it is.
   async function answerReady(row: EntryRow): Promise<Response> {
     if (speech.state !== "ready" || !needsSpeech(row)) return await respond(context, admin, user.userId, row);
     const outcome = await speechStage({
@@ -258,20 +268,10 @@ async function run(req: Request, context: Context): Promise<Response> {
   if (claim.kind === "busy") throw new AppError("ALREADY_PROCESSING", "claim_busy");
   const entryId = claim.row.id;
 
-  // True once the entry has been saved as a reflection or as a crisis. From then on the catch below never marks it failed:
-  // a database that hiccups while the answer is built answers a plain 500, and the entry stays as it was saved (the same
-  // request sent again answers it from its saved row).
+  // True once the entry has been saved as a reflection. From then on the catch below never marks it failed: a database that
+  // hiccups while the answer is built answers a plain 500, and the entry stays as it was saved (the same request sent again
+  // answers it from its saved row).
   let saved = false;
-
-  // A crisis entry keeps only the flag and the person's words. The reply is the same 200 shape as a reflection, built from
-  // the saved row, with no devotional, no passage and no affirmations. Nothing is sent to anyone, nothing is waited for,
-  // and only the source (one word) reaches the log. It gets no speech and is never counted or blocked by the limit.
-  async function answerCrisis(words: string | null, source: CrisisSource): Promise<Response> {
-    context.crisisSource = source;
-    const row = await db(() => saveCrisisEntry(admin, user.userId, entryId, words));
-    saved = true;
-    return await respond(context, admin, user.userId, row);
-  }
 
   try {
     const deadlineAt = context.startedAt + GEMINI_DEADLINE_MS;
@@ -281,32 +281,42 @@ async function run(req: Request, context: Context): Promise<Response> {
     context.screen = screening.status;
     if (screening.status === "failed") throw new AppError("AI_UNAVAILABLE", `screening_failed:${screening.reason}`);
     if (screening.status === "no_speech") throw new AppError("NO_SPEECH", "no_speech");
-    if (screening.status === "crisis") return await answerCrisis(screening.transcript, screening.source);
 
-    // The reflection is written from the screened words alone, never from the recording again.
+    // A heavy moment (gen-v2.4): the screening found a risk to the person. Its source (one word) reaches the log, and nothing
+    // else of the screening's answer does.
+    let heavy = screening.status === "crisis";
+    if (screening.status === "crisis") context.crisisSource = screening.source;
+
+    // The reflection is written from the screened words alone, never from the recording again. A recording a safety filter
+    // blocked before its words were read has none, and gets the written fallback.
     const words = screening.transcript;
 
-    // The person's last reflections (their titles, openings and passages, never their words), read while the profile and the
-    // limit are, so that the model can vary its title, its opening and its passage (step 32). A read that fails means no block,
-    // never a failed reflection, and its time is not part of dbMs.
-    const recentReflections = listRecentReflections(admin, user.userId, entryId, claim.row.created_at)
-      .catch((): RecentReflectionRow[] => []);
+    // The person's last ten reflections, read while the profile and the limit are, so that the model can vary its title, its
+    // first word and its passage (step 32). Since step 36 only their first words, their titles' main words and their passages
+    // reach the model, after the entry (prompt.ts), never a sentence they said and never the person's words. A read that fails
+    // means no block, never a failed reflection, and its time is not part of dbMs.
+    const recentReflections = words === null
+      ? Promise.resolve<RecentReflectionRow[]>([])
+      : listRecentReflections(admin, user.userId, entryId, claim.row.created_at)
+        .catch((): RecentReflectionRow[] => []);
 
-    // The free tier's limit. Only a clear screening gets this far, so a crisis is never counted and never blocked. An entry
+    // The free tier's limit. Only a clear screening meets it, so a heavy moment is never counted and never blocked. An entry
     // over the limit is saved as failed with LIMIT_REACHED (the catch below does that) and answered with a 402 that carries
     // the entry and the week's numbers; sent again after an upgrade or when the week turns, it is claimed and checked again.
-    const stored = await db(() => readProfile(admin, user.userId));
-    const profile = await confirmPaidPlan(context, admin, user.userId, stored);
-    const decision = await db(() => checkDevotionalLimit(admin, user.userId, profile, claim.row));
-    context.limit = limitStatus(decision);
-    context.limitUsed = decision.kind === "free" ? decision.used : null;
-    if (decision.kind === "free" && !decision.allowed) {
-      // A recording keeps the words that were heard in it, so that sending it again does not start from the recording.
-      if (input.inputType === "audio") await db(() => saveTranscript(admin, user.userId, entryId, words));
-      throw new AppError("LIMIT_REACHED", "free_limit", {
-        entryId,
-        usage: { used: decision.used, limit: decision.limit, resetsAt: decision.resetsAt },
-      });
+    if (!heavy && words !== null) {
+      const stored = await db(() => readProfile(admin, user.userId));
+      const profile = await confirmPaidPlan(context, admin, user.userId, stored);
+      const decision = await db(() => checkDevotionalLimit(admin, user.userId, profile, claim.row));
+      context.limit = limitStatus(decision);
+      context.limitUsed = decision.kind === "free" ? decision.used : null;
+      if (decision.kind === "free" && !decision.allowed) {
+        // A recording keeps the words that were heard in it, so that sending it again does not start from the recording.
+        if (input.inputType === "audio") await db(() => saveTranscript(admin, user.userId, entryId, words));
+        throw new AppError("LIMIT_REACHED", "free_limit", {
+          entryId,
+          usage: { used: decision.used, limit: decision.limit, resetsAt: decision.resetsAt },
+        });
+      }
     }
 
     const recent: RecentReflection[] = (await recentReflections).map((row) => ({
@@ -315,36 +325,66 @@ async function run(req: Request, context: Context): Promise<Response> {
       reference: row.scripture_reference,
     }));
 
-    let reflection: Reflection;
-    try {
-      reflection = await generate({
-        apiKey: gemini.apiKey,
-        model: gemini.model,
-        fallbackModel: gemini.fallbackModel,
-        thinkingLevel: gemini.thinkingLevel,
-        system: buildSystemInstruction(),
-        input: { kind: "text", text: buildUserTurn(words, recent) },
-        schema: buildSchema(),
-        deadlineAt,
-        // The hook guard compares the new opening with the first words the recent devotionals began with.
-        validate: (reply) =>
-          parseReflection(reply, {
-            entry: words,
-            recentFirstWords: recent.flatMap((item) => (item.devotional ? [firstWord(item.devotional)] : [])),
-          }),
-      }, context.stats);
-    } catch (error) {
-      // The last of the three layers: a request a safety filter blocks is treated as a possible crisis.
-      if (error instanceof GeminiBlocked) return await answerCrisis(words, "blocked");
-      throw error;
+    // The reflection. For a heavy moment the user turn says so (a <heavy_moment> block) and the heavy rules check the reply. The
+    // last of the three layers is the model's own: a reply it flags is a heavy moment even when the screening said clear (its
+    // reply was already checked by the heavy rules), and a request a safety filter blocks is treated as one.
+    let reflection: Reflection | null = null;
+    let fallbackWhy: "no_words" | "blocked" | "unwritten" | null = words === null ? "no_words" : null;
+    if (words !== null) {
+      // Set when any reply flagged a heavy moment, so a reply that then fails its checks still ends as one (the fallback).
+      let flagged = false;
+      try {
+        reflection = await generate({
+          apiKey: gemini.apiKey,
+          model: gemini.model,
+          fallbackModel: gemini.fallbackModel,
+          thinkingLevel: gemini.thinkingLevel,
+          system: buildSystemInstruction(),
+          input: { kind: "text", text: buildUserTurn(words, recent, heavy) },
+          schema: buildSchema(),
+          deadlineAt,
+          // The hook guard compares the new opening with the first words the recent devotionals began with.
+          validate: (reply) => {
+            const read = readReflection(reply);
+            if (read.heavy) flagged = true;
+            return checkReflection(read, {
+              entry: words,
+              heavy,
+              recentFirstWords: recent.flatMap((item) => (item.devotional ? [firstWord(item.devotional)] : [])),
+            });
+          },
+        }, context.stats);
+      } catch (error) {
+        if (error instanceof GeminiBlocked) {
+          fallbackWhy = "blocked";
+          heavy = true;
+          context.crisisSource ??= "blocked";
+        } else if (error instanceof AppError && (heavy || flagged)) {
+          // A heavy moment is never failed for want of a reply.
+          fallbackWhy = "unwritten";
+          heavy = true;
+          context.crisisSource ??= "model";
+        } else {
+          throw error;
+        }
+      }
+      if (reflection?.heavy && !heavy) {
+        heavy = true;
+        context.crisisSource = "model";
+      }
     }
-    // ... and so is the model's own flag, even when the screening said clear.
-    if (reflection.kind === "crisis") return await answerCrisis(words, "model");
-    // A reflection kept with a safe title or headline is saved like any other, and its log line says so.
-    if (reflection.salvaged) context.salvaged = `salvaged:${reflection.salvaged}`;
+    if (reflection === null) {
+      reflection = heavyFallback();
+      context.salvaged = `fallback:${fallbackWhy ?? "unwritten"}`;
+    } else if (reflection.salvaged) {
+      // A reflection kept after a soft check is saved like any other, and its log line says so.
+      context.salvaged = `salvaged:${reflection.salvaged}`;
+    }
+    const fromModel = fallbackWhy === null;
 
-    // The model said where the passage is; the words come from the Bible. If that passage does not exist, one small
-    // follow-up request chooses another, and if none can be found the reflection is saved without a passage.
+    // The model said where the passage is; the words come from the Bible. If that passage does not exist (or, for a heavy
+    // moment, is one a heavy moment never gets), one small follow-up request chooses another, and if none can be found the
+    // reflection is saved without a passage (a heavy moment with the fallback's).
     const scripture = await resolveScripture({
       ref: reflection.scripture,
       title: reflection.title,
@@ -352,27 +392,48 @@ async function run(req: Request, context: Context): Promise<Response> {
       gemini,
       deadlineAt,
       stats: context.stats,
+      heavy,
     });
     context.scripture = scripture.outcome;
     context.bibleMs = scripture.bibleMs;
 
     const row = await db(() =>
-      saveReadyEntry(admin, user.userId, entryId, {
-        transcript: words,
-        dominant_emotion: reflection.emotion,
-        devotional_title: reflection.title,
-        devotional_script: reflection.devotional,
-        closing_prayer: reflection.closingPrayer,
-        scripture_reference: scripture.reference,
-        scripture_text: scripture.text,
-        scripture_verified: scripture.verified,
-        is_active_prayer: reflection.prayer !== null,
-        prayer_title: reflection.prayer?.title ?? null,
-        prayer_category: reflection.prayer?.category ?? null,
-        prayer_summary: reflection.prayer?.summary ?? null,
-      }, reflection.affirmations)
+      saveReadyEntry(
+        admin,
+        user.userId,
+        entryId,
+        {
+          transcript: words,
+          dominant_emotion: reflection.emotion,
+          devotional_title: reflection.title,
+          validation_line: reflection.validationLine,
+          devotional_script: reflection.devotional,
+          closing_prayer: reflection.closingPrayer,
+          scripture_reference: scripture.reference,
+          scripture_text: scripture.text,
+          scripture_verified: scripture.verified,
+          // A heavy moment is never made a prayer by the server: the person can track it from their own screen.
+          is_active_prayer: !heavy && reflection.prayer !== null,
+          prayer_title: heavy ? null : reflection.prayer?.title ?? null,
+          prayer_category: heavy ? null : reflection.prayer?.category ?? null,
+          prayer_summary: heavy ? null : reflection.prayer?.summary ?? null,
+        },
+        reflection.affirmations,
+        heavy,
+      )
     );
     saved = true;
+    // How the saved reflection is written from the entry, as a count and two words (step 36): never a word of either. The
+    // written fallback is not written from the entry, so it has none.
+    if (fromModel && words !== null) {
+      context.grounding = groundingCount(words, [
+        reflection.validationLine ?? "",
+        reflection.devotional,
+        reflection.closingPrayer,
+      ]);
+      context.prayerVoice = prayerVoice(reflection.closingPrayer, words);
+      context.validationLine = reflection.validationSource === "model" ? "ok" : "salvaged";
+    }
 
     // Speech, best effort, from the row that was just saved. It never throws and never changes the status.
     const outcome = await speechStage({
@@ -418,6 +479,9 @@ export async function handle(req: Request): Promise<Response> {
     billing: null,
     billingMs: 0,
     salvaged: null,
+    grounding: null,
+    prayerVoice: null,
+    validationLine: null,
     counters: { authMs: 0, dbMs: 0 },
   };
   let status = 200;
@@ -479,6 +543,9 @@ export async function handle(req: Request): Promise<Response> {
       accountLeftOut: null,
       accountBytes: null,
       accountApple: null,
+      grounding: context.grounding,
+      prayerVoice: context.prayerVoice,
+      validationLine: context.validationLine,
     };
     writeLog(line);
   }

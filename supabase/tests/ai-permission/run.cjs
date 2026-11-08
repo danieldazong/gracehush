@@ -220,7 +220,6 @@ async function main() {
       sheet.notNow,
       sheet.learnMore,
       sheet.showLess,
-      sheet.support,
       sheet.privacy,
       ...sheet.details.flatMap((row) => [row.label, row.body]),
     ].join(" ");
@@ -240,7 +239,7 @@ async function main() {
       "and says what Google's terms say, in Google's words",
     );
     // One tap away, nothing hidden: what Google keeps, why it is asked, where to change it.
-    for (const word of ["support resources", "Profile", "misuse", "limited time"]) {
+    for (const word of ["extra care", "Profile", "misuse", "limited time"]) {
       assert.ok(all.includes(word), `the details must say "${word}"`);
     }
     assert.equal(sheet.details.length, 3);
@@ -268,7 +267,7 @@ async function main() {
     assert.match(screen, /accessibilityElementsHidden=\{!editing \|\| !allowed\}/, "screen readers cannot reach the editor behind it");
     assert.match(screen, /usePreventRemove\(allowed && \(/, "leaving the sheet never asks to discard");
     assert.match(screen, /leaveToJournal\("permission"\)/, "Not now returns to Journal with the calm note");
-    assert.match(screen, /navigate\("CrisisResources", \{ source: "newEntry" \}\)/, "Support Resources is one tap away");
+    assert.ok(!screen.includes("CrisisResources") && !screen.includes("onOpenSupport"), "Support Resources was removed (2026-11-08)");
     assert.match(screen, /route\.params\.mode !== "write" \|\| !allowed/, "the keyboard waits for the answer");
     assert.match(screen, /\[route\.params\.mode, allowed\]/, "and comes up after it");
   });
@@ -278,9 +277,10 @@ async function main() {
     for (const word of ["haptics", "track(", "console.", "crisis", "colors.crisis", "<Modal"]) {
       assert.ok(!view.includes(word), `the sheet must not use ${word}`);
     }
-    // Drawn inside the screen, not as a system Modal: the Support link, Not now and the keyboard never meet iOS's one-Modal rule.
+    // Drawn inside the screen, not as a system Modal: Not now and the keyboard never meet iOS's one-Modal rule.
     assert.ok(!/<BottomSheet|import \{[^}]*BottomSheet/.test(view), "the sheet is not a BottomSheet (a Modal)");
-    for (const handler of ["onOpenSupport", "onOpenPrivacy"]) {
+    assert.ok(!view.includes("onOpenSupport"), "no Support Resources link (removed 2026-11-08)");
+    for (const handler of ["onOpenPrivacy"]) {
       assert.match(view, new RegExp(`onPress=\\{${handler}\\}`), `${handler} is pressable`);
     }
     for (const handler of ["onAllow", "onNotNow"]) {
@@ -336,7 +336,7 @@ async function main() {
     assert.match(profile, /setAiAllowed\(!aiAllowed\)/);
     assert.match(profile, /accessibilityState=\{\{ checked: aiAllowed \}\}/);
     assert.match(read("src/components/dev/DevToolsPanel.tsx"), /Reset AI permission \(dev\)/);
-    assert.match(read("src/navigation/types.ts"), /\| "journal" \| "newEntry" \}/);
+    assert.ok(!read("src/navigation/types.ts").includes("CrisisResources"), "no Support Resources route (removed 2026-11-08)");
     assert.match(read("src/store/offlineStore.ts"), /"permission"/);
   });
 

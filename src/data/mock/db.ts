@@ -3,7 +3,6 @@ import {
   ANXIOUS_ENTRY_ID,
   buildEntries,
   buildOfflineEntries,
-  CRISIS_ENTRY_ID,
 } from "@/data/mock/entries";
 import { getMockScenario, type MockScenario } from "@/data/mock/scenario";
 import { buildProfile } from "@/data/mock/users";
@@ -40,9 +39,10 @@ export function getMockDb(): MockDb {
   return mockDb;
 }
 
-// The mock data's stand-in for the server (data source "mock"): the server creates the entry. Here a finished (or crisis)
-// fixture is cloned under a new id, so Journal and Reflection have something to show after a submit. Like the server it is
-// idempotent on client_entry_id: a retried submit never adds a second row.
+// The mock data's stand-in for the server (data source "mock"): the server creates the entry. Here the finished anxious fixture
+// is cloned under a new id, so Journal and Reflection have something to show after a submit. A heavy moment ("crisis") is a whole
+// reflection since 2026-11-08, so it is the same clone, marked as one (the words-only CRISIS_ENTRY_ID fixture stands for one saved
+// before then). Like the server it is idempotent on client_entry_id: a retried submit never adds a second row.
 export function addMockEntry(kind: "ready" | "crisis", req: ProcessEntryRequest): string {
   const db = getMockDb();
   const existing = db.entries.find((row) => row.client_entry_id === req.clientEntryId);
@@ -51,10 +51,9 @@ export function addMockEntry(kind: "ready" | "crisis", req: ProcessEntryRequest)
   const now = new Date();
   const created = now.toISOString();
   const fixtures = buildEntries(now);
-  const templateId = kind === "crisis" ? CRISIS_ENTRY_ID : ANXIOUS_ENTRY_ID;
-  const template = fixtures.find((row) => row.id === templateId);
+  const template = fixtures.find((row) => row.id === ANXIOUS_ENTRY_ID);
   if (!template) {
-    throw new Error(`The mock fixtures have no ${templateId} entry to clone`);
+    throw new Error(`The mock fixtures have no ${ANXIOUS_ENTRY_ID} entry to clone`);
   }
 
   const id = `entry-new-${req.clientEntryId}`;
@@ -64,6 +63,7 @@ export function addMockEntry(kind: "ready" | "crisis", req: ProcessEntryRequest)
     created_at: created,
     updated_at: created,
     client_entry_id: req.clientEntryId,
+    is_crisis: kind === "crisis",
     input_type: req.inputType,
     // What was written becomes the transcript, so Journal quotes it. It lives only in this in-memory mock.
     transcript: req.inputType === "text" ? req.text : template.transcript,
@@ -76,17 +76,15 @@ export function addMockEntry(kind: "ready" | "crisis", req: ProcessEntryRequest)
     answered_at: null,
     answered_notes: null,
   });
-  if (kind === "ready") {
-    // The newest ready entry owns the affirmations Journal shows, so it gets the three rows too.
-    db.affirmations.push(
-      ...buildAffirmations(fixtures).map((row) => ({
-        ...row,
-        id: `affirmation-${id}-${row.time_slot}`,
-        entry_id: id,
-        created_at: created,
-      })),
-    );
-  }
+  // The newest finished entry owns the affirmations Journal shows, so it gets the three rows too, a heavy moment's included.
+  db.affirmations.push(
+    ...buildAffirmations(fixtures).map((row) => ({
+      ...row,
+      id: `affirmation-${id}-${row.time_slot}`,
+      entry_id: id,
+      created_at: created,
+    })),
+  );
   return id;
 }
 

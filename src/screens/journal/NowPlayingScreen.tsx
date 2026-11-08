@@ -446,8 +446,7 @@ export function NowPlayingScreen({ navigation, route }: RootStackScreenProps<"No
         </Pressable>
       </MessageView>
     );
-  } else if (state.status === "not-found" || state.entry.isCrisis) {
-    // A crisis entry gets this too: nothing here may hint that a player exists for it.
+  } else if (state.status === "not-found") {
     body = (
       <MessageView title={states.notFound}>
         <PrimaryButton label={states.close} onPress={close} />

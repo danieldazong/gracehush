@@ -29,10 +29,6 @@ interface DevState {
   // The next Reflection load fails once, so its error state can be reached.
   nextReflectionLoadFails: boolean;
   setNextReflectionLoadFails: (value: boolean) => void;
-  // The next crisis phone, text or web link "cannot be opened" once, so the fallback sheet can be reached
-  // on a device that has a phone app (useCrisisActions clears it as it fails the link).
-  nextCrisisLinkFails: boolean;
-  setNextCrisisLinkFails: (value: boolean) => void;
   // The next prayer change (mark answered, move back to Active, edit a note) fails once, so the failure
   // paths of the Prayers screen and its sheet can be reached. Step 15 reuses it for the next profile save,
   // data export and account deletion as well: one flag, not a third.
@@ -79,8 +75,6 @@ export const useDevStore = create<DevState>()((set) => ({
   setNextNetworkFails: (nextNetworkFails) => set({ nextNetworkFails }),
   nextReflectionLoadFails: false,
   setNextReflectionLoadFails: (nextReflectionLoadFails) => set({ nextReflectionLoadFails }),
-  nextCrisisLinkFails: false,
-  setNextCrisisLinkFails: (nextCrisisLinkFails) => set({ nextCrisisLinkFails }),
   nextPrayerMutationFails: false,
   setNextPrayerMutationFails: (nextPrayerMutationFails) => set({ nextPrayerMutationFails }),
   mockProfileVersion: 0,

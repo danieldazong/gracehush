@@ -828,24 +828,31 @@ async function hookChecks() {
 
 // ================================================================== the menu, the copy and the log
 async function menuChecks() {
-  // The screens are not loaded in Node, so what they wire is read from their source: the crisis view carries the same link
-  // as the ready view, asks with `crisis: true`, and its delete sends no analytics event (Analytics Rules).
-  await test("source: the crisis view has the ready view's delete link, asks with crisis set, and its delete sends no event", async () => {
+  // The screens are not loaded in Node, so what they wire is read from their source (2026-11-08): a heavy moment is the ready view
+  // with one quiet help line, one saved before then is the words-only view with the same delete link (asking with `crisis: true`),
+  // and deleting either sends no analytics event (Analytics Rules).
+  await test("source: a heavy moment's views carry the shared delete link and the help line, the words-only view asks with crisis set, and no delete of one sends an event", async () => {
     const fs = require("node:fs");
     const path = require("node:path");
     const root = process.env.GRACEHUSH_REPO ?? path.resolve(__dirname, "../../..");
     const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
     const screen = read("src/screens/journal/ReflectionScreen.tsx");
-    const panel = read("src/components/crisis/CrisisSupportPanel.tsx");
     const link = read("src/components/DeleteReflectionLink.tsx");
-    assert.equal(screen.split("<DeleteReflectionLink ").length - 1, 1, "the ready view draws the shared link once");
-    assert.equal(panel.split("<DeleteReflectionLink ").length - 1, 1, "the crisis view draws the shared link once");
-    assert.ok(panel.indexOf("returnToJournal") < panel.indexOf("<DeleteReflectionLink "), "under the way back, last of all");
-    assert.ok(/deletion\.ask\(\{ entryId: state\.entry\.id, answered: false, crisis: true \}\)/.test(screen), "the crisis branch asks with crisis set");
-    assert.ok(/if \(!isCrisisEntry\) track\("reflection_deleted"/.test(screen), "no event for a crisis entry");
+    const help = read("src/components/HelpLine.tsx");
+    assert.equal(screen.split("<DeleteReflectionLink ").length - 1, 2, "the ready view and the words-only view draw the shared link");
+    const wordsOnly = screen.slice(screen.indexOf("function WordsOnlyView"), screen.indexOf("export function ReflectionScreen"));
+    assert.ok(wordsOnly.indexOf("onPress={onReturn}") < wordsOnly.indexOf("<DeleteReflectionLink "), "under the way back, last of all");
+    assert.ok(wordsOnly.includes("<HelpLine />"), "the words-only view has the help line");
+    assert.ok(/\{entry\.isCrisis \? \(\s*<FadeIn \{\.\.\.arrive\(3\)\}>\s*<HelpLine \/>/.test(screen), "a heavy moment's ready view has the help line under its devotional");
+    assert.ok(/deletion\.ask\(\{ entryId: state\.entry\.id, answered: false, crisis: true \}\)/.test(screen), "the words-only branch asks with crisis set");
+    assert.ok(/if \(!isCrisisEntry\) track\("reflection_deleted"/.test(screen), "no event for a heavy moment");
     assert.equal(screen.split('track("reflection_deleted"').length - 1, 1, "one call site, guarded");
-    assert.ok(link.includes("text-mauve") && !/colors[.]crisis|-crisis[^a-z]/.test(link), "the link is mauve and never crisis red");
-    assert.ok(!/haptics|console\./.test(link) && !/haptics|console\./.test(panel), "no haptic and no log line");
+    assert.ok(!screen.includes("CrisisSupportPanel") && !screen.includes("CrisisResources"), "Support Resources was removed");
+    for (const source of [link, help]) {
+      assert.ok(!/colors[.]crisis|-crisis[^a-z]|btn-critical/.test(source), "mauve and plum, never crisis red");
+      assert.ok(!/haptics|console\.|track\(/.test(source), "no haptic, no log line and no event");
+    }
+    assert.ok(help.includes("HELPLINE_NUMBER") && help.includes("EMERGENCY_NUMBER") && help.includes("openPhoneCall"), "the numbers come from constants/crisisResources.ts, and the tap calls");
   });
   await test("menu: Active offers Remove then Delete; Answered offers Edit, Move back, Remove then Delete; the delete is last and the only destructive one", async (w) => {
     const { getPrayerMenu } = w.use("@/utils/prayerMenu");

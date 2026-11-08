@@ -355,17 +355,7 @@ export function JournalFeedScreen({ navigation }: MainTabScreenProps<"Journal">)
       {/* While the person's permission is off nothing will go by itself when the phone reconnects. */}
       {ready.isOffline ? <OfflineBanner unsyncedCount={aiAllowed ? unsentCount : 0} /> : null}
       {ready.savedNote !== null ? (
-        <NoticeBanner
-          message={copy.journal.notes[ready.savedNote]}
-          onDismiss={ready.dismissNote}
-          // Nothing has been screened yet (offline, the service had no answer, or the person said "Not now" and nothing was
-          // sent), so a way to reach someone stays one tap away (step 25 follow-up). Like every way into Support Resources: no
-          // haptic and no log.
-          link={{
-            label: copy.journal.noteSupport,
-            onPress: () => navigation.navigate("CrisisResources", { source: "journal" }),
-          }}
-        />
+        <NoticeBanner message={copy.journal.notes[ready.savedNote]} onDismiss={ready.dismissNote} />
       ) : null}
       {askConsent ? (
         <AnalyticsConsentCard onShare={() => chooseAnalytics("granted")} onNotNow={() => chooseAnalytics("declined")} />
