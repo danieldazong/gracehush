@@ -16,7 +16,7 @@ You must be at least 18 and able to enter a binding contract where you live. The
 
 ## 2. What GraceHush is, and is not
 
-GraceHush is a private audio prayer journal. You speak or write a prayer, and GraceHush creates a reflection for you: a Bible passage from the Berean Standard Bible, a short spoken devotional, a closing prayer and three affirmations.
+GraceHush is a private audio prayer journal. You speak or write a prayer, and GraceHush creates a reflection for you: a Bible passage from the Berean Standard Bible, a short spoken devotional, a closing prayer and three affirmations, each with a Bible verse.
 
 GraceHush is **not** pastoral counseling, therapy, medical advice or an emergency or crisis service, and it is not a substitute for a pastor, a counselor, a doctor or emergency services. If you are in danger or thinking about harming yourself, contact your local emergency number; in the US you can call or text 988.
 
@@ -34,7 +34,7 @@ You sign in with Apple, Google or an emailed code. Keep your sign-in secure, giv
 
 ## 5. AI-written content
 
-Your devotional, closing prayer and affirmations are written with the help of artificial intelligence. They can contain mistakes or miss what you meant. We check that each Bible passage we show matches the text of the Berean Standard Bible, but everything written around it is an AI-written reflection, not the teaching of any church, and not professional advice. Use your own judgment and the counsel of people you trust.
+Your devotional, closing prayer and affirmations are written with the help of artificial intelligence. They can contain mistakes or miss what you meant. We check that each Bible passage and verse we show matches the text of the Berean Standard Bible, but everything written around it is an AI-written reflection, not the teaching of any church, and not professional advice. Use your own judgment and the counsel of people you trust.
 
 ## 6. Using GraceHush fairly
 
@@ -57,7 +57,7 @@ We may add, change or remove features, and we may change the free limit. If a ch
 
 ## 9. Reminders and notifications
 
-If you turn on reminders, GraceHush schedules notifications on your phone at the times you choose. They show an affirmation written for you, which may appear on your lock screen. You can turn reminders off in Profile or in your phone’s settings.
+If you turn on reminders, GraceHush schedules notifications on your phone at the times you choose. They show an affirmation written for you and a Bible verse, which may appear on your lock screen. You can turn reminders off in Profile or in your phone’s settings.
 
 ## 10. Other companies’ services
 

@@ -32,7 +32,7 @@ GraceHush is a private audio prayer journal. You speak or write what you are car
 
 ### 1.2 Information we create for you
 
-From each entry GraceHush creates: a transcript of a recording; an emotion label (such as anxious, weary or grateful); one Bible passage from the Berean Standard Bible and its text; a short devotional and its spoken audio; a closing prayer; three affirmations; and, for prayers you track, a title, category and summary. These are stored with your entry and are as private as the entry itself.
+From each entry GraceHush creates: a transcript of a recording; an emotion label (such as anxious, weary or grateful); one Bible passage from the Berean Standard Bible and its text; a short devotional and its spoken audio; a closing prayer; three affirmations, each with a short Bible verse from the Berean Standard Bible and its reference; and, for prayers you track, a title, category and summary. These are stored with your entry and are as private as the entry itself.
 
 ### 1.3 Subscription information
 
@@ -91,7 +91,7 @@ Every entry is checked, by our own rules and by Google’s AI as part of prepari
 
 ## 6. Reminders on your lock screen
 
-If you turn on reminders, your phone shows an affirmation (text written for you from your own prayers) in a notification. It may appear on your lock screen, and anyone who can see your phone could read it. You can turn reminders off in Profile, and your phone’s settings let you hide notification previews.
+If you turn on reminders, your phone shows an affirmation in a notification: a short line written for you from your own prayers, and a Bible verse with its reference. It may appear on your lock screen, and anyone who can see your phone could read it. The line and the verse are written so that they never name a person, a place or what happened, but they are chosen for what you shared. You can turn reminders off in Profile, and your phone’s settings let you hide notification previews.
 
 ## 7. How long we keep information
 
