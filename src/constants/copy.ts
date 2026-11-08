@@ -527,7 +527,10 @@ export const copy = {
       errors: playbackErrors,
     },
     scripture: {
-      translation: "Berean Standard Bible",
+      // The pill beside the reference: the abbreviation, as the verse blocks, the notification and the share text say it
+      // (2026-11-08; it read "Berean Standard Bible" until then and dropped under the reference when they did not fit). The
+      // full name stays in the spoken label below and on Profile's footer.
+      translation: "BSB",
       confirming: "We’re confirming this passage.",
       a11y: (reference: string, body: string) => `${reference}, Berean Standard Bible. ${body}`,
     },
