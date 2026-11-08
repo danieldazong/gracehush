@@ -104,7 +104,7 @@ type ReflectionCarouselProps = {
   initialTab?: ReflectionTab;
 };
 
-// Devotional, Affirmations and Closing Prayer in one card. Only the selected pane is rendered, and it
+// Devotional, Affirmations and Prayer (the closing prayer) in one card. Only the selected pane is rendered, and it
 // fades in when the tab changes. An entry without a closing prayer has two tabs. It opens on `initialTab`
 // (a tapped affirmation notification, step 28), else on the devotional.
 export function ReflectionCarousel({

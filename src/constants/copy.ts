@@ -540,7 +540,7 @@ export const copy = {
       label: "Reflection sections",
       devotional: "Devotional",
       affirmations: "Affirmations",
-      prayer: "Closing Prayer",
+      prayer: "Prayer",
     },
     affirmations: {
       eyebrow: (slotName: string, time: string) => `${slotName} • ${time}`,
