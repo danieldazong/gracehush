@@ -42,6 +42,7 @@ export type ContractParity = [
   Expect<Same<App.DeleteAccountError, Server.DeleteAccountError>>,
   Expect<Same<App.JournalEntry, Server.JournalEntry>>,
   Expect<Same<App.Affirmation, Server.Affirmation>>,
+  Expect<Same<App.AffirmationVerse, Server.AffirmationVerse>>,
   Expect<Same<App.Prayer, Server.Prayer>>,
   Expect<Same<App.Scripture, Server.Scripture>>,
   Expect<Same<App.Devotional, Server.Devotional>>,

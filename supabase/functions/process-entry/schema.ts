@@ -30,6 +30,38 @@ export function buildScriptureSchema(): JsonSchema {
   return { type: "object", properties: passageProperties(), required: PASSAGE_REQUIRED };
 }
 
+// gen-v2.5 (step 37): where an affirmation's verse is. One verse, so verse_end equals verse_start; the Bible code decides
+// whether it exists, is short enough and is a whole sentence (verses.ts).
+function verseSchema(): JsonSchema {
+  return {
+    type: "object",
+    description:
+      "ONE Berean Standard Bible verse (verse_end equal to verse_start), at most 25 words, for this affirmation.",
+    properties: passageProperties(),
+    required: PASSAGE_REQUIRED,
+  };
+}
+
+// The small schema for asking for other verses for some affirmations (verses.ts): two verses per affirmation named, best
+// first (VERSE_CANDIDATES).
+export function buildVersesSchema(): JsonSchema {
+  return {
+    type: "object",
+    properties: {
+      verses: {
+        type: "array",
+        maxItems: 6,
+        items: {
+          type: "object",
+          properties: { time_slot: { type: "string", enum: [...TIME_SLOTS] }, ...passageProperties() },
+          required: ["time_slot", ...PASSAGE_REQUIRED],
+        },
+      },
+    },
+    required: ["verses"],
+  };
+}
+
 // The reflection's schema. The call only ever sees text (the crisis screening has already transcribed a recording and
 // judged it), so there is no transcript and no no_speech here. is_crisis stays: it is the last of the three layers, and since
 // gen-v2.4 it marks a heavy moment, whose reflection is still written in full, so no field is nullable any more.
@@ -70,12 +102,15 @@ export function buildSchema(): JsonSchema {
         description: "One per time of day.",
         items: {
           type: "object",
+          // gen-v2.5 (step 37): the verse comes before the headline, because Gemini writes the properties in this order and
+          // the headline is written from its verse.
           properties: {
             time_slot: { type: "string", enum: [...TIME_SLOTS] },
-            headline: text("2 to 8 words, at most 50 characters, second person."),
+            verse: verseSchema(),
+            headline: text("2 to 6 words, at most 38 characters, spoken to them: what its verse says to them."),
             text: text("12 to 30 words, second person."),
           },
-          required: ["time_slot", "headline", "text"],
+          required: ["time_slot", "verse", "headline", "text"],
         },
       },
     },

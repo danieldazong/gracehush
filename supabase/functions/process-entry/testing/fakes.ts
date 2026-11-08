@@ -147,6 +147,9 @@ const COLUMNS: Record<string, string[]> = {
     "is_favorite",
     "scheduled_for",
     "created_at",
+    // gen-v2.5 (step 37).
+    "verse_reference",
+    "verse_text",
   ],
   deleted_devotionals: ["entry_id", "user_id", "made_at", "deleted_at"],
 };
@@ -310,6 +313,16 @@ function check(table: string, row: Row, world: World): void {
       other.id !== row.id && other.entry_id === row.entry_id && other.time_slot === row.time_slot
     );
     if (clash) fail("23505", "daily_affirmations_entry_slot_key");
+    // The step 37 migration's two rules: a verse is both its reference and its text, or neither, and both are short.
+    const reference = row.verse_reference ?? null;
+    const verse = row.verse_text ?? null;
+    if ((reference === null) !== (verse === null)) fail("23514", "affirmation_verse_pair");
+    if (
+      typeof verse === "string" &&
+      (verse.length === 0 || verse.length > 200 || String(reference).length === 0 || String(reference).length > 60)
+    ) {
+      fail("23514", "affirmation_verse_length");
+    }
   }
   if (table === "deleted_devotionals") {
     for (const column of ["entry_id", "user_id", "made_at"]) {
@@ -1091,6 +1104,24 @@ const DEVOTIONAL = Array.from(
 // one of the person's recent devotionals began, so a test that makes several for one person gives each its own first word.
 export function devotionalStartingWith(word: string): string {
   return DEVOTIONAL.replace(/^Paragraph/, word);
+}
+
+// gen-v2.5 (step 37): a headline the person has already received is asked for again (tone.ts headlineProblems), so a test that
+// makes several reflections for one person gives each a set of its own. Set 0 is readyOutput's.
+const AFFIRMATION_SETS: readonly (readonly [string, string, string])[] = [
+  ["You are held", "Rest is allowed", "It is enough"],
+  ["New mercy meets your morning", "Your steps are kept today", "Quiet trust carries your night"],
+  ["Mercy walks beside you today", "Your needs are known to him", "Steady love keeps your evening"],
+  ["Strength waits for your morning", "His hand steadies your day", "Your rest is his gift tonight"],
+];
+
+export function affirmationSet(index: number): Row[] {
+  const [morning, afternoon, evening] = AFFIRMATION_SETS[index];
+  return [
+    { time_slot: "morning", headline: morning, text: "Begin the day knowing you are held." },
+    { time_slot: "afternoon", headline: afternoon, text: "Pause and breathe; the work will wait." },
+    { time_slot: "evening", headline: evening, text: "You did what you could today." },
+  ];
 }
 
 // A reply that passes every check of gen-v2.3 for TEXT: a validation line and a prayer in the person's own words (the first person

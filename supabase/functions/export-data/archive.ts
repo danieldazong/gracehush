@@ -216,7 +216,13 @@ function entrySection(entry: UserEntry, zone: string): string[] {
     const text = words(row.affirmation_text);
     if (headline === null && text === null) return [];
     const slot = SLOT_NAMES[String(row.time_slot)] ?? "Affirmation";
-    return [`- ${slot}: ${[headline === null ? null : sentence(headline), text].filter(Boolean).join(" ")}`];
+    // Step 37: the verse under the affirmation, as one line, with its reference (both or neither are stored).
+    const verseText = words(row.verse_text);
+    const verseReference = words(row.verse_reference);
+    const verse = verseText !== null && verseReference !== null
+      ? `“${verseText.replace(/\s*\n\s*/g, " ")}” (${verseReference}, BSB)`
+      : null;
+    return [`- ${slot}: ${[headline === null ? null : sentence(headline), text, verse].filter(Boolean).join(" ")}`];
   });
   if (affirmations.length > 0) out.push("", "**Affirmations**", "", ...affirmations);
   return out;

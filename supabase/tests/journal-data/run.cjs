@@ -205,6 +205,24 @@ async function gatewayChecks() {
     assert.equal(w.server.state.functionCalls.length, 1);
   });
 
+  await test("gateway (step 37): an affirmation's verse is kept as it came; none, no verse key (a function from before step 37) or half a verse is null", async (w) => {
+    const api = w.use("@/api/journalApi");
+    const verse = { reference: "Psalm 46:1", text: "God is our refuge and strength,\nan ever-present help in times of trouble." };
+    const base = readyResult(text("c1")).response;
+    const answer = {
+      ...base,
+      affirmations: [
+        { ...base.affirmations[0], verse },
+        (({ verse: _gone, ...rest }) => rest)(base.affirmations[1]),
+        { ...base.affirmations[2], verse: { reference: "Psalm 23:1", text: "   " } },
+      ],
+    };
+    w.server.state.functions["process-entry"].push(() => json(200, answer));
+    const result = await api.processEntry(text("c1"));
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data.affirmations.map((item) => item.verse), [verse, null, null]);
+  });
+
   await test("gateway: every response the function can give is accepted as it is (the seven fixtures of the contract)", async (w) => {
     const api = w.use("@/api/journalApi");
     for (const fixture of fixtures) {
@@ -467,14 +485,23 @@ async function queryChecks() {
     assert.equal(q.get("user_id"), "eq.user_a");
   });
 
-  await test("entries: the affirmations of an entry carry the six columns the app shows and no more, and another user's are never returned", async (w) => {
+  await test("entries: the affirmations of an entry carry the eight columns the app shows and no more, and another user's are never returned", async (w) => {
     seedServer(w, 2);
     w.server.state.affirmations.push(...affirmationRows(serverRow(99).id, "user_b"));
     const remote = w.use("@/data/entriesRemote");
     const result = await remote.selectAffirmations(serverRow(1).id);
     assert.equal(result.ok, true);
     assert.equal(result.data.length, 3);
-    assert.deepEqual(Object.keys(result.data[0]).sort(), ["affirmation_text", "entry_id", "headline", "id", "is_favorite", "time_slot"]);
+    assert.deepEqual(Object.keys(result.data[0]).sort(), [
+      "affirmation_text",
+      "entry_id",
+      "headline",
+      "id",
+      "is_favorite",
+      "time_slot",
+      "verse_reference",
+      "verse_text",
+    ]);
     assert.deepEqual((await remote.selectAffirmations(serverRow(99).id)).data, []);
   });
 
@@ -659,6 +686,27 @@ async function liveChecks() {
     w.server.state.offline = true;
     assert.deepEqual(await live.fetchEntry(serverRow(1).id), entry);
     await assert.rejects(() => live.fetchEntry(serverRow(2).id), /NETWORK/);
+  });
+
+  await test("live (step 37): an affirmation's verse is read, mapped and cached; one cached before verses existed reads with none", async (w) => {
+    const live = w.use("@/data/entriesLive");
+    const cache = w.use("@/db/cache");
+    const rows = affirmationRows(serverRow(1).id);
+    rows[0].verse_reference = "Psalm 23:1";
+    rows[0].verse_text = "The LORD is my shepherd;\nI shall not want.";
+    w.server.state.affirmations.push(...rows);
+    const list = await live.fetchAffirmations(serverRow(1).id);
+    assert.deepEqual(list.map((item) => item.verse), [
+      { reference: "Psalm 23:1", text: "The LORD is my shepherd;\nI shall not want." },
+      null,
+      null,
+    ]);
+    assert.deepEqual(await cache.listAffirmationsForEntry(serverRow(1).id), list);
+    // A row cached by an older app has no verse key at all: it is read as none, never as undefined.
+    const older = list.map(({ verse: _gone, ...rest }) => rest);
+    await cache.upsertAffirmations(serverRow(1).id, older);
+    const read = await cache.listAffirmationsForEntry(serverRow(1).id);
+    assert.deepEqual(read.map((item) => item.verse), [null, null, null]);
   });
 
   await test("live: fetchAffirmations orders by slot, caches, falls back to the cache offline and throws with nothing cached", async (w) => {

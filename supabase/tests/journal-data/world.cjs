@@ -179,6 +179,9 @@ function affirmationRows(entryId, userId = "user_a") {
     is_delivered: false,
     scheduled_for: null,
     created_at: "2026-10-25T00:00:00+00:00",
+    // Step 37: an affirmation's verse, both or neither (none here; the checks that need one add it).
+    verse_reference: null,
+    verse_text: null,
   }));
 }
 
@@ -225,6 +228,7 @@ function readyResult(request, userId = "user_a", n = 900) {
       headline: a.headline,
       text: a.affirmation_text,
       isFavorite: false,
+      verse: null,
     })),
   };
   return { row, affirmations, response };

@@ -84,10 +84,15 @@ export const copy = {
       helper: "You can change these anytime in Settings.",
       // The sample lock-screen word under the three cards (2026-11-01, round 2): the afternoon slot's title as the
       // notification's own builder writes it, marked as a sample, over a headline the model really wrote (step 34b, B4).
+      // Step 37: the sample is the new form, the headline in bold over a verse of the Berean Standard Bible and its reference.
+      // The verse is Psalm 23:1's own words (a check in supabase/tests/notifications compares it with the Bible's chapter) and
+      // the headline is written from it, by the rules the model follows.
       sample: {
         tag: "Sample",
-        headline: "You are held by his grace",
-        a11y: (title: string, time: string, headline: string) => `Sample ${title} at ${time}: ${headline}`,
+        app: "GraceHush",
+        headline: "Your shepherd knows what you need",
+        verse: { reference: "Psalm 23:1", text: "The LORD is my shepherd;\nI shall not want." },
+        a11y: (time: string, headline: string, verse: string) => `Sample affirmation at ${time}: ${headline}. ${verse}`,
       },
       primary: "Save My Daily Rhythm",
       back: "Back",
@@ -198,6 +203,15 @@ export const copy = {
     // An affirmation notification's title, the same words as the Journal card's eyebrow: "Morning affirmation". Its body is
     // the affirmation's headline (step 28): the lock screen shows nothing else.
     affirmationTitle: (slotName: string) => `${slotName} affirmation`,
+    // Step 37: an affirmation with a verse is its headline in bold (the title) over the verse, in curly quotes as one line,
+    // and its reference: “God is our refuge and strength, an ever-present help in times of trouble.” — Psalm 46:1 BSB
+    affirmationVerse: (quotedVerse: string, reference: string) => `${quotedVerse} — ${reference} BSB`,
+  },
+  // Step 37: the verse under an affirmation in the app (the Journal card, Reflection's Affirmations tab).
+  affirmationVerse: {
+    reference: (reference: string) => `${reference} · BSB`,
+    // For a row that is one element to a screen reader.
+    spoken: (quotedVerse: string, reference: string) => `${quotedVerse} ${reference}, Berean Standard Bible.`,
   },
   journal: {
     // The greeting is drawn in two spans, the name in rosewood (2026-11-01, the Daily Calm cue); `greeting` is the
@@ -530,8 +544,9 @@ export const copy = {
     },
     affirmations: {
       eyebrow: (slotName: string, time: string) => `${slotName} • ${time}`,
-      rowLabel: (slotName: string, time: string, isCurrent: boolean, headline: string, text: string) =>
-        `${slotName}, ${time}${isCurrent ? ", current" : ""}. ${headline}. ${text}`,
+      // Step 37: `verse` is the spoken verse (copy.affirmationVerse.spoken), or null for an affirmation without one.
+      rowLabel: (slotName: string, time: string, isCurrent: boolean, headline: string, text: string, verse: string | null) =>
+        `${slotName}, ${time}${isCurrent ? ", current" : ""}. ${headline}. ${verse ? `${verse} ` : ""}${text}`,
       empty: "No affirmations were created for this reflection.",
     },
     words: {

@@ -33,9 +33,11 @@ import {
   failEntry,
   findEntry,
   listAffirmations,
+  listRecentAffirmations,
   listRecentReflections,
   needsSpeech,
   readProfile,
+  type RecentAffirmationRow,
   type RecentReflectionRow,
   saveReadyEntry,
   saveTranscript,
@@ -48,6 +50,7 @@ import { toResponse } from "./response.ts";
 import { buildSchema } from "./schema.ts";
 import { resolveScripture } from "./scripture.ts";
 import { type SpeechOutcome, speechStage } from "./speech.ts";
+import { resolveAffirmationVerses } from "./verses.ts";
 import { readJsonBody, validateRequest } from "./validate.ts";
 
 // The request flow, top to bottom. Each step that can fail throws an AppError; handle() turns it into the one error
@@ -97,6 +100,8 @@ type Context = {
   grounding: number | null;
   prayerVoice: PrayerVoiceStatus | null;
   validationLine: ValidationLineStatus | null;
+  // gen-v2.5 (step 37), set once a reflection is saved: how many of its three affirmations carry a verse.
+  affirmationVerses: number | null;
   counters: Counters;
 };
 
@@ -299,6 +304,11 @@ async function run(req: Request, context: Context): Promise<Response> {
       ? Promise.resolve<RecentReflectionRow[]>([])
       : listRecentReflections(admin, user.userId, entryId, claim.row.created_at)
         .catch((): RecentReflectionRow[] => []);
+    // gen-v2.5 (step 37): beside it, the person's newest affirmations, whose headlines and verses a new reflection must not
+    // repeat. A read that fails means nothing to compare with, never a failed reflection.
+    const recentAffirmations = words === null
+      ? Promise.resolve<RecentAffirmationRow[]>([])
+      : listRecentAffirmations(admin, user.userId, entryId).catch((): RecentAffirmationRow[] => []);
 
     // The free tier's limit. Only a clear screening meets it, so a heavy moment is never counted and never blocked. An entry
     // over the limit is saved as failed with LIMIT_REACHED (the catch below does that) and answered with a 402 that carries
@@ -324,6 +334,8 @@ async function run(req: Request, context: Context): Promise<Response> {
       devotional: row.devotional_script,
       reference: row.scripture_reference,
     }));
+    const recentAffirmed = await recentAffirmations;
+    const recentVerses = recentAffirmed.flatMap((row) => (row.verse_reference ? [row.verse_reference] : []));
 
     // The reflection. For a heavy moment the user turn says so (a <heavy_moment> block) and the heavy rules check the reply. The
     // last of the three layers is the model's own: a reply it flags is a heavy moment even when the screening said clear (its
@@ -340,7 +352,7 @@ async function run(req: Request, context: Context): Promise<Response> {
           fallbackModel: gemini.fallbackModel,
           thinkingLevel: gemini.thinkingLevel,
           system: buildSystemInstruction(),
-          input: { kind: "text", text: buildUserTurn(words, recent, heavy) },
+          input: { kind: "text", text: buildUserTurn(words, recent, heavy, recentVerses) },
           schema: buildSchema(),
           deadlineAt,
           // The hook guard compares the new opening with the first words the recent devotionals began with.
@@ -351,6 +363,7 @@ async function run(req: Request, context: Context): Promise<Response> {
               entry: words,
               heavy,
               recentFirstWords: recent.flatMap((item) => (item.devotional ? [firstWord(item.devotional)] : [])),
+              recentHeadlines: recentAffirmed.map((row) => row.headline),
             });
           },
         }, context.stats);
@@ -397,6 +410,31 @@ async function run(req: Request, context: Context): Promise<Response> {
     context.scripture = scripture.outcome;
     context.bibleMs = scripture.bibleMs;
 
+    // gen-v2.5 (step 37): each affirmation's verse, read from the Bible like the passage (verses.ts). A verse that cannot be
+    // used costs one small follow-up request for all of them; one still unusable leaves its affirmation without a verse. The
+    // written fallback names none, so nothing is read or asked for it (an affirmation without a verse costs no follow-up).
+    const affirmationVerses = await resolveAffirmationVerses({
+      affirmations: reflection.affirmations,
+      passage: scripture.ref,
+      recent: [
+        ...recent.flatMap((item) => (item.reference ? [item.reference] : [])),
+        ...recentVerses,
+      ],
+      heavy,
+      title: reflection.title,
+      emotion: reflection.emotion,
+      gemini,
+      deadlineAt,
+      stats: context.stats,
+    });
+    context.bibleMs += affirmationVerses.bibleMs;
+    const affirmations = reflection.affirmations.map((item, index) => ({
+      slot: item.slot,
+      headline: item.headline,
+      text: item.text,
+      verse: affirmationVerses.verses[index] ?? null,
+    }));
+
     const row = await db(() =>
       saveReadyEntry(
         admin,
@@ -418,11 +456,12 @@ async function run(req: Request, context: Context): Promise<Response> {
           prayer_category: heavy ? null : reflection.prayer?.category ?? null,
           prayer_summary: heavy ? null : reflection.prayer?.summary ?? null,
         },
-        reflection.affirmations,
+        affirmations,
         heavy,
       )
     );
     saved = true;
+    context.affirmationVerses = affirmations.filter((item) => item.verse !== null).length;
     // How the saved reflection is written from the entry, as a count and two words (step 36): never a word of either. The
     // written fallback is not written from the entry, so it has none.
     if (fromModel && words !== null) {
@@ -482,6 +521,7 @@ export async function handle(req: Request): Promise<Response> {
     grounding: null,
     prayerVoice: null,
     validationLine: null,
+    affirmationVerses: null,
     counters: { authMs: 0, dbMs: 0 },
   };
   let status = 200;
@@ -546,6 +586,7 @@ export async function handle(req: Request): Promise<Response> {
       grounding: context.grounding,
       prayerVoice: context.prayerVoice,
       validationLine: context.validationLine,
+      affirmationVerses: context.affirmationVerses,
     };
     writeLog(line);
   }

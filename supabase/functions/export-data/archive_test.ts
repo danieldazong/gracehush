@@ -447,3 +447,35 @@ Deno.test("zip: the files are stamped with the export time on the profile's cloc
     "2026-10-31 00:00:00",
   );
 });
+
+Deno.test("markdown and json: an affirmation's verse (step 37) follows its text as one line; one without a verse has none", () => {
+  const data: UserData = {
+    profile: profile("UTC"),
+    entries: [
+      entry({
+        affirmations: [
+          {
+            ...affirmation("morning", "God is your refuge", "Begin the day held."),
+            verse_reference: "Psalm 46:1",
+            verse_text: "God is our refuge and strength,\nan ever-present help in times of trouble.",
+          },
+          {
+            ...affirmation("evening", "It is enough", "You did what you could."),
+            verse_reference: null,
+            verse_text: null,
+          },
+        ],
+      }),
+    ],
+  };
+  const md = buildMarkdown(data, { exportedAt: EXPORTED, zone: "UTC" });
+  assert(
+    md.includes(
+      "- Morning: God is your refuge. Begin the day held. “God is our refuge and strength, an ever-present help in times of trouble.” (Psalm 46:1, BSB)\n- Evening: It is enough. You did what you could.",
+    ),
+    md,
+  );
+  const json = JSON.parse(buildJson(data, { exportedAt: EXPORTED, zone: "UTC", included: new Map() }));
+  assertEquals(json.entries[0].affirmations[0].verse_reference, "Psalm 46:1");
+  assertEquals(json.entries[0].affirmations[1].verse_text, null);
+});

@@ -12,6 +12,8 @@ import {
   groundingThreshold,
   hasStockOpening,
   hasVerseReference,
+  headlineKey,
+  headlineProblems,
   HOOK_MAX_WORDS,
   leakedWords,
   leaksPrivate,
@@ -588,4 +590,58 @@ Deno.test("style measures of gen-v2.3: grounding, the prayer's voice and the val
   assert(measured.grounding >= 2, `${measured.grounding}`);
   const none = styleMeasures(reflection());
   assertEquals([none.validationWords, none.grounding], [0, 0]);
+});
+
+// ---- Step 37 (gen-v2.5): the headlines are a lock screen's bold title -------------------------------------------------------
+
+Deno.test("headlineProblems: a feeling word in any headline, in any of its forms, and nothing else", () => {
+  const three = (morning: string) => [
+    { slot: "morning" as const, headline: morning },
+    { slot: "afternoon" as const, headline: "He leads you gently" },
+    { slot: "evening" as const, headline: "Your needs are known" },
+  ];
+  for (
+    const headline of [
+      "When you feel anxious",
+      "Your worries are his",
+      "Grief does not have the last word",
+      "Fearful days end",
+      "Rest when you are tired",
+      "You are not ALONE or lonely",
+      "Overwhelmed and still held",
+      // Step 37 round 2: a person's state or reaction, which a headline written from a verse tended to name.
+      "Your tears are noticed",
+      "Strength when depleted",
+      "His grace meets your weakness",
+      "God stays beside your ache",
+    ]
+  ) {
+    assertEquals(headlineProblems(three(headline)).map((item) => item.reason), ["headline_feeling"], headline);
+  }
+  for (const headline of ["God is your refuge", "His mercies are new", "Sadie’s Grace", "Peace that guards you"]) {
+    assertEquals(headlineProblems(three(headline)), [], headline);
+  }
+});
+
+Deno.test("headlineProblems: a headline this person already received, compared without case or punctuation", () => {
+  const items = [
+    { slot: "morning" as const, headline: "God is your refuge" },
+    { slot: "afternoon" as const, headline: "He leads you gently" },
+    { slot: "evening" as const, headline: "Your needs are known" },
+  ];
+  assertEquals(headlineProblems(items, ["You are held", "he leads you, gently."]).map((item) => item.reason), [
+    "headline_repeated",
+  ]);
+  assertEquals(headlineProblems(items, ["", "You are held"]), []);
+  assertEquals(headlineKey("  He LEADS you—gently! "), "he leads you gently");
+});
+
+Deno.test("headlineProblems: the notes quote only the model's own headline, never the person's words", () => {
+  const notes = headlineProblems([
+    { slot: "morning", headline: "When you feel anxious" },
+    { slot: "afternoon", headline: "He leads you gently" },
+    { slot: "evening", headline: "Your needs are known" },
+  ], ["he leads you gently"]).map((item) => item.note);
+  assertEquals(notes.length, 2);
+  assert(notes.every((note) => !note.includes("work this week")), "never the entry");
 });

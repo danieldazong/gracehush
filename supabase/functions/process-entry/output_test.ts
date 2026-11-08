@@ -313,7 +313,7 @@ Deno.test("affirmation rules", () => {
   invalid(aff([one("morning", "Short", words(31)), one("afternoon"), one("evening")]), "affirmation_body");
   invalid(aff([one("morning", "", "x"), one("afternoon"), one("evening")]), "affirmation_headline");
   // A headline is a notification's whole body: 50 characters at most (step 32).
-  const fifty = "Your weary heart is held by unfailing faithfulness";
+  const fifty = "Your quiet heart is held by unfailing faithfulness";
   assertEquals(fifty.length, 50);
   assert(parse(aff([one("morning", fifty), one("afternoon"), one("evening")])).kind === "ready");
   invalid(aff([one("morning", `${fifty}!`), one("afternoon"), one("evening")]), "affirmation_headline");
@@ -735,4 +735,82 @@ Deno.test("several soft faults at once: one retry carries every note, and the fi
   );
   const saved = title.salvage as ReadyReflection;
   assertEquals([saved.title, saved.validationSource], [SAFE_TITLE, "salvage"]);
+});
+
+// ---- Step 37 (gen-v2.5): a verse under each affirmation -------------------------------------------------------------------
+
+const versed = (morning: unknown, over: Record<string, unknown> = {}) =>
+  readyOutput({
+    affirmations: [
+      {
+        time_slot: "morning",
+        verse: morning,
+        headline: "god is your refuge",
+        text: "Begin the day knowing you are held.",
+      },
+      {
+        time_slot: "afternoon",
+        verse: { book_id: "PSA", chapter: 23, verse_start: 1, verse_end: 1 },
+        headline: "He leads you gently",
+        text: "Pause; the work will wait.",
+      },
+      { time_slot: "evening", headline: "Your needs are known", text: "You did what you could today." },
+    ],
+    ...over,
+  });
+
+Deno.test("an affirmation's verse is read where it is, and a headline starts with a capital", () => {
+  const result = parse(versed({ book_id: "PSA", chapter: 46, verse_start: 1, verse_end: 1 }));
+  assert(result.kind === "ready");
+  assertEquals(result.affirmations.map((item) => item.verse ?? null), [
+    { bookId: "PSA", chapter: 46, verseStart: 1, verseEnd: 1 },
+    { bookId: "PSA", chapter: 23, verseStart: 1, verseEnd: 1 },
+    null,
+  ]);
+  assertEquals(result.affirmations[0].headline, "God is your refuge");
+});
+
+Deno.test("a verse that is not where a verse can be is no verse, never a failed reply", () => {
+  for (
+    const bad of [
+      null,
+      "Psalm 46:1",
+      { book_id: "XYZ", chapter: 1, verse_start: 1, verse_end: 1 },
+      { book_id: "PSA", chapter: 0, verse_start: 1, verse_end: 1 },
+      { book_id: "PSA", chapter: 46, verse_start: 3, verse_end: 2 },
+      { book_id: "PSA", chapter: 46, verse_start: 1.5, verse_end: 2 },
+    ]
+  ) {
+    const result = parse(versed(bad));
+    assert(result.kind === "ready", JSON.stringify(bad));
+    assertEquals(result.affirmations[0].verse, null);
+  }
+});
+
+Deno.test("headline_feeling and headline_repeated: soft, so the reply is asked for once more and then kept", () => {
+  const feeling = invalid(
+    versed(null, {
+      affirmations: [
+        { time_slot: "morning", headline: "When you feel anxious", text: "Begin the day knowing you are held." },
+        { time_slot: "afternoon", headline: "He leads you gently", text: "Pause; the work will wait." },
+        { time_slot: "evening", headline: "Your needs are known", text: "You did what you could today." },
+      ],
+    }),
+    "headline_feeling",
+  );
+  assert(feeling.note?.includes("(“anxious”)"), feeling.note);
+  assertEquals((feeling.salvage as ReadyReflection).salvaged, "headline_feeling");
+
+  let repeated: OutputInvalid | null = null;
+  try {
+    parseReflection(JSON.stringify(versed(null)), { entry: TEXT, recentHeadlines: ["He leads you gently!"] });
+  } catch (error) {
+    repeated = error as OutputInvalid;
+  }
+  assert(repeated instanceof OutputInvalid);
+  assertEquals(repeated.reason, "headline_repeated");
+  assert(repeated.note?.includes("afternoon"), repeated.note);
+  assertEquals((repeated.salvage as ReadyReflection).salvaged, "headline_repeated");
+  // Another person's earlier headlines are not this person's: with none given, the reply is clean.
+  assert(parse(versed(null)).kind === "ready");
 });

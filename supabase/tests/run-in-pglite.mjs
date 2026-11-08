@@ -40,6 +40,7 @@ const EXPORTS = migrations.find((name) => name.includes("exports_bucket"));
 const REALTIME = migrations.find((name) => name.includes("realtime_broadcast"));
 const VALIDATION = migrations.find((name) => name.includes("validation_line"));
 const HEAVY = migrations.find((name) => name.includes("heavy_moments"));
+const VERSES = migrations.find((name) => name.includes("affirmation_verses"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -318,6 +319,10 @@ if (process.argv.includes("--negative")) {
     ["the run counts entries with no devotional", "off", (sql) => sql.replace(/\s+and e\.devotional_script is not null/, ""), [64], HEAVY],
     ["the run counts every day with a reflection", "off", (sql) => sql.replace("(select count(*)::int from ranked where local_day = start_day - (n - 1))", "(select count(*)::int from days)"), [64], HEAVY],
     ["visitors may ask for the run of reflection days", "off", (sql) => sql + "\ngrant execute on function public.reflection_streak_days(text) to anon;", [64], HEAVY],
+    // Affirmation verses (step 37, its own migration).
+    ["a verse with no reference, or a reference with no words", "off", dropLine(/alter table public\.daily_affirmations add constraint affirmation_verse_pair\s+check \(\(verse_reference is null\) = \(verse_text is null\)\);/), [68], VERSES],
+    ["a verse of any length", "off", (sql) => sql.replace("char_length(verse_text) between 1 and 200", "true").replace("char_length(verse_reference) between 1 and 60", "true"), [68], VERSES],
+    ["the app may write an affirmation's verse", "off", (sql) => sql + "\ngrant update (verse_reference, verse_text) on public.daily_affirmations to authenticated;", [69], VERSES],
     // Not a broken migration: the hosted project before the day's first Realtime connection. Nothing may fail, the checks that need
     // a message table say skipped, and a change is still saved (59).
     ["no message table today (nobody has connected yet)", "off", null, { skipped: [60, 61, 62], passed: [59, 63, 64] }, REALTIME, { stub: NO_MESSAGE_TABLE_TODAY }],

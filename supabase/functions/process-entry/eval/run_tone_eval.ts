@@ -66,10 +66,14 @@ import {
 } from "../output.ts";
 import { buildSystemInstruction, buildUserTurn, openingSentence, PROMPT_VERSION, wrapEntry } from "../prompt.ts";
 import { buildSchema } from "../schema.ts";
+import { flowText, resolveAffirmationVerses } from "../verses.ts";
+import type { AffirmationVerse } from "../contracts.ts";
 import {
   estimatedSeconds,
   firstWord,
   groundingThreshold,
+  HEADLINE_FEELING_WORDS,
+  headlineKey,
   HOOK_MAX_WORDS,
   hookProblem,
   leaksPrivate,
@@ -349,7 +353,7 @@ const RUBRIC = [
   ],
   [
     "lock_screen_safe",
-    "The title and the three headlines are shown on a lock screen, so a stranger may read them. The title may be gently true to the feeling (such as 'Rest for a Tired Heart'); a headline is a short affirmation that never names the entry's feeling. 5: no title or headline holds a name, a place, an illness, an event or the private situation, and no headline names the feeling. 3: one hints at the private situation, or a headline names the feeling. 1: one names a person, a place, an illness or a private event.",
+    "The title, the three headlines and (gen-v2.5) the verse under each headline are shown on a lock screen, so a stranger may read them. The title may be gently true to the feeling (such as 'Rest for a Tired Heart'); a headline is a short affirmation that never names the entry's feeling. 5: no title, headline or verse holds a name, a place, an illness, an event or the private situation, and no headline names the feeling. 3: one hints at the private situation, or a headline names the feeling. 1: one names a person, a place, an illness or a private event.",
   ],
   [
     "affirmation_grounded",
@@ -378,6 +382,10 @@ const RUBRIC = [
   [
     "hook",
     "The devotional's first sentence, heard within the first five seconds. 5: it speaks straight into something specific the person told (what they did, saw, heard or keep doing, or the exact situation they are in), true to what they wrote (it adds or changes no fact), in fresh words and in about 14 words or fewer, so they know at once it was written for them; it could not open a devotional for a different entry. 3: about their situation but general, poetic or slow to reach them, or a line that could open many devotionals. 1: a stock or generic opening, such as 'It sounds like', 'It feels like', 'Today', 'Sometimes' or a general truth.",
+  ],
+  [
+    "verse_fit",
+    "Each affirmation is a lock-screen notification: its headline in bold and, under it, one Bible verse. 5: every affirmation has a verse that is a whole sentence about who God is or what he does, short and comforting, never a command, a proverb about behavior or a rebuke, and fitting what this person shared; each headline says, in fresh words of its own, the truth its verse holds for them, and could not sit above any verse; no two headlines or verses alike. 3: verses that fit loosely, a headline that repeats its verse's words or could sit above any verse, or one affirmation with no verse. 1: no verses, or verses that command, rebuke or do not fit.",
   ],
   [
     "passage_fit",
@@ -470,11 +478,31 @@ function addGraderSpend(stats: GeminiStats) {
 
 // What the grader reads of a reflection, whichever version wrote it.
 type Gradable = Pick<ReadyReflection, "title" | "devotional" | "closingPrayer" | "affirmations">;
+// gen-v2.5 (step 37): the verse read for each affirmation, in slot order, or null for a version that names none.
+type Verses = (AffirmationVerse | null)[] | null;
 
-async function grade(entry: string, reflection: Gradable, passage: Passage, shown: string) {
+// A verse as the lock screen shows it: one line in curly quotes that pair up, without a character of it changed. The same
+// rule as the app's quoteVerse (src/utils/format.ts): a verse that ends a speech begun earlier (Deuteronomy 31:8 ends with ”)
+// gets only the opening mark it lacks. Kept here because the evaluation cannot import the app's module.
+function shownVerse(verse: AffirmationVerse): string {
+  const text = flowText(verse.text);
+  if (!/[“”]/.test(text)) return `“${text}” — ${verse.reference} BSB`;
+  let missingOpens = 0;
+  let missingCloses = 0;
+  for (const char of text) {
+    if (char === "“") missingCloses += 1;
+    else if (char === "”") {
+      if (missingCloses > 0) missingCloses -= 1;
+      else missingOpens += 1;
+    }
+  }
+  return `${"“".repeat(missingOpens)}${text}${"”".repeat(missingCloses)} — ${verse.reference} BSB`;
+}
+
+async function grade(entry: string, reflection: Gradable, passage: Passage, shown: string, verses: Verses = null) {
   const stats = newStats();
   try {
-    return await gradeOnce(entry, reflection, passage, shown, stats);
+    return await gradeOnce(entry, reflection, passage, shown, verses, stats);
   } finally {
     addGraderSpend(stats);
   }
@@ -485,12 +513,16 @@ async function gradeOnce(
   reflection: Gradable,
   passage: Passage,
   shown: string,
+  verses: Verses,
   stats: GeminiStats,
 ) {
   const turn = [
     `<journal_entry>\n${entry}\n</journal_entry>`,
     `<reflection>\nFirst line, shown above the devotional: ${shown}\n\nTitle: ${reflection.title}\n\nDevotional:\n${reflection.devotional}\n\nClosing prayer:\n${reflection.closingPrayer} Amen.\n\nAffirmations:\n${
-      reflection.affirmations.map((item) => `- ${item.slot}: ${item.headline} | ${item.text}`).join("\n")
+      reflection.affirmations.map((item, index) => {
+        const verse = verses?.[index] ?? null;
+        return `- ${item.slot}: ${item.headline} | ${item.text} | verse: ${verse ? shownVerse(verse) : "none"}`;
+      }).join("\n")
     }\n</reflection>`,
     `<passage>\n${
       passage.text ? `${passage.reference} (Berean Standard Bible): ${passage.text}` : `none (${passage.status})`
@@ -595,6 +627,10 @@ type Result = {
   // For a baseline: which of today's hard checks, or the lock-screen check, an older reply would fail.
   toneProblem: string | null;
   namesLeak: boolean;
+  // gen-v2.5 (step 37), today's version only: each affirmation's verse as the function reads it, and how many came from the
+  // follow-up. null for an older version, which names none.
+  verses: Verses;
+  versesReplaced: number | null;
 };
 
 async function passageOf(reflection: ReadyReflection): Promise<Passage> {
@@ -649,6 +685,8 @@ async function runCase(model: string, version: Version, item: Case): Promise<Res
     lineOk: null,
     toneProblem: null,
     namesLeak: false,
+    verses: null,
+    versesReplaced: null,
   };
   const reflection = made.reflection;
   let shown: string | null = null;
@@ -665,8 +703,25 @@ async function runCase(model: string, version: Version, item: Case): Promise<Res
     result.toneProblem = hardProblem(reflection, item.text)?.reason ?? privacyProblem(reflection, item.text)?.reason ??
       null;
     shown = shownLine(reflection, today);
+    if (today) {
+      // As the function does after it reads the passage: one verse per affirmation from the Bible, with one follow-up for the
+      // ones that cannot be used. Its calls count toward this reflection's cost.
+      const versesFound = await resolveAffirmationVerses({
+        affirmations: reflection.affirmations,
+        passage: result.passage.status === "verified" ? reflection.scripture : null,
+        recent: [],
+        heavy: reflection.heavy === true,
+        title: reflection.title,
+        emotion: reflection.emotion,
+        gemini: { apiKey, model, thinkingLevel: "low" },
+        deadlineAt: Date.now() + GEMINI_DEADLINE_MS,
+        stats: made.stats,
+      });
+      result.verses = versesFound.verses;
+      result.versesReplaced = versesFound.replaced;
+    }
     const [grades, swap] = await Promise.all([
-      grade(item.text, reflection, result.passage, shown),
+      grade(item.text, reflection, result.passage, shown, result.verses),
       swapTest(item, shown, reflection.devotional),
     ]);
     result.grades = grades;
@@ -693,7 +748,10 @@ async function runCase(model: string, version: Version, item: Case): Promise<Res
             validationSource: reflection.validationSource,
             devotional: reflection.devotional,
             closingPrayer: reflection.closingPrayer,
-            affirmations: reflection.affirmations,
+            affirmations: reflection.affirmations.map((affirmation, index) => ({
+              ...affirmation,
+              verse: result.verses?.[index] ?? null,
+            })),
             emotion: reflection.emotion,
             passage: formatReference(reflection.scripture),
             salvaged: reflection.salvaged,
@@ -705,6 +763,7 @@ async function runCase(model: string, version: Version, item: Case): Promise<Res
         estimatedSeconds: result.seconds,
         style: result.style,
         toneProblem: result.toneProblem,
+        versesReplaced: result.versesReplaced,
         // The rubric and the grader these grades and this swap answer come from: --compare reuses them when both match.
         rubric: RUBRIC_KEY,
         grader,
@@ -767,10 +826,47 @@ type Summary = {
   lineOk: number | null;
   lineSalvaged: number | null;
   stock: number;
+  // gen-v2.5 (step 37), today's version only: the verses found under the affirmations, the cases with all three, the verses
+  // the follow-up gave, and the headline measures (see headlineMeasures).
+  versesFound: number | null;
+  versesAllThree: number | null;
+  versesReplaced: number | null;
+  headlines: ReturnType<typeof headlineMeasures> | null;
   scores: Record<Criterion, number>;
   medianMs: number;
   costPerReflection: number | null;
 };
+
+// The lines a model tends to reach for, which the instruction names as never to write (prompt.ts, the headline bullet).
+const GENERIC_HEADLINES = new Set(
+  [
+    "You are held",
+    "You are loved",
+    "You are known",
+    "You are not alone",
+    "You can rest",
+    "Rest in his care",
+    "God is with you",
+  ]
+    .map(headlineKey),
+);
+
+// The headlines of the ready cases, measured: over 38 characters (one bold line), holding a feeling word, one of the generic
+// lines, and the cases whose three headlines do not begin with three different words.
+function headlineMeasures(results: Result[]) {
+  const ready = results.flatMap((result) => (result.made.reflection ? [result.made.reflection] : []));
+  const all = ready.flatMap((reflection) => reflection.affirmations.map((item) => item.headline));
+  return {
+    count: all.length,
+    overLong: all.filter((headline) => headline.length > 38).length,
+    feeling: all.filter((headline) => HEADLINE_FEELING_WORDS.test(headline)).length,
+    generic: all.filter((headline) => GENERIC_HEADLINES.has(headlineKey(headline))).length,
+    sharedFirstWord:
+      ready.filter((reflection) =>
+        new Set(reflection.affirmations.map((item) => headlineKey(item.headline).split(" ")[0])).size < 3
+      ).length,
+  };
+}
 
 type Verdict = { model: string; passed: boolean; misses: string[]; today: Summary; before: Summary | null };
 
@@ -802,6 +898,14 @@ function summarize(label: string, model: string, results: Result[]): Summary {
       ? ready.filter((result) => result.made.reflection?.validationSource === "salvage").length
       : null,
     stock: styled.filter(({ style }) => style.stockOpening).length,
+    versesFound: today
+      ? ready.reduce((sum, result) => sum + (result.verses?.filter((verse) => verse !== null).length ?? 0), 0)
+      : null,
+    versesAllThree: today
+      ? ready.filter((result) => (result.verses?.filter((verse) => verse !== null).length ?? 0) === 3).length
+      : null,
+    versesReplaced: today ? ready.reduce((sum, result) => sum + (result.versesReplaced ?? 0), 0) : null,
+    headlines: today ? headlineMeasures(results) : null,
     scores: averages(results),
     medianMs: median(results.flatMap((result) => (Number.isFinite(result.made.ms) ? [result.made.ms] : []))),
     costPerReflection: spent === null || ready.length === 0 ? null : spent / ready.length,
@@ -964,6 +1068,13 @@ function report(
       fixed(median(lineWords), 0)
     } words | the same line on two cases: ${lineTwins.join(", ") || "none"}`,
   );
+  if (today.headlines !== null) {
+    print(
+      `affirmation verses (step 37): ${today.versesFound}/${
+        ready.length * 3
+      } found, all three on ${today.versesAllThree}/${ready.length} cases, ${today.versesReplaced} from the follow-up | headlines over 38 characters ${today.headlines.overLong}, with a feeling word ${today.headlines.feeling}, generic ${today.headlines.generic}, cases whose three begin alike ${today.headlines.sharedFirstWord}`,
+    );
+  }
   print("per case: swap test | grounding / threshold | prayer voice (today, then the earlier version) | the line");
   const swapMark = (result: Result | undefined) => (result?.swap ? (result.swap.correct ? "yes" : "no") : "-");
   const groundMark = (result: Result | undefined) =>
@@ -1060,6 +1171,20 @@ function report(
     misses.push(`validation line passed ${today.lineOk}/${total}, salvaged ${today.lineSalvaged}`);
   }
   if (openings.stock > 0) misses.push(`stock openings ${openings.stock}`);
+  // Step 37: a verse under nearly every affirmation, and headlines that are one bold line, hold no feeling, are not the
+  // generic lines and begin with three different words.
+  if (today.headlines !== null) {
+    const versesNeeded = Math.ceil(ready.length * 3 * 0.95);
+    if ((today.versesFound ?? 0) < versesNeeded) {
+      misses.push(`affirmation verses ${today.versesFound}/${ready.length * 3} (needs ${versesNeeded})`);
+    }
+    if (today.headlines.overLong > 0) misses.push(`headlines over 38 characters ${today.headlines.overLong}`);
+    if (today.headlines.feeling > 0) misses.push(`headlines with a feeling word ${today.headlines.feeling}`);
+    if (today.headlines.generic > 2) misses.push(`generic headlines ${today.headlines.generic}`);
+    if (today.headlines.sharedFirstWord > 2) {
+      misses.push(`cases whose headlines begin alike ${today.headlines.sharedFirstWord}`);
+    }
+  }
   if (lineTwins.length > 0) misses.push(`the same validation line: ${lineTwins.join(", ")}`);
   if (openings.sharedStarts.length > 0) misses.push(`begun the same way: ${openings.sharedStarts.join(", ")}`);
   if (!beforeScores) {
@@ -1248,9 +1373,13 @@ async function writeSheet(results: Result[]) {
       "",
       "**Affirmations:**",
       "",
-      ...reflection.affirmations.map((affirmation) =>
-        `- ${affirmation.slot}: **${affirmation.headline}.** ${affirmation.text}`
-      ),
+      ...reflection.affirmations.map((affirmation, index) => {
+        // gen-v2.5 (step 37): the verse the lock screen shows under the headline.
+        const verse = result.verses?.[index] ?? null;
+        return `- ${affirmation.slot}: **${affirmation.headline}.** ${affirmation.text}${
+          verse ? ` ${shownVerse(verse)}` : ""
+        }`;
+      }),
       "",
       "Verdict: [ ] keep   [ ] adjust   [ ] wrong",
       "",
@@ -1346,6 +1475,8 @@ async function compareWith(model: string, version: string): Promise<Result[] | n
       lineOk: null,
       toneProblem: null,
       namesLeak: false,
+      verses: null,
+      versesReplaced: null,
     };
     const reflection = saved.reflection;
     if (!reflection || !saved.passage) return result;
@@ -1414,6 +1545,8 @@ async function loadV1Grades(model: string): Promise<Result[] | null> {
           lineOk: null,
           toneProblem: null,
           namesLeak: false,
+          verses: null,
+          versesReplaced: null,
         });
       }
     }
@@ -1498,6 +1631,17 @@ if (columns.length > 0) {
       (summary) => (summary.lineOk === null ? "-" : `${summary.lineOk}, ${summary.lineSalvaged}`),
     ],
     ["stock openings", (summary) => `${summary.stock}`],
+    [
+      "affirmation verses",
+      (summary) => (summary.versesFound === null ? "-" : `${summary.versesFound}/${summary.made * 3}`),
+    ],
+    [
+      "headlines long, feeling, generic, alike",
+      (summary) =>
+        summary.headlines === null
+          ? "-"
+          : `${summary.headlines.overLong}, ${summary.headlines.feeling}, ${summary.headlines.generic}, ${summary.headlines.sharedFirstWord}`,
+    ],
     ...RUBRIC.map(([name]): [string, (summary: Summary) => string] => [
       name,
       (summary) => fixed(summary.scores[name], 2),

@@ -1,6 +1,7 @@
 import type { SymbolViewProps } from "expo-symbols";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { AffirmationVerseBlock } from "@/components/AffirmationVerseBlock";
 import { Icon } from "@/components/Icon";
 import { copy } from "@/constants/copy";
 import { colors, shadows } from "@/constants/theme";
@@ -50,6 +51,7 @@ export function AffirmationCard({ affirmation, footer, onToggleFavorite, saveFai
         </Pressable>
       </View>
       <Text className="text-section tracking-[-0.5px] text-ink">{affirmation.headline}</Text>
+      {affirmation.verse ? <AffirmationVerseBlock verse={affirmation.verse} /> : null}
       <Text className="text-body text-ink/80">{affirmation.text}</Text>
       <View className="flex-row items-center gap-1.5 pt-1">
         <Icon name={icons.clock} size={14} color={colors.mauve} />

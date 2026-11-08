@@ -840,7 +840,8 @@ export type SalvageReason =
   | "prayer_none"
   | "grounding_low"
   | "echo_invented"
-  | ValidationRule;
+  | ValidationRule
+  | HeadlineRule;
 
 // The reflection with its title and each headline that leaks a private word replaced by its safe text; nothing else changes.
 // `salvaged` says which check it was (title_private when the title leaked, otherwise headline_private), or null when nothing
@@ -862,4 +863,57 @@ export function salvageReflection<T extends ToneReflection>(
     affirmations,
     salvaged: titleLeaks ? "title_private" : headlineLeaks ? "headline_private" : null,
   };
+}
+
+// ---- gen-v2.5 (step 37): the headline, a notification's bold title over its verse --------------------------------------
+//
+// Since step 37 a headline is the bold first line of a lock-screen notification, written from its verse. Two soft checks
+// (each costs at most a retry with a note, never a reflection: output.ts keeps the reply as its salvage):
+//   headline_feeling   a feeling word in a headline, which a stranger can read ("Leave your regret behind tonight" and "Lay down
+//                      the irritation" in the step 37 prototype); the instruction names most of them, this is the net
+//   headline_repeated  a headline this person has already received in one of their recent reflections (the step 36 evaluation
+//                      found 14 of 96 headlines word for word another case's), compared without case or punctuation
+export type HeadlineRule = "headline_feeling" | "headline_repeated";
+
+// Whole words, any case, with their common forms.
+export const HEADLINE_FEELING_WORDS = new RegExp(
+  String
+    .raw`(?<![\p{L}])(?:sorrow(?:s|ful)?|grie(?:f|fs|ve|ves|ving|ved)|regret(?:s|ted|ting)?|worr(?:y|ies|ied|ying)|anxi(?:ous|ety|eties)|fear(?:s|ful|ing)?|afraid|scared|guilt(?:y)?|shame(?:d|ful)?|ashamed|ang(?:er|ry)|irritat(?:ion|ed|ing)|frustrat(?:ion|ed|ing)|sad(?:ness)?|lonel(?:y|iness)|solitary|exhaust(?:ed|ion)|tired(?:ness)?|weary|weariness|burnout|depress(?:ed|ion)|despair|hopeless(?:ness)?|heartbr(?:oken|eak)|panic(?:ked)?|stress(?:ed|ful)?|overwhelm(?:ed|ing)?|tears|tearful|cry|crying|cried|weep(?:s|ing)?|wept|depleted|drained|hurting|heartache|wounded|ach(?:e|es|ing)|weak(?:ness)?|failing|failure)(?![\p{L}])`,
+  "iu",
+);
+
+// A headline as it is compared with the person's recent ones: lowercase letters and digits, one space between words.
+export function headlineKey(headline: string): string {
+  return headline.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+// The soft problems of the three headlines, feeling first. `recentHeadlines`: the person's newest headlines (lifecycle.ts
+// listRecentAffirmations). The notes quote only what the model wrote (a headline, or the feeling word in it).
+export function headlineProblems(
+  affirmations: readonly { slot: TimeSlot; headline: string }[],
+  recentHeadlines: readonly string[] = [],
+): SoftProblem[] {
+  const problems: SoftProblem[] = [];
+  const feeling = affirmations
+    .map((item) => item.headline.match(HEADLINE_FEELING_WORDS)?.[0])
+    .find((word): word is string => word !== undefined);
+  if (feeling) {
+    problems.push({
+      reason: "headline_feeling",
+      salvaged: "headline_feeling",
+      note:
+        `Your last reply put a feeling word (“${feeling.toLowerCase()}”) in an affirmation headline, which a stranger can read on a lock screen. Write the whole reply again, and keep every feeling out of the three headlines: say the truth each verse holds for them, as "What to write" asks.`,
+    });
+  }
+  const recent = new Set(recentHeadlines.map(headlineKey).filter((key) => key !== ""));
+  const repeated = affirmations.find((item) => recent.has(headlineKey(item.headline)));
+  if (repeated) {
+    problems.push({
+      reason: "headline_repeated",
+      salvaged: "headline_repeated",
+      note:
+        `Your last reply gave the ${repeated.slot} affirmation the headline “${repeated.headline}”, which this person has already received. Write the whole reply again with three new headlines, each written from its own verse.`,
+    });
+  }
+  return problems;
 }

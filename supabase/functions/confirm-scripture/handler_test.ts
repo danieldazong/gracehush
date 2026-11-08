@@ -298,6 +298,7 @@ Deno.test(
       "accountEntries",
       "accountFiles",
       "accountLeftOut",
+      "affirmationVerses",
       "attempts",
       "audioMs",
       "authMs",

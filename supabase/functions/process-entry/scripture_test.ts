@@ -74,7 +74,14 @@ Deno.test(
     const result = await resolveScripture(resolveArgs());
     assertEquals(
       { ...result, bibleMs: 0 },
-      { outcome: "verified", reference: "Philippians 4:6–7", text: PHP_4_6_7, verified: true, bibleMs: 0 },
+      {
+        outcome: "verified",
+        reference: "Philippians 4:6–7",
+        text: PHP_4_6_7,
+        verified: true,
+        ref: ref("PHP", 4, 6, 7),
+        bibleMs: 0,
+      },
     );
     assertEquals(world.geminiCalls.length, 0);
     assertEquals(world.bibleCalls.length, 1);
@@ -88,7 +95,14 @@ Deno.test(
     const result = await resolveScripture(resolveArgs());
     assertEquals(
       { ...result, bibleMs: 0 },
-      { outcome: "unverified", reference: "Philippians 4:6–7", text: null, verified: false, bibleMs: 0 },
+      {
+        outcome: "unverified",
+        reference: "Philippians 4:6–7",
+        text: null,
+        verified: false,
+        ref: ref("PHP", 4, 6, 7),
+        bibleMs: 0,
+      },
     );
     assertEquals(world.geminiCalls.length, 0);
     assertEquals(world.bibleCalls.length, 2, "one try and one more");
@@ -102,7 +116,14 @@ Deno.test(
     const result = await resolveScripture(resolveArgs({ ref: ref("PHP", 4, 24, 25), stats }));
     assertEquals(
       { ...result, bibleMs: 0 },
-      { outcome: "replaced", reference: "Psalm 23:1–3", text: PSA_23_1_3, verified: true, bibleMs: 0 },
+      {
+        outcome: "replaced",
+        reference: "Psalm 23:1–3",
+        text: PSA_23_1_3,
+        verified: true,
+        ref: ref("PSA", 23, 1, 3),
+        bibleMs: 0,
+      },
     );
     assertEquals(stats.attempts, 1);
     assertEquals(world.geminiCalls.length, 1);
@@ -152,6 +173,7 @@ Deno.test(
       reference: null,
       text: null,
       verified: false,
+      ref: null,
       bibleMs: 0,
     });
     assertEquals(world.geminiCalls.length, 1, "asked once, not again");
@@ -174,7 +196,14 @@ Deno.test(
     const result = await resolveScripture(resolveArgs({ ref: ref("PHP", 4, 24) }));
     assertEquals(
       { ...result, bibleMs: 0 },
-      { outcome: "unverified", reference: "Psalm 23:1–3", text: null, verified: false, bibleMs: 0 },
+      {
+        outcome: "unverified",
+        reference: "Psalm 23:1–3",
+        text: null,
+        verified: false,
+        ref: ref("PSA", 23, 1, 3),
+        bibleMs: 0,
+      },
     );
   }),
 );
@@ -309,7 +338,14 @@ Deno.test(
     const result = await resolveScripture(resolveArgs({ ref: ref("PHP", 1, 21, 23), heavy: true, stats }));
     assertEquals(
       { ...result, bibleMs: 0 },
-      { outcome: "replaced", reference: "Psalm 23:1–3", text: PSA_23_1_3, verified: true, bibleMs: 0 },
+      {
+        outcome: "replaced",
+        reference: "Psalm 23:1–3",
+        text: PSA_23_1_3,
+        verified: true,
+        ref: ref("PSA", 23, 1, 3),
+        bibleMs: 0,
+      },
     );
     assertEquals(world.bibleCalls.length, 1, "the denied passage is never even read");
     const input = (world.geminiCalls[0].json as { input: string }).input;
@@ -325,7 +361,14 @@ Deno.test(
     const denied = await resolveScripture(resolveArgs({ ref: ref("1KI", 19, 4), heavy: true }));
     assertEquals(
       { ...denied, bibleMs: 0 },
-      { outcome: "replaced", reference: "Isaiah 41:10", text: ISA_41_10, verified: true, bibleMs: 0 },
+      {
+        outcome: "replaced",
+        reference: "Isaiah 41:10",
+        text: ISA_41_10,
+        verified: true,
+        ref: ref("ISA", 41, 10),
+        bibleMs: 0,
+      },
     );
     const failed = await resolveScripture(resolveArgs({ ref: ref("JOB", 3, 1, 3), heavy: true }));
     assertEquals([failed.outcome, failed.reference, failed.verified], ["replaced", "Isaiah 41:10", true]);
@@ -345,7 +388,14 @@ Deno.test(
     const result = await resolveScripture(resolveArgs({ ref: ref("1KI", 19, 4), heavy: true }));
     assertEquals(
       { ...result, bibleMs: 0 },
-      { outcome: "unverified", reference: "Isaiah 41:10", text: null, verified: false, bibleMs: 0 },
+      {
+        outcome: "unverified",
+        reference: "Isaiah 41:10",
+        text: null,
+        verified: false,
+        ref: ref("ISA", 41, 10),
+        bibleMs: 0,
+      },
     );
   }),
 );

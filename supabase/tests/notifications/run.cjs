@@ -295,6 +295,86 @@ async function planChecks() {
     assert.ok(p.testAffirmationId(T0).startsWith(p.AFFIRMATION_ID_PREFIX));
     assert.equal(p.isPlannedAffirmationId("daily-reminder"), false);
   });
+
+  // Step 37: an affirmation with a verse is its headline in bold over the verse and its reference.
+  const VERSES = {
+    morning: { reference: "Psalm 46:1", text: "God is our refuge and strength,\nan ever-present help in times of trouble." },
+    afternoon: {
+      reference: "Psalm 46:10",
+      text: "“Be still and know that I am God;\nI will be exalted among the nations,\nI will be exalted over the earth.”",
+    },
+    evening: { reference: "Psalm 23:1", text: "The LORD is my shepherd;\nI shall not want." },
+  };
+  const versed = (slots = ["morning", "afternoon", "evening"]) => ({
+    entryId: "entry-1",
+    affirmations: W.affirmationsFor("entry-1").map((item) => ({ ...item, verse: slots.includes(item.slot) ? VERSES[item.slot] : null })),
+  });
+
+  await test("plan (step 37): with a verse the headline is the title and the body is the verse as one line, quoted, with its reference", async () => {
+    const p = planner();
+    const first = p.planAffirmations(planInput({ source: versed() })).slice(0, 3);
+    assert.deepEqual(first.map((item) => item.title), ["You are held this morning", "You are held this afternoon", "You are held this evening"]);
+    assert.deepEqual(first.map((item) => item.body), [
+      "“God is our refuge and strength, an ever-present help in times of trouble.” — Psalm 46:1 BSB",
+      // A verse that is already a speech keeps its own marks: never doubled.
+      "“Be still and know that I am God; I will be exalted among the nations, I will be exalted over the earth.” — Psalm 46:10 BSB",
+      "“The LORD is my shepherd; I shall not want.” — Psalm 23:1 BSB",
+    ]);
+    // A line that ends in an em dash joins the next with none, as the BSB closes its dashes.
+    const dashed = versed(["morning"]);
+    dashed.affirmations[0].verse = {
+      reference: "Psalm 27:1",
+      text: "The LORD is my light and my salvation—\nwhom shall I fear?\nThe LORD is the stronghold of my life—\nwhom shall I dread?",
+    };
+    assert.equal(
+      p.planAffirmations(planInput({ source: dashed }))[0].body,
+      "“The LORD is my light and my salvation—whom shall I fear? The LORD is the stronghold of my life—whom shall I dread?” — Psalm 27:1 BSB",
+    );
+    for (const item of p.planAffirmations(planInput({ source: versed() }))) {
+      assert.ok(!item.body.includes("\n") && !item.title.includes("\n"), "one line each");
+      assert.ok(!JSON.stringify(item).includes("longer words"), "the affirmation's text never goes into a notification");
+      assert.deepEqual(item.data, { kind: "affirmation", entryId: "entry-1", slot: item.data.slot, userHash: HASH_A });
+    }
+  });
+
+  await test("plan (step 37): an affirmation without a verse keeps the older form, and a verse changes the identifiers", async () => {
+    const p = planner();
+    const mixed = p.planAffirmations(planInput({ source: versed(["morning", "evening"]) })).slice(0, 3);
+    assert.deepEqual(mixed.map((item) => item.title), ["You are held this morning", "Afternoon affirmation", "You are held this evening"]);
+    assert.equal(mixed[1].body, "You are held this afternoon");
+    // A half verse, or an empty one, is no verse.
+    const half = versed();
+    half.affirmations[0].verse = { reference: "Psalm 46:1", text: "   " };
+    assert.equal(p.planAffirmations(planInput({ source: half }))[0].title, "Morning affirmation");
+    // The verse is part of what an identifier hashes, so a reflection that gains its verses replaces its notifications.
+    const plain = p.planAffirmations(planInput()).map((item) => item.identifier);
+    const withVerses = p.planAffirmations(planInput({ source: versed() })).map((item) => item.identifier);
+    assert.equal(withVerses.filter((id) => plain.includes(id)).length, 0);
+    assert.ok(withVerses.every((id) => p.isPlannedAffirmationId(id)));
+  });
+
+  await test("mock data (step 37): the sample affirmations' verses are the Berean Standard Bible's own words", async () => {
+    const w = W.world();
+    const { ANXIOUS_ENTRY_ID } = w.use("@/data/mock/entries");
+    const rows = w.use("@/data/mock/affirmations").buildAffirmations([
+      { id: ANXIOUS_ENTRY_ID, user_id: "user_mock", created_at: "2026-10-27T08:00:00.000Z" },
+    ]);
+    assert.equal(rows.length, 3);
+    const books = { Psalm: "PSA", Philippians: "PHP" };
+    const root = REPO ?? path.resolve(__dirname, "..", "..", "..");
+    // The onboarding sample (copy.onboarding.rhythm.sample) is checked the same way.
+    const sample = w.use("@/constants/copy").copy.onboarding.rhythm.sample;
+    rows.push({ headline: sample.headline, verse_reference: sample.verse.reference, verse_text: sample.verse.text });
+    for (const row of rows) {
+      const match = /^(Psalm|Philippians) (\d+):(\d+)$/.exec(row.verse_reference);
+      assert.ok(match, row.verse_reference);
+      const file = path.join(root, "supabase", "functions", "_shared", "bible", "fixtures", `${books[match[1]]}_${match[2]}.simple.json`);
+      const chapter = JSON.parse(fs.readFileSync(file, "utf8"));
+      const verse = chapter.chapter.content.find((item) => item.type === "verse" && item.number === Number(match[3]));
+      assert.equal(row.verse_text, verse.text.trim(), row.verse_reference);
+      assert.ok(row.headline.length <= 38, row.headline);
+    }
+  });
 }
 
 // ================================================================== the scheduler

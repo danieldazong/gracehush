@@ -7,6 +7,7 @@ import { DEFAULT_SPEAKING_RATE } from "../_shared/tts/config.ts";
 import { buildSpeechScript } from "../_shared/tts/script.ts";
 import { assert, assertEquals } from "./testing/assert.ts";
 import {
+  affirmationSet,
   devotionalStartingWith,
   ENTRY_ID,
   FIXTURE_WAV,
@@ -672,9 +673,11 @@ Deno.test(
       [flagged("uncertain"), "uncertain", "22222222-2222-4222-8222-222222222222", "Somewhere"],
       [blocked(), "blocked", "33333333-3333-4333-8333-333333333333", "Before"],
     ];
-    for (const [reply, source, clientEntryId, first] of cases) {
+    for (const [index, [reply, source, clientEntryId, first]] of cases.entries()) {
       world.screenQueue.push(reply);
-      world.geminiQueue.push(geminiOk(heavyOutput({ devotional_text: devotionalStartingWith(first) })));
+      world.geminiQueue.push(
+        geminiOk(heavyOutput({ devotional_text: devotionalStartingWith(first), affirmations: affirmationSet(index) })),
+      );
       const response = await post(world, handle, textBody({ clientEntryId, text: QUIET_TEXT }));
       assertEquals(response.status, 200, source);
       assertHeavy(world, await ok(response), QUIET_TEXT);
@@ -1093,6 +1096,7 @@ Deno.test(
       "accountEntries",
       "accountFiles",
       "accountLeftOut",
+      "affirmationVerses",
       "attempts",
       "audioMs",
       "authMs",
@@ -1130,7 +1134,7 @@ Deno.test(
       "user",
       "validationLine",
     ]);
-    assertEquals(Object.keys(line).length, 42);
+    assertEquals(Object.keys(line).length, 43);
     assertEquals(line.status, 200);
     assertEquals(line.inputType, "text");
     // gen-v2.3: the shared content words, the prayer's voice and whether the line is the model's own, as numbers and words.
@@ -1149,7 +1153,7 @@ Deno.test(
     assertEquals(line.tokensOut, 1308);
     assertEquals(line.tokensThought, 174);
     assertEquals(line.scripture, "verified");
-    assertEquals(line.promptVersion, "gen-v2.4");
+    assertEquals(line.promptVersion, "gen-v2.5");
     assert(Number.isInteger(line.bibleMs) && line.bibleMs >= 0);
     assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
     const everything = world.logs.join("\n");
@@ -1185,7 +1189,10 @@ Deno.test(
 Deno.test(
   "the log of a heavy moment names the source in one word and holds nothing the person said, nothing that matched",
   flow(
-    [geminiOk(heavyOutput()), geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning") }))],
+    [
+      geminiOk(heavyOutput()),
+      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning"), affirmations: affirmationSet(1) })),
+    ],
     async (world) => {
       const token = await world.token({ sub: USER });
       const text = `${PHRASE_TEXT} SECRET-MARKER`;
@@ -1430,8 +1437,8 @@ Deno.test(
   "speech e) a half-set or malformed secret is logged by name and never fails the reflection; it is not a failed call",
   speechFlow([
     geminiOk(readyOutput()),
-    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Morning") })),
-    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Evening") })),
+    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Morning"), affirmations: affirmationSet(1) })),
+    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Evening"), affirmations: affirmationSet(2) })),
   ], async (world) => {
     const cases: [string, () => void, string][] = [
       ["a voice is missing", () => Deno.env.delete("TTS_VOICE_NAME"), "bad_config:TTS_VOICE_NAME"],
@@ -1722,7 +1729,10 @@ for (const tier of ["trial", "pro"] as const) {
 Deno.test(
   "limit o) a heavy moment over the limit is written in full, never a 402, and is not counted afterwards",
   flow(
-    [geminiOk(heavyOutput()), geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning") }))],
+    [
+      geminiOk(heavyOutput()),
+      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning"), affirmations: affirmationSet(1) })),
+    ],
     async (world) => {
       seedWeek(world);
       const byPhrase = await post(world, handle, textBody({ text: PHRASE_TEXT }));
@@ -1809,7 +1819,7 @@ Deno.test(
 // -- The log, the refusals and the entry that was saved (step 22) ------------------------------------------------------
 
 Deno.test(
-  "log s) with speech on the line has exactly 42 fields and holds no script, verse, link, path, key or address",
+  "log s) with speech on the line has exactly 43 fields and holds no script, verse, link, path, key or address",
   speechFlow([geminiOk(readyOutput())], async (world) => {
     const token = await world.token({ sub: USER });
     const response = await post(world, handle, textBody({ text: `${TEXT} SECRET-MARKER` }), { token });
@@ -1817,7 +1827,7 @@ Deno.test(
     const { entry } = await ok(response);
     assertEquals(world.logs.length, 1);
     const line = JSON.parse(world.logs[0]);
-    assertEquals(Object.keys(line).length, 42);
+    assertEquals(Object.keys(line).length, 43);
     assertEquals([line.tts, line.limit, line.limitUsed], ["ok", "free_ok", 0]);
     assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
 
@@ -2199,7 +2209,7 @@ Deno.test(
     assertEquals(books.length, 65);
     assert(!books.includes("SNG"));
     assert("validation_line" in body.response_format.schema.properties);
-    assertEquals(lastLog(world).promptVersion, "gen-v2.4");
+    assertEquals(lastLog(world).promptVersion, "gen-v2.5");
   }),
 );
 
@@ -2221,7 +2231,10 @@ Deno.test(
 Deno.test(
   "a heavy moment's row has its validation line, whichever layer decided (gen-v2.4)",
   flow(
-    [geminiOk(heavyOutput()), geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning") }))],
+    [
+      geminiOk(heavyOutput()),
+      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning"), affirmations: affirmationSet(1) })),
+    ],
     async (world) => {
       // The model's own flag.
       const model = await post(world, handle, textBody());
@@ -2441,4 +2454,176 @@ Deno.test(
       assertEquals(world.entries[0].processing_status, "failed");
     },
   ),
+);
+
+// ---- Step 37: a Bible verse under each affirmation ------------------------------------------------------------------------
+
+const verse = (book_id: string, chapter: number, verse_start: number) => ({
+  book_id,
+  chapter,
+  verse_start,
+  verse_end: verse_start,
+});
+const withVerses = (
+  morning: ReturnType<typeof verse>,
+  afternoon: ReturnType<typeof verse>,
+  evening: ReturnType<typeof verse>,
+  over: Record<string, unknown> = {},
+) =>
+  readyOutput({
+    affirmations: [
+      {
+        time_slot: "morning",
+        verse: morning,
+        headline: "God is your refuge",
+        text: "Begin the day knowing you are held.",
+      },
+      { time_slot: "afternoon", verse: afternoon, headline: "He leads you gently", text: "Pause; the work will wait." },
+      { time_slot: "evening", verse: evening, headline: "Your needs are known", text: "You did what you could today." },
+    ],
+    ...over,
+  });
+const versePicks = (...items: [string, string, number, number][]): GeminiReply =>
+  geminiOk({
+    verses: items.map(([time_slot, book_id, chapter, verse_start]) => ({
+      time_slot,
+      book_id,
+      chapter,
+      verse_start,
+      verse_end: verse_start,
+    })),
+  });
+
+Deno.test(
+  "verses: each affirmation's verse is read from the Bible, saved with it and in the answer, and the log counts them",
+  flow([geminiOk(withVerses(verse("PSA", 46, 1), verse("PSA", 23, 1), verse("PHP", 4, 19)))], async (world) => {
+    const json = await ok(await post(world, handle, textBody()));
+    assertEquals(json.affirmations.map((item) => item.verse), [
+      { reference: "Psalm 46:1", text: "God is our refuge and strength,\nan ever-present help in times of trouble." },
+      { reference: "Psalm 23:1", text: "The LORD is my shepherd;\nI shall not want." },
+      {
+        reference: "Philippians 4:19",
+        text: "And my God will supply all your needs according to His glorious riches in Christ Jesus.",
+      },
+    ]);
+    assertEquals(world.affirmations.map((row) => row.verse_reference), [
+      "Psalm 46:1",
+      "Psalm 23:1",
+      "Philippians 4:19",
+    ]);
+    assert(world.affirmations.every((row) => typeof row.verse_text === "string"));
+    assertEquals(world.geminiCalls.length, 1, "no follow-up");
+    const line = lastLog(world);
+    assertEquals(line.affirmationVerses, 3);
+    assertEquals(Object.keys(line).length, 43);
+    assert(!JSON.stringify(line).includes("Psalm"), "the log never names a verse");
+    assertEquals(unscopedRequests(world, USER), []);
+  }),
+);
+
+Deno.test(
+  "verses: a verse too long for a lock screen costs one follow-up that never sees the entry",
+  flow(
+    [
+      geminiOk(withVerses(verse("PSA", 46, 1), verse("ISA", 41, 10), verse("PHP", 4, 19))),
+      versePicks(["afternoon", "PSA", 23, 1]),
+    ],
+    async (world) => {
+      const json = await ok(await post(world, handle, textBody()));
+      assertEquals(json.affirmations.map((item) => item.verse?.reference ?? null), [
+        "Psalm 46:1",
+        "Psalm 23:1",
+        "Philippians 4:19",
+      ]);
+      assertEquals(world.geminiCalls.length, 2);
+      const followUp = reflectionInput(world, 1);
+      assert(followUp.includes("Isaiah 41:10 is too long to read in full on a lock screen"), followUp);
+      assert(!followUp.includes(TEXT) && !followUp.includes("<journal_entry>"));
+      assertEquals(lastLog(world).affirmationVerses, 3);
+    },
+  ),
+);
+
+Deno.test(
+  "verses: a verse still unusable after the follow-up leaves that affirmation without one, and the reflection is saved",
+  flow(
+    [
+      geminiOk(withVerses(verse("PSA", 46, 1), verse("ISA", 41, 10), verse("PHP", 4, 19))),
+      geminiError(503),
+    ],
+    async (world) => {
+      const response = await post(world, handle, textBody());
+      assertEquals(response.status, 200);
+      const json = await ok(response);
+      assertEquals(json.affirmations.map((item) => item.verse?.reference ?? null), [
+        "Psalm 46:1",
+        null,
+        "Philippians 4:19",
+      ]);
+      assertEquals(
+        world.affirmations.map((
+          row,
+        ) => [row.verse_reference ?? null, row.verse_text === null || row.verse_text === undefined]),
+        [["Psalm 46:1", false], [null, true], ["Philippians 4:19", false]],
+      );
+      assertEquals(lastLog(world).affirmationVerses, 2);
+      assertEquals(world.entries[0].processing_status, "ready");
+    },
+  ),
+);
+
+Deno.test(
+  "verses: the person's recent affirmation verses are listed for the model and never chosen again",
+  flow(
+    [
+      geminiOk(withVerses(verse("PSA", 46, 1), verse("PSA", 23, 1), verse("PHP", 4, 19))),
+      versePicks(["morning", "PHP", 4, 13]),
+    ],
+    async (world) => {
+      profile(world, "pro");
+      const earlier = seedDevotional(world, USER, { created_at: hoursAgo(5) });
+      world.affirmations.push({
+        id: crypto.randomUUID(),
+        user_id: USER,
+        entry_id: earlier.id,
+        time_slot: "morning",
+        headline: "A refuge for you",
+        affirmation_text: "Begin the day knowing you are held.",
+        verse_reference: "Psalm 46:1",
+        verse_text: "God is our refuge and strength,\nan ever-present help in times of trouble.",
+        is_favorite: false,
+        created_at: hoursAgo(5),
+      });
+      const json = await ok(await post(world, handle, textBody()));
+      const turn = reflectionInput(world, 0);
+      assert(turn.includes("Affirmation verses: Psalm 46:1"), turn);
+      assert(reflectionInput(world, 1).includes("Psalm 46:1 was in one of their recent reflections"));
+      assertEquals(json.affirmations.map((item) => item.verse?.reference ?? null), [
+        "Philippians 4:13",
+        "Psalm 23:1",
+        "Philippians 4:19",
+      ]);
+      assertEquals(unscopedRequests(world, USER), []);
+    },
+  ),
+);
+
+Deno.test(
+  "verses: the written fallback names no verse and asks for none",
+  flow([blocked()], async (world) => {
+    const json = await ok(await post(world, handle, textBody()));
+    assertEquals(json.affirmations.length, 3);
+    assert(json.affirmations.every((item) => item.verse === null));
+    assertEquals(world.geminiCalls.length, 1);
+    assertEquals(lastLog(world).affirmationVerses, 0);
+  }),
+);
+
+Deno.test(
+  "verses: a request that ends before saving logs no verse count",
+  flow([everyAttempt(geminiError(503))].flat(), async (world) => {
+    const response = await post(world, handle, textBody());
+    assertEquals(response.status, 503);
+    assertEquals(lastLog(world).affirmationVerses, null);
+  }),
 );

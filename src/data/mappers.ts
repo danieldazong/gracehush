@@ -93,6 +93,8 @@ export function toAffirmation(row: AffirmationRow): Affirmation {
     headline: row.headline,
     text: row.affirmation_text,
     isFavorite: row.is_favorite === true,
+    // Step 37: both or neither (the table's affirmation_verse_pair rule); an affirmation without them has no verse.
+    verse: row.verse_reference && row.verse_text ? { reference: row.verse_reference, text: row.verse_text } : null,
   };
 }
 

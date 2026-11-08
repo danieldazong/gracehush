@@ -44,6 +44,7 @@ import { synthesize } from "../_shared/tts/synthesize.ts";
 import { buildSystemInstruction, buildUserTurn, PROMPT_VERSION, wrapEntry } from "./prompt.ts";
 import { buildSchema } from "./schema.ts";
 import { resolveScripture } from "./scripture.ts";
+import { flowText, resolveAffirmationVerses } from "./verses.ts";
 import { GEMINI_DEADLINE_MS } from "./constants.ts";
 import { groundingCount, groundingThreshold, prayerVoice } from "./tone.ts";
 
@@ -276,6 +277,31 @@ async function run(name: string, input: ScreenInput, expect: "ready" | "heavy" |
         detail += `\n         ${good ? "ok     " : "UNEXPECTED"} passage ${resolved.outcome}: ${
           resolved.reference ?? "none"
         }, ${resolved.text?.length ?? 0} characters, Bible ${resolved.bibleMs} ms`;
+        // gen-v2.5 (step 37): each affirmation's verse, read from the Bible as the function reads it. A verse missing after the
+        // follow-up is not a failure (the notification keeps the headline alone), but it is shown, because it should be rare.
+        const verses = await resolveAffirmationVerses({
+          affirmations: result.affirmations,
+          passage: resolved.ref,
+          recent: [],
+          heavy: result.heavy,
+          title: result.title,
+          emotion: result.emotion,
+          gemini: { apiKey, model, thinkingLevel },
+          deadlineAt: Date.now() + GEMINI_DEADLINE_MS,
+          stats,
+        });
+        const found = verses.verses.filter((verse) => verse !== null).length;
+        detail += `\n         ${
+          found === 3 ? "ok     " : "note   "
+        } affirmation verses ${found} of 3 (${verses.kept} as chosen, ${verses.replaced} from the follow-up), Bible ${verses.bibleMs} ms`;
+        if (flag("--show")) {
+          result.affirmations.forEach((item, index) => {
+            const verse = verses.verses[index];
+            detail += `\n         ${item.slot}: ${item.headline} | ${
+              verse ? `${flowText(verse.text)} — ${verse.reference} BSB` : "no verse"
+            }`;
+          });
+        }
         if (speakPath !== null && !spoke) {
           detail += `
          ${await speak(result, resolved, speakPath)}`;

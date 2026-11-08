@@ -2,13 +2,14 @@ import type { SymbolViewProps } from "expo-symbols";
 import { useState, type ReactElement } from "react";
 import { Text, View } from "react-native";
 
+import { AffirmationVerseBlock } from "@/components/AffirmationVerseBlock";
 import { FadeIn } from "@/components/FadeIn";
 import { Icon } from "@/components/Icon";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { copy } from "@/constants/copy";
 import { colors } from "@/constants/theme";
 import type { Affirmation, Devotional, ReflectionTab, TimeSlot } from "@/types";
-import { formatTime12 } from "@/utils/format";
+import { flowVerse, formatTime12, quoteVerse } from "@/utils/format";
 
 const { tabs, affirmations: affirmationsCopy, closingPrayer: closingPrayerCopy } = copy.reflection;
 
@@ -68,6 +69,9 @@ function AffirmationsPane({ affirmations, reminders, currentSlot }: Affirmations
               isCurrent,
               affirmation.headline,
               affirmation.text,
+              affirmation.verse
+                ? copy.affirmationVerse.spoken(quoteVerse(flowVerse(affirmation.verse.text)), affirmation.verse.reference)
+                : null,
             )}
             className="flex-row items-start gap-3 overflow-hidden rounded-xl border border-petal bg-linen/80 p-3"
           >
@@ -78,7 +82,12 @@ function AffirmationsPane({ affirmations, reminders, currentSlot }: Affirmations
             <View className="flex-1">
               <Text className="eyebrow">{affirmationsCopy.eyebrow(slotName, time)}</Text>
               <Text className="mt-0.5 text-section text-ink">{affirmation.headline}</Text>
-              <Text className="mt-1 text-body text-ink/80">{affirmation.text}</Text>
+              {affirmation.verse ? (
+                <View className="mt-2">
+                  <AffirmationVerseBlock verse={affirmation.verse} />
+                </View>
+              ) : null}
+              <Text className="mt-2 text-body text-ink/80">{affirmation.text}</Text>
             </View>
           </View>
         );

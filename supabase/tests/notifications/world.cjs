@@ -209,6 +209,7 @@ function affirmationsFor(entryId, headlines = {}) {
     headline: headlines[slot] ?? `You are held this ${slot}`,
     text: `The longer words of the ${slot} affirmation, which the lock screen must never show.`,
     isFavorite: false,
+    verse: null,
   }));
 }
 

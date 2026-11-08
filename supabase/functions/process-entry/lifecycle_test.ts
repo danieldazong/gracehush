@@ -11,6 +11,7 @@ import {
   failEntry,
   findEntry,
   listAffirmations,
+  listRecentAffirmations,
   listRecentReflections,
   markSpeechFailed,
   needsSpeech,
@@ -562,5 +563,71 @@ Deno.test(
       "INTERNAL",
       "db:recent:XX000",
     );
+  }),
+);
+
+// ---- Step 37: affirmation verses ------------------------------------------------------------------------------------------
+
+Deno.test(
+  "an affirmation's verse is saved as its reference and its text, and one with none as two nulls",
+  withWorld(async (world, admin) => {
+    const claim = await claimEntry(admin, USER, text, null, Date.now());
+    assert(claim.kind === "claimed");
+    await saveReadyEntry(admin, USER, claim.row.id, fields, [
+      { ...three[0], verse: { reference: "Psalm 46:1", text: "God is our refuge and strength." } },
+      { ...three[1], verse: null },
+      three[2],
+    ]);
+    assertEquals(
+      world.affirmations.map((row) => [row.time_slot, row.verse_reference, row.verse_text]),
+      [
+        ["morning", "Psalm 46:1", "God is our refuge and strength."],
+        ["afternoon", null, null],
+        ["evening", null, null],
+      ],
+    );
+  }),
+);
+
+Deno.test(
+  "listRecentAffirmations: this user's thirty newest headlines and verses from other reflections, and two columns only",
+  withWorld(async (world, admin) => {
+    const earlier = seedDevotional(world, USER);
+    const current = seedDevotional(world, USER);
+    const other = seedDevotional(world, "user_b");
+    const row = (entryId: unknown, userId: string, index: number, verse: string | null) => ({
+      id: crypto.randomUUID(),
+      user_id: userId,
+      entry_id: entryId,
+      time_slot: ["morning", "afternoon", "evening"][index % 3],
+      headline: `Headline ${index}`,
+      affirmation_text: `PRIVATE-TEXT-${index}`,
+      verse_reference: verse,
+      verse_text: verse ? "Some words." : null,
+      is_favorite: false,
+      created_at: minutesAgo(100 - index),
+    });
+    for (let index = 0; index < 33; index += 1) {
+      world.affirmations.push(row(earlier.id, USER, index, index % 2 === 0 ? `Psalm ${index + 1}:1` : null));
+    }
+    world.affirmations.push(row(current.id, USER, 50, "Isaiah 41:10"));
+    world.affirmations.push(row(other.id, "user_b", 60, "John 3:16"));
+
+    const rows = await listRecentAffirmations(admin, USER, String(current.id));
+    assertEquals(rows.length, 30);
+    assertEquals(rows[0], { headline: "Headline 32", verse_reference: "Psalm 33:1" });
+    assertEquals(rows[1], { headline: "Headline 31", verse_reference: null });
+    assert(rows.every((item) => item.verse_reference !== "Isaiah 41:10" && item.verse_reference !== "John 3:16"));
+
+    const [request] = world.requests.filter((item) =>
+      item.method === "GET" && item.url.pathname.endsWith("/daily_affirmations")
+    );
+    const params = request.url.searchParams;
+    assertEquals(params.get("select"), "headline,verse_reference");
+    assert(!request.url.search.includes("affirmation_text"), "the texts are never asked for");
+    assertEquals(params.get("user_id"), `eq.${USER}`);
+    assertEquals(params.get("entry_id"), `neq.${current.id}`);
+    assertEquals(params.get("order"), "created_at.desc");
+    assertEquals(params.get("limit"), "30");
   }),
 );

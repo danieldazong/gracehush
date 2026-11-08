@@ -26,6 +26,7 @@ import type {
   Scripture,
   SyncSubscriptionResponse,
 } from "@/types";
+import { readAffirmationVerse } from "@/utils/affirmationVerse";
 import { NO_SESSION_ERROR_NAME } from "@/utils/supabaseErrors";
 
 // The only code that calls the Edge Functions (step 25, delete-entry since step 29b, sync-subscription since step 30, and export-data
@@ -248,8 +249,12 @@ async function callFunction<T>(
 
 // process-entry (steps 19 to 22). It takes up to about 145 seconds (the function stops itself at 150), so the call gives up
 // at PROCESS_ENTRY_TIMEOUT_MS, and the sync engine's own ceiling is above that.
-export function processEntry(request: ProcessEntryRequest): Promise<FunctionResult<ProcessEntryResponse>> {
-  return callFunction("process-entry", request, PROCESS_ENTRY_TIMEOUT_MS, isProcessEntryResponse);
+export async function processEntry(request: ProcessEntryRequest): Promise<FunctionResult<ProcessEntryResponse>> {
+  const result = await callFunction("process-entry", request, PROCESS_ENTRY_TIMEOUT_MS, isProcessEntryResponse);
+  if (!result.ok) return result;
+  // Step 37: an affirmation's verse, or null (a function from before step 37 sends no verse at all).
+  const affirmations = result.data.affirmations.map((item) => ({ ...item, verse: readAffirmationVerse(item.verse) }));
+  return { ok: true, data: { ...result.data, affirmations } };
 }
 
 // confirm-scripture (step 20): the passage of one reflection, read again from the Bible.

@@ -148,7 +148,13 @@ export function quoteVerse(text: string): string {
 // it wrap to the card. A run of whitespace that holds a line break becomes one space; nothing else changes, not a letter or
 // a mark, and the stored verse and the share message keep their lines.
 export function flowVerse(text: string): string {
-  return text.replace(/\s+/g, (run) => (run.includes("\n") ? " " : run)).trim();
+  // A line that ends in an em dash joins the next with none, as the BSB closes its dashes ("my salvation—whom shall I
+  // fear?", step 37).
+  return text
+    .replace(/\s+/g, (run: string, offset: number, whole: string) =>
+      run.includes("\n") ? (whole[offset - 1] === "—" ? "" : " ") : run,
+    )
+    .trim();
 }
 
 // The prayer's own title, or "Prayer from Oct 2" when it has none. A title is never made up from the transcript.

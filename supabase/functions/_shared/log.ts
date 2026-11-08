@@ -160,6 +160,9 @@ export type LogLine = {
   grounding: number | null;
   prayerVoice: PrayerVoiceStatus | null;
   validationLine: ValidationLineStatus | null;
+  // gen-v2.5 (step 37): how many of a saved reflection's three affirmations carry a verse (0 to 3). null when no reflection was
+  // saved.
+  affirmationVerses: number | null;
 };
 
 // The first 8 hex characters of SHA-256(value): enough to follow one user through the logs, not to find them.
@@ -219,6 +222,7 @@ export function blankLogLine(fields: Pick<LogLine, "requestId" | "status"> & Par
     grounding: null,
     prayerVoice: null,
     validationLine: null,
+    affirmationVerses: null,
     ...rest,
   };
 }

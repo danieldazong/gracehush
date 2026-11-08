@@ -97,6 +97,17 @@ from (
           (select 'the run of reflection days skips crisis entries'
              from pg_proc p
             where p.oid = to_regprocedure('public.reflection_streak_days(text)') and p.prosrc like '%is_crisis%')), ''),
-          'none'))
+          'none')),
+    (18, 'affirmation verses (step 37)',
+        case
+          when (select count(*) from information_schema.columns
+                 where table_schema = 'public' and table_name = 'daily_affirmations'
+                   and column_name in ('verse_reference', 'verse_text')) < 2 then 'absent'
+          else 'exists; checks: '
+               || coalesce(nullif((select string_agg(c.conname::text, ', ' order by c.conname)
+                                   from pg_constraint c
+                                   where c.conrelid = to_regclass('public.daily_affirmations')
+                                     and c.conname in ('affirmation_verse_pair', 'affirmation_verse_length')), ''), 'none')
+        end)
 ) as checks (position, item, found)
 order by position;

@@ -26,6 +26,8 @@ export type ResolvedScripture = {
   reference: string | null;
   text: string | null;
   verified: boolean;
+  // The passage as it is stored, or null for none (gen-v2.5: the affirmations' verses must not fall inside it, verses.ts).
+  ref: ScriptureRef | null;
   // Time spent reading the Bible text. The follow-up request to the model counts as model time, in the stats.
   bibleMs: number;
 };
@@ -59,24 +61,45 @@ export async function resolveScripture(args: ResolveArgs): Promise<ResolvedScrip
 
   // What a passage that cannot be used ends as: nothing, or for a heavy moment the fallback passage, read from the Bible.
   const nothing = async (): Promise<ResolvedScripture> => {
-    if (!heavy) return { outcome: "dropped", reference: null, text: null, verified: false, bibleMs };
+    if (!heavy) return { outcome: "dropped", reference: null, text: null, verified: false, ref: null, bibleMs };
     const fallback = await look(HEAVY_FALLBACK_PASSAGE);
     if (fallback.status === "verified") {
-      return { outcome: "replaced", reference: fallback.reference, text: fallback.text, verified: true, bibleMs };
+      return {
+        outcome: "replaced",
+        reference: fallback.reference,
+        text: fallback.text,
+        verified: true,
+        ref: fallback.ref,
+        bibleMs,
+      };
     }
     if (fallback.status === "unavailable") {
-      return { outcome: "unverified", reference: fallback.reference, text: null, verified: false, bibleMs };
+      return {
+        outcome: "unverified",
+        reference: fallback.reference,
+        text: null,
+        verified: false,
+        ref: fallback.ref,
+        bibleMs,
+      };
     }
-    return { outcome: "dropped", reference: null, text: null, verified: false, bibleMs };
+    return { outcome: "dropped", reference: null, text: null, verified: false, ref: null, bibleMs };
   };
 
   const denied = heavy && isDeniedPassage(args.ref);
   const first = denied ? null : await look(args.ref);
   if (first?.status === "verified") {
-    return { outcome: "verified", reference: first.reference, text: first.text, verified: true, bibleMs };
+    return {
+      outcome: "verified",
+      reference: first.reference,
+      text: first.text,
+      verified: true,
+      ref: first.ref,
+      bibleMs,
+    };
   }
   if (first?.status === "unavailable") {
-    return { outcome: "unverified", reference: first.reference, text: null, verified: false, bibleMs };
+    return { outcome: "unverified", reference: first.reference, text: null, verified: false, ref: first.ref, bibleMs };
   }
 
   // The passage does not exist, or a heavy moment never gets it. Ask once for another, in the time that is left; if that
@@ -112,10 +135,24 @@ export async function resolveScripture(args: ResolveArgs): Promise<ResolvedScrip
   if (heavy && isDeniedPassage(pick)) return await nothing();
   const second = await look(pick);
   if (second.status === "verified") {
-    return { outcome: "replaced", reference: second.reference, text: second.text, verified: true, bibleMs };
+    return {
+      outcome: "replaced",
+      reference: second.reference,
+      text: second.text,
+      verified: true,
+      ref: second.ref,
+      bibleMs,
+    };
   }
   if (second.status === "unavailable") {
-    return { outcome: "unverified", reference: second.reference, text: null, verified: false, bibleMs };
+    return {
+      outcome: "unverified",
+      reference: second.reference,
+      text: null,
+      verified: false,
+      ref: second.ref,
+      bibleMs,
+    };
   }
   return await nothing();
 }

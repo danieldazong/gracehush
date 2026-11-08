@@ -392,14 +392,14 @@ Deno.test(
 );
 
 Deno.test(
-  "log: one line of 42 fields, the step as one word and the files as a count; no id, key, path or token",
+  "log: one line of 43 fields, the step as one word and the files as a count; no id, key, path or token",
   flow(async (world) => {
     seedAccount(world, USER);
     const token = await world.token({ sub: USER });
     assertEquals((await ask(world, CONFIRM, { token })).status, 200);
     assertEquals(world.logs.length, 1);
     const line = JSON.parse(world.logs[0]);
-    assertEquals(Object.keys(line).length, 42);
+    assertEquals(Object.keys(line).length, 43);
     assertEquals([line.status, line.account, line.accountFiles, line.accountApple], [200, "delete:done", 3, "no_code"]);
     assert(/^[0-9a-f]{8}$/.test(line.user));
     for (const word of [USER, token, "sk_test", "sk_key", "raw/", ".zip", ".wav", "devotionals"]) {
@@ -609,7 +609,7 @@ Deno.test(
         assertEquals(response.status, 200, answer);
         assertEquals(world.logs.length, 1);
         const line = world.logs[0];
-        assertEquals(Object.keys(JSON.parse(line)).length, 42);
+        assertEquals(Object.keys(JSON.parse(line)).length, 43);
         for (const word of [APPLE_CODE, `rt.${APPLE_CODE}`, "rt.leak", secret, "client_secret", "refresh"]) {
           assert(!line.includes(word), `the log holds ${word.slice(0, 12)}`);
           assert(!answer.includes(word), `the answer holds ${word.slice(0, 12)}`);

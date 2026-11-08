@@ -231,6 +231,7 @@ export async function handle(req: Request): Promise<Response> {
       grounding: null,
       prayerVoice: null,
       validationLine: null,
+      affirmationVerses: null,
     };
     writeLog(line);
   }

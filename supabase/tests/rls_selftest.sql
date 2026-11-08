@@ -15,6 +15,9 @@
 -- 2026-11-08 (heavy moments, supabase/migrations/20261108120000_heavy_moments.sql): a crisis entry is a whole reflection since
 -- process-entry gen-v2.4, so checks 21, 22, 31, 44, 64 and 65 now prove that the database lets it be one, and check 67 that the
 -- server can save one whole and that the old rules are gone. Run it after that migration.
+--
+-- 2026-11-08 (step 37, supabase/migrations/20261108130000_affirmation_verses.sql): checks 68 and 69 prove an affirmation's verse
+-- columns. Run it after that migration.
 
 drop table if exists pg_temp.rls_results;
 create temp table rls_results (position integer, check_name text, passed boolean);
@@ -877,6 +880,49 @@ begin
     and not exists (select 1 from pg_trigger
                      where tgrelid = 'public.daily_affirmations'::regclass and tgname = 'daily_affirmations_no_crisis')
     and to_regprocedure('public.reject_affirmation_for_crisis_entry()') is null);
+
+  -- ===== affirmation verses (step 37) =====
+  -- The server saves a verse as its reference and its words, both or neither, and both short.
+  insert into rls_results values (68, 'an affirmation''s verse is its reference and its words, both or neither, and short',
+    exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'daily_affirmations' and column_name = 'verse_reference'
+               and data_type = 'text' and is_nullable = 'YES')
+    and exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'daily_affirmations' and column_name = 'verse_text'
+                   and data_type = 'text' and is_nullable = 'YES')
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.daily_affirmations set verse_reference = 'Psalm 46:1',
+           verse_text = 'God is our refuge and strength, an ever-present help in times of trouble.'
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.daily_affirmations set verse_reference = 'Psalm 46:1'
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.daily_affirmations set verse_text = 'God is our refuge.'
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.daily_affirmations set verse_reference = 'Psalm 46:1', verse_text = repeat('x', 201)
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.daily_affirmations set verse_reference = repeat('x', 61), verse_text = 'God is our refuge.'
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.daily_affirmations set verse_reference = '', verse_text = ''
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = '23514');
+
+  -- The app reads the verse of its own affirmation (a table-wide select) and still writes is_favorite alone.
+  insert into rls_results values (69, 'the app reads the verse of its own affirmation, never another''s, and can never write it',
+    pg_temp.try_as('authenticated', claims_a,
+      $q$update public.daily_affirmations set verse_reference = 'Psalm 23:1', verse_text = 'The LORD is my shepherd.'
+         where id in ('a0000000-0000-4000-8000-0000000000f1', 'b0000000-0000-4000-8000-0000000000f1')$q$,
+      $q$select verse_reference, verse_text from public.daily_affirmations where verse_reference is not null$q$) = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.daily_affirmations set verse_reference = 'Psalm 23:1', verse_text = 'The LORD is my shepherd.'
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = '42501'
+    and not exists (select 1 from information_schema.column_privileges
+                     where table_schema = 'public' and table_name = 'daily_affirmations'
+                       and column_name in ('verse_reference', 'verse_text')
+                       and grantee in ('authenticated', 'anon') and privilege_type in ('INSERT', 'UPDATE')));
 
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
   delete from public.users_profile where id like 'selftest\_%';

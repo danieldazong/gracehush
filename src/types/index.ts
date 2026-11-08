@@ -72,6 +72,13 @@ export interface Devotional {
   durationMs: number | null;
 }
 
+// Step 37: the verse an affirmation carries, its reference and its exact Berean Standard Bible text, read from the Bible by the
+// server. A notification shows it under the headline.
+export interface AffirmationVerse {
+  reference: string;
+  text: string;
+}
+
 export interface Affirmation {
   id: string;
   entryId: string;
@@ -79,6 +86,8 @@ export interface Affirmation {
   headline: string;
   text: string;
   isFavorite: boolean;
+  // Null for an affirmation saved before step 37, or one whose verse could not be found.
+  verse: AffirmationVerse | null;
 }
 
 // What the affirmation notifications are made from (step 28): the newest finished reflection on the phone and, when it is not

@@ -78,8 +78,9 @@ export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const satisfies
 
 // What the model is allowed to write. Out of range counts as invalid (nothing is truncated). These are the hard bounds that
 // stop a runaway reply; the targets the instruction asks for are tighter (step 32: a devotional of 110 to 150 words, a title of
-// at most 40 characters), and the tone evaluation measures how close the model comes. A headline is a notification's whole
-// body (step 28), so its 50 characters are a hard limit. The validation line (step 36) asks for 8 to 18 words; a line outside
+// at most 40 characters), and the tone evaluation measures how close the model comes. A headline is a notification's text
+// (its whole body since step 28, its bold title above the verse since step 37), so its 50 characters are a hard limit; the
+// instruction asks for about 38, what one title line holds. The validation line (step 36) asks for 8 to 18 words; a line outside
 // 5 to 24, or over the column's 240 characters, is asked for again and never stored (tone.ts validationProblem).
 export const LIMITS = {
   title: { maxChars: 60 },
@@ -91,6 +92,11 @@ export const LIMITS = {
   prayerTitle: { maxChars: 60 },
   prayerSummary: { maxChars: 120 },
 } as const;
+
+// gen-v2.5 (step 37): an affirmation's verse. A notification shows the headline as its bold title and the verse with its
+// reference below it, in about four lines, so the verse is one whole sentence of at most this many characters (its line
+// breaks read as single spaces). 67% of BSB verses are this short; 53% are short and a whole sentence (2026-11-08).
+export const AFFIRMATION_VERSE_MAX_CHARS = 140;
 
 // The largest chapter and verse numbers in the Bible (Psalm 150, Psalm 119:176). The model's passage is checked against
 // the real book table by the Bible code (_shared/bible); these only keep an absurd number out of the log and the prompt.

@@ -1,6 +1,7 @@
 import { getDb } from "@/db/database";
 import { decryptText, encryptText } from "@/db/fieldCrypto";
 import type { Affirmation, JournalEntry } from "@/types";
+import { readAffirmationVerse } from "@/utils/affirmationVerse";
 
 // The read cache (step 24): the entries and affirmations this phone has seen, so Journal and Reflection can open without a
 // network. Rows hold the mapped models (the same JournalEntry and Affirmation the screens use) as an encrypted JSON token.
@@ -185,7 +186,9 @@ export async function listAffirmationsForEntry(entryId: string): Promise<Affirma
       note("cache_row_invalid");
       await getDb().runAsync("DELETE FROM affirmations_cache WHERE id = ?", row.id);
     } else {
-      list.push(value as Affirmation);
+      // Step 37: a row cached before verses existed has no verse; it is read as none.
+      const affirmation = value as Affirmation;
+      list.push({ ...affirmation, verse: readAffirmationVerse(affirmation.verse) });
     }
   }
   return list.sort((a, b) => SLOTS.indexOf(a.slot) - SLOTS.indexOf(b.slot));

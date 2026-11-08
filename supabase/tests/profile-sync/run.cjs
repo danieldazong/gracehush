@@ -300,7 +300,7 @@ const row = ({
       "For the Lord GOD, the Holy One of Israel, has said:\n“By repentance and rest\nyou would be saved;\nyour strength would lie in quiet confidence—\nbut you were not willing.”";
     assert.equal(
       flowVerse(isaiah),
-      "For the Lord GOD, the Holy One of Israel, has said: “By repentance and rest you would be saved; your strength would lie in quiet confidence— but you were not willing.”",
+      "For the Lord GOD, the Holy One of Israel, has said: “By repentance and rest you would be saved; your strength would lie in quiet confidence—but you were not willing.”",
     );
     assert.equal(flowVerse("one line, nothing to join"), "one line, nothing to join", "prose is left alone");
     assert.equal(flowVerse("a \r\n  b\n\n c"), "a b c", "a break and the spaces around it are one space");

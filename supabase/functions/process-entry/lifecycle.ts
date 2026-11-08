@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { AppError } from "../_shared/errors.ts";
 import type { LimitProfile } from "../_shared/limits/weekly.ts";
 import { CLAIM_LEASE_MS } from "./constants.ts";
-import type { InputType, ProcessEntryRequest, TimeSlot } from "./contracts.ts";
+import type { AffirmationVerse, InputType, ProcessEntryRequest, TimeSlot } from "./contracts.ts";
 
 // Every database call of the function lives here. The service-role client bypasses row level security, so each query
 // on a user's table filters by the verified user id, with no exceptions.
@@ -51,7 +51,14 @@ export type AffirmationRow = {
   headline: string;
   affirmation_text: string;
   is_favorite: boolean;
+  // gen-v2.5 (step 37): the verse the affirmation carries, both or neither. Optional: a row saved before the migration, or
+  // made by a test, may not name them.
+  verse_reference?: string | null;
+  verse_text?: string | null;
 };
+
+// An affirmation as it is saved: the reply's, with the verse verses.ts read from the Bible, or none.
+export type SavedAffirmation = { slot: TimeSlot; headline: string; text: string; verse?: AffirmationVerse | null };
 
 // What a database failure may tell the log: the operation and Postgres' own error code, never its message.
 export function dbFailure(operation: string, error: { code?: string } | null): AppError {
@@ -242,6 +249,28 @@ export async function listRecentReflections(
   }));
 }
 
+// gen-v2.5 (step 37): the person's newest affirmations, ten reflections' worth, made before this entry's (a retried entry's own
+// rows left out), newest first: a new reflection's headlines and verses must not repeat them. Two columns only, filtered by the
+// verified user like every query. It does not wait for the recent reflections' read: it runs beside it.
+export const RECENT_AFFIRMATIONS = 30;
+
+export type RecentAffirmationRow = { headline: string; verse_reference: string | null };
+
+export async function listRecentAffirmations(
+  admin: SupabaseClient,
+  userId: string,
+  entryId: string,
+): Promise<RecentAffirmationRow[]> {
+  const { data, error } = await admin.from("daily_affirmations").select("headline, verse_reference")
+    .eq("user_id", userId).neq("entry_id", entryId)
+    .order("created_at", { ascending: false }).limit(RECENT_AFFIRMATIONS);
+  if (error) throw dbFailure("recent_affirmations", error);
+  return (data as RecentAffirmationRow[]).map((row) => ({
+    headline: typeof row.headline === "string" ? row.headline : "",
+    verse_reference: typeof row.verse_reference === "string" ? row.verse_reference : null,
+  }));
+}
+
 // Marks a claimed entry failed. The person's text or recording stays saved. Never throws: the error being handled is
 // the one that matters.
 export async function failEntry(
@@ -273,7 +302,7 @@ async function replaceAffirmations(
   admin: SupabaseClient,
   userId: string,
   entryId: string,
-  affirmations: { slot: TimeSlot; headline: string; text: string }[],
+  affirmations: readonly SavedAffirmation[],
 ): Promise<void> {
   // A retried entry may have rows from an earlier run: start from none, so there are exactly three.
   const removed = await admin.from("daily_affirmations").delete().eq("entry_id", entryId).eq("user_id", userId);
@@ -287,6 +316,8 @@ async function replaceAffirmations(
     time_slot: item.slot,
     headline: item.headline,
     affirmation_text: item.text,
+    verse_reference: item.verse?.reference ?? null,
+    verse_text: item.verse?.text ?? null,
   })));
   if (inserted.error) throw dbFailure("affirmations_insert", inserted.error);
 }
@@ -318,7 +349,7 @@ export async function saveReadyEntry(
   userId: string,
   entryId: string,
   fields: ReadyFields,
-  affirmations: { slot: TimeSlot; headline: string; text: string }[],
+  affirmations: readonly SavedAffirmation[],
   heavy = false,
 ): Promise<EntryRow> {
   await replaceAffirmations(admin, userId, entryId, affirmations);

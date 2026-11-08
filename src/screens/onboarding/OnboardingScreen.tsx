@@ -30,7 +30,7 @@ import { getNotificationPermission, requestNotificationPermission } from "@/serv
 import { getMicPermission, requestMicPermission } from "@/services/recorder";
 import { isSamplePlaying, playSample, stopSample, subscribeSample } from "@/services/samplePlayer";
 import { useOnboardingStore } from "@/store/onboardingStore";
-import { formatTime12 } from "@/utils/format";
+import { flowVerse, formatTime12, quoteVerse } from "@/utils/format";
 
 const { stepCounter, stepLabel, welcome, rhythm, permissions } = copy.onboarding;
 
@@ -257,7 +257,11 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
     afternoon: formatTime12(reminders.afternoon),
     evening: formatTime12(reminders.evening),
   };
-  const sampleTitle = copy.notifications.affirmationTitle(rhythm.slots.afternoon.name);
+  // Step 37: the sample's verse line, exactly as a notification writes it.
+  const sampleVerse = copy.notifications.affirmationVerse(
+    quoteVerse(flowVerse(rhythm.sample.verse.text)),
+    rhythm.sample.verse.reference,
+  );
   // The Welcome step is the cover (2026-11-01): its scene runs edge to edge and under the status bar, the progress row
   // sits over the scene's top fade, and its text is centred like Sign In's. The form steps keep the header in flow,
   // with the divider, and their text left-aligned.
@@ -378,26 +382,26 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
                     );
                   })}
                 </View>
-                {/* What arrives at the afternoon time, as a sample (2026-11-01, round 2): the slot's title as the
-                    notification writes it, marked as a sample, over a headline the model really wrote. One element for a
-                    screen reader, which hears it is a sample first. */}
+                {/* What arrives at the afternoon time, as a sample (2026-11-01, round 2; step 37 the new form): the app's
+                    name, marked as a sample, then the headline in bold over the verse line, as a notification writes them.
+                    One element for a screen reader, which hears it is a sample first. */}
                 <View
                   accessible
-                  accessibilityLabel={rhythm.sample.a11y(sampleTitle, times.afternoon, rhythm.sample.headline)}
-                  className="card mt-5 gap-1.5 p-3"
+                  accessibilityLabel={rhythm.sample.a11y(times.afternoon, rhythm.sample.headline, sampleVerse)}
+                  className="card mt-4 gap-1 p-3"
                   style={shadows.card}
                 >
                   <View className="flex-row items-center gap-2">
                     <Image source={images.logoMark} contentFit="contain" style={styles.sampleMark} />
-                    <Text className="shrink font-dm-semibold text-[13px] leading-[18px] text-ink">
-                      {sampleTitle}
-                      <Text className="font-dm text-mauve"> · {rhythm.sample.tag}</Text>
+                    <Text className="shrink font-dm text-[13px] leading-[18px] text-mauve">
+                      {rhythm.sample.app} · {rhythm.sample.tag}
                     </Text>
                     <Text className="ml-auto shrink-0 text-body-sm text-mauve">{times.afternoon}</Text>
                   </View>
-                  <Text className="text-body text-ink">{rhythm.sample.headline}</Text>
+                  <Text className="font-dm-semibold text-[15px] leading-[20px] text-ink">{rhythm.sample.headline}</Text>
+                  <Text className="text-body-sm text-ink">{sampleVerse}</Text>
                 </View>
-                <Text className="mt-4 text-center text-body-sm text-mauve">{rhythm.helper}</Text>
+                <Text className="mt-3 text-center text-body-sm text-mauve">{rhythm.helper}</Text>
               </>
             )}
 

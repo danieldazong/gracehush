@@ -1,6 +1,7 @@
 import { AFFIRMATION_DAYS_AHEAD } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import type { AffirmationSource, PermissionResult, TimeSlot } from "@/types";
+import { flowVerse, quoteVerse } from "@/utils/format";
 import { addDays, calendarDayIn, instantAt, isTimeZone } from "@/utils/zonedTime";
 
 // Which affirmation notifications the phone should hold (step 28), worked out with no side effect: the scheduler compares
@@ -24,8 +25,11 @@ export type AffirmationTapData = { kind: "affirmation"; entryId: string; slot: T
 export type PlannedAffirmation = {
   identifier: string;
   fireAt: Date;
-  title: string; // "Morning affirmation"
-  body: string; // the affirmation's headline: never its text, the person's words, the emotion or the verse
+  // Step 37: an affirmation with a verse is its headline as the title and the verse with its reference as the body; one
+  // without (saved before step 37, or whose verse could not be found) keeps step 28's form, "Morning affirmation" over the
+  // headline. Never the affirmation's text, the person's words or the emotion.
+  title: string;
+  body: string;
   data: AffirmationTapData;
 };
 
@@ -61,7 +65,17 @@ export function planAffirmations(input: PlanInput): PlannedAffirmation[] {
   if (!input.enabled || input.permission !== "granted" || source === null) return [];
   if (!USER_HASH.test(input.userHash)) return [];
   const headlines = new Map<TimeSlot, string>();
-  for (const affirmation of source.affirmations) headlines.set(affirmation.slot, affirmation.headline.trim());
+  const verses = new Map<TimeSlot, string>();
+  for (const affirmation of source.affirmations) {
+    headlines.set(affirmation.slot, affirmation.headline.trim());
+    const verse = affirmation.verse ?? null;
+    if (verse && verse.text.trim() && verse.reference.trim()) {
+      verses.set(
+        affirmation.slot,
+        copy.notifications.affirmationVerse(quoteVerse(flowVerse(verse.text)), verse.reference.trim()),
+      );
+    }
+  }
   if (SLOTS.some((slot) => !headlines.get(slot))) return [];
 
   const zone = isTimeZone(input.timeZone) ? input.timeZone : "UTC";
@@ -74,8 +88,10 @@ export function planAffirmations(input: PlanInput): PlannedAffirmation[] {
       if (!TIME.test(time)) continue;
       const fireAt = instantAt(day, time, zone);
       if (fireAt.getTime() <= input.now.getTime()) continue;
-      const title = copy.notifications.affirmationTitle(copy.onboarding.rhythm.slots[slot].name);
-      const body = headlines.get(slot) ?? "";
+      const headline = headlines.get(slot) ?? "";
+      const verse = verses.get(slot);
+      const title = verse ? headline : copy.notifications.affirmationTitle(copy.onboarding.rhythm.slots[slot].name);
+      const body = verse ?? headline;
       const hash = fnv1a([fireAt.getTime(), title, body, source.entryId, input.userHash].join("|"));
       const stamp = `${day.year}${pad(day.month, 2)}${pad(day.day, 2)}-${time.replace(":", "")}`;
       plan.push({

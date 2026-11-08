@@ -10,6 +10,7 @@ import {
   groundingProblem,
   hasQuotation,
   hasVerseReference,
+  headlineProblems,
   hookProblem,
   leakedWords,
   prayerVoiceProblem,
@@ -71,7 +72,9 @@ export type ReadyReflection = {
   devotional: string;
   closingPrayer: string;
   prayer: { title: string; summary: string; category: PrayerCategory } | null;
-  affirmations: { slot: TimeSlot; headline: string; text: string }[];
+  // gen-v2.5 (step 37): each affirmation's verse, where the model said it is (null when the reply gave none that has the
+  // shape of one). Whether it exists, is short enough and is a whole sentence is decided afterwards (verses.ts).
+  affirmations: ReplyAffirmation[];
   // Null for every clean reply. Set when this is a reply kept after a soft check still failed on the last try (a word from the
   // entry in its title or a headline, with the safe text in its place; the prayer's voice; grounding; the line; the echo; the
   // hook): the log line says which.
@@ -81,7 +84,17 @@ export type ReadyReflection = {
 // What the checks need besides the reply: the words the reflection was written from (the screened text).
 // `recentFirstWords`: the first word of each recent devotional of the person's (tone.ts firstWord), for the hook guard.
 // `heavy`: the app's check (the crisis screening) found a heavy moment, so the heavy rules apply whatever the reply says.
-export type ParseContext = { entry: string; recentFirstWords?: readonly string[]; heavy?: boolean };
+// `recentHeadlines` (gen-v2.5, step 37): the person's newest affirmation headlines, which a new one must not repeat.
+export type ParseContext = {
+  entry: string;
+  recentFirstWords?: readonly string[];
+  heavy?: boolean;
+  recentHeadlines?: readonly string[];
+};
+
+// An affirmation as the reply gave it. `verse` is optional so that the written fallback (heavy.ts) and an older version's
+// replies (the evaluation) need not name one: absent means none.
+export type ReplyAffirmation = { slot: TimeSlot; headline: string; text: string; verse?: ScriptureRef | null };
 
 // Since gen-v2.4 every reply is a whole reflection. The model's own is_crisis flag (the last of the three layers: the crisis
 // screening is the first two) no longer stands in for one: it makes the reflection a heavy moment (ReadyReflection.heavy).
@@ -186,9 +199,27 @@ function readPrayer(value: unknown): ReadyReflection["prayer"] {
   return { title, summary, category: category as PrayerCategory };
 }
 
+// gen-v2.5 (step 37): an affirmation's verse, read leniently. A verse is extra: a reply whose verse does not have the shape of
+// one is not asked for again for that, the affirmation simply has none (and verses.ts asks for none in its place).
+function readVersePick(value: unknown): ScriptureRef | null {
+  if (!isRecord(value)) return null;
+  const { book_id, chapter, verse_start, verse_end } = value;
+  if (!isUsfmBookId(book_id)) return null;
+  if (!isCount(chapter, 1, SCRIPTURE_NUMBER_LIMITS.chapter)) return null;
+  if (!isCount(verse_start, 1, SCRIPTURE_NUMBER_LIMITS.verse)) return null;
+  if (!isCount(verse_end, verse_start, SCRIPTURE_NUMBER_LIMITS.verse)) return null;
+  return { bookId: book_id, chapter, verseStart: verse_start, verseEnd: verse_end };
+}
+
+// A headline is in sentence case: the model sometimes writes it all in lowercase (three of sixteen replies in the step 37
+// prototype), and the first letter is the one a bold title shows most.
+function sentenceStart(text: string): string {
+  return text.replace(/^\p{Ll}/u, (letter) => letter.toUpperCase());
+}
+
 function readAffirmations(value: unknown): ReadyReflection["affirmations"] {
   if (!Array.isArray(value) || value.length !== TIME_SLOTS.length) fail("affirmations_count");
-  const bySlot = new Map<TimeSlot, { slot: TimeSlot; headline: string; text: string }>();
+  const bySlot = new Map<TimeSlot, ReplyAffirmation>();
   for (const item of value) {
     if (!isRecord(item)) fail("affirmation_shape");
     const slot = (TIME_SLOTS as readonly string[]).find((candidate) => candidate === item.time_slot) as
@@ -196,13 +227,13 @@ function readAffirmations(value: unknown): ReadyReflection["affirmations"] {
       | undefined;
     if (!slot || bySlot.has(slot)) fail("affirmation_slot");
     if (typeof item.headline !== "string" || typeof item.text !== "string") fail("affirmation_text");
-    const headline = singleLine(clean(item.headline));
+    const headline = sentenceStart(singleLine(clean(item.headline)));
     const text = singleLine(clean(item.text));
     if (headline.length === 0 || headline.length > LIMITS.affirmationHeadline.maxChars) fail("affirmation_headline");
     if (countWords(headline) > LIMITS.affirmationHeadline.maxWords) fail("affirmation_headline");
     if (text.length === 0 || text.length > LIMITS.affirmationText.maxChars) fail("affirmation_body");
     if (countWords(text) > LIMITS.affirmationText.maxWords) fail("affirmation_body");
-    bySlot.set(slot, { slot, headline, text });
+    bySlot.set(slot, { slot, headline, text, verse: readVersePick(item.verse) });
   }
   return TIME_SLOTS.map((slot) => bySlot.get(slot)!);
 }
@@ -279,12 +310,14 @@ export function checkTone(
   reflection: ReadyReflection,
   entry: string,
   recentFirstWords: readonly string[] = [],
+  recentHeadlines: readonly string[] = [],
 ): OutputInvalid | null {
   const hard = hardProblem(reflection, entry);
   if (hard) return hard;
   const hook = hookProblem(reflection.devotional, recentFirstWords);
   const problems = [
     privacyProblem(reflection, entry),
+    ...headlineProblems(reflection.affirmations, recentHeadlines),
     ...personalProblems(reflection, entry),
     hook ? { reason: hook.reason, salvaged: hook.reason, note: hook.note } : null,
   ].filter((problem): problem is SoftProblem => problem !== null);
@@ -307,7 +340,7 @@ function readValidationLine(value: unknown): string | null {
 // Throws the first problem (OutputInvalid), or returns the reflection as it is kept.
 export function checkReflection(read: ReadyReflection, context: ParseContext): ReadyReflection {
   const reflection = context.heavy === true && !read.heavy ? { ...read, heavy: true } : read;
-  const problem = checkTone(reflection, context.entry, context.recentFirstWords ?? []);
+  const problem = checkTone(reflection, context.entry, context.recentFirstWords ?? [], context.recentHeadlines ?? []);
   if (problem) throw problem;
   return reflection;
 }
