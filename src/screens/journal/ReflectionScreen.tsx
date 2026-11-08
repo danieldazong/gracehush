@@ -261,9 +261,15 @@ function ReadyView({
     >
       <FadeIn {...arrive(0)}>
         <View>
+          {/* The first line is written from the entry (8 to 18 words, step 36), so it is a lead and not a headline: Fraunces
+              Regular 22/30, three lines for a typical line and five at most (2026-11-08; it was the 27/34 one-off of step 11,
+              chosen for a two-line fixed sentence, which gave four lines and an orphan). The break strategies keep a lone
+              word off the last line, as on PrimaryButton and ScriptureCard. */}
           <Text
             accessibilityRole="header"
-            className="font-fraunces text-[27px] leading-[34px] tracking-[-0.675px] text-plum-deep"
+            className="font-fraunces text-[22px] leading-[30px] tracking-[-0.55px] text-plum-deep"
+            lineBreakStrategyIOS="push-out"
+            textBreakStrategy="balanced"
           >
             {getReflectionHeadline(entry)}
           </Text>
@@ -364,9 +370,12 @@ function WordsOnlyView({ transcript, isVoice, onReturn, onDelete, deleteOffline 
       ]}
     >
       <View>
+        {/* The same lead class as the ready view's first line, so the first line has one rule on both views. */}
         <Text
           accessibilityRole="header"
-          className="font-fraunces text-[27px] leading-[34px] tracking-[-0.675px] text-plum-deep"
+          className="font-fraunces text-[22px] leading-[30px] tracking-[-0.55px] text-plum-deep"
+          lineBreakStrategyIOS="push-out"
+          textBreakStrategy="balanced"
         >
           {wordsOnly.title}
         </Text>
