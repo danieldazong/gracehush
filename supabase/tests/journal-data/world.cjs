@@ -638,6 +638,13 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
     resetAnalytics: async () => undefined,
     flushAnalytics: async () => undefined,
   };
+  // 2026-11-09: Journal gives the success tap when a reflection finishes (New Entry used to). expo-haptics cannot load in
+  // plain Node, so a stand-in records which tap was asked for.
+  const hapticsCalls = [];
+  fakes["@/services/haptics"] = {
+    __esModule: true,
+    haptics: Object.fromEntries(["selection", "light", "medium", "success"].map((name) => [name, () => void hapticsCalls.push(name)])),
+  };
   const realtimeFake = makeRealtimeFake();
   if (realtime === "fake") fakes["@/services/realtime"] = realtimeFake.module;
   // The account has allowed Google's AI in every suite but supabase/tests/ai-permission, which checks the real answer.
@@ -661,6 +668,7 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
     counts,
     realtimeCalls: realtimeFake.calls,
     analyticsCalls,
+    hapticsCalls,
     affirmationRequests: () => affirmationRequests,
     renderHook,
     logs,

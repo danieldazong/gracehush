@@ -54,6 +54,18 @@ export const SCRIPTURE_RETRY_MS = 60_000;
 // A reflection that a server is still preparing is read again this often, for at most REFLECTION_POLL_MAX_MS (step 25).
 export const REFLECTION_POLL_MS = 5_000;
 export const REFLECTION_POLL_MAX_MS = 120_000;
+// New Entry's handoff (2026-11-09; three seconds since 2026-11-10). The screen waits this long for the reflection before it
+// hands it to Journal, where its card shows the progress: the server takes 10 to 30 seconds, and nobody is held on a screen
+// for that. Its three step cards tick on real moments, and never before their place on the screen, so they are read in turn:
+// "Saved" once the reflection is in the outbox (from NEW_ENTRY_STEP_SAVED_MS), "Sent" once the request has left (from
+// NEW_ENTRY_STEP_SENT_MS), and "Preparing your devotional" is in progress when the screen leaves.
+export const NEW_ENTRY_WAIT_MS = 3_000;
+export const NEW_ENTRY_STEP_SAVED_MS = 400;
+export const NEW_ENTRY_STEP_SENT_MS = 1_200;
+// A finished reflection whose spoken devotional is still being made (2026-11-09): the server answers as soon as the text is
+// saved and reads it aloud behind the answer, about fifteen seconds. For this long after the text was saved, a ready entry with
+// no audio and no failure mark shows "Preparing your audio"; after it, the entry counts as having none.
+export const AUDIO_PENDING_MS = 120_000;
 // Realtime (step 33): a message about an entry, or about its affirmations, is acted on once this long has passed without another
 // one about it, so a burst of writes (a reflection being made) is read once.
 export const REALTIME_COALESCE_MS = 300;

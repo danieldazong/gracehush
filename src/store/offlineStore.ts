@@ -2,7 +2,8 @@ import { create } from "zustand";
 
 // The transient state of the offline machinery (step 24). Not persisted: the database and the network are asked again at every
 // start. The journal's data is never mirrored here: it lives in SQLite.
-export type SavedNote = "offline" | "retry" | "permission";
+// "retry" went on 2026-11-09: a reflection handed to Journal has its card there, which says where it stands.
+export type SavedNote = "offline" | "permission";
 
 interface OfflineState {
   // The signed-in user's database is open and migrated, or it could not be opened. Neither is true while it is opening

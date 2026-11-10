@@ -129,10 +129,10 @@ export function startAnalytics(): void {
   });
   subscribeToSync((event) => {
     if (event.type === "finished" && !event.isCrisis) {
+      // Since 2026-11-09 the audio is made behind the answer, so whether it came is no fact of this moment.
       track("reflection_ready", {
         input: event.inputType === "audio" ? "voice" : "text",
         scripture_verified: event.scriptureVerified,
-        has_audio: event.hasAudio,
       });
     } else if (event.type === "settled" && event.status === "needs_action") {
       track("entry_failed", { code: toEntryFailedCode(event.code) });

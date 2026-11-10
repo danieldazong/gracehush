@@ -5,6 +5,7 @@ import { EmotionBadge } from "@/components/EmotionBadge";
 import { Icon } from "@/components/Icon";
 import { copy } from "@/constants/copy";
 import { colors, shadows } from "@/constants/theme";
+import { isAudioPending } from "@/data/selectors";
 import type { HomeEntry, JournalEntry } from "@/types";
 import {
   formatDuration,
@@ -20,14 +21,16 @@ const icons = {
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 // Every status has its own card. A heavy moment is a reflection like any other since 2026-11-08 and gets the same card. One
-// saved before then has no devotional, so its card is the person's words only ("words").
-type CardKind = "ready" | "textOnly" | "words" | "processing" | "uploading" | "pending" | "failed";
+// saved before then has no devotional, so its card is the person's words only ("words"). A finished reflection whose spoken
+// devotional is still being made behind the server's answer (2026-11-09) is "audioPending" until the audio lands.
+type CardKind = "ready" | "audioPending" | "textOnly" | "words" | "processing" | "uploading" | "pending" | "failed";
 
-function getKind(entry: JournalEntry): CardKind {
+function getKind(entry: JournalEntry, nowMs: number): CardKind {
   switch (entry.status) {
     case "ready":
       if (entry.devotional === null) return "words";
-      return entry.devotional.audioPath ? "ready" : "textOnly";
+      if (entry.devotional.audioPath) return "ready";
+      return isAudioPending(entry, nowMs) ? "audioPending" : "textOnly";
     case "processing":
     case "uploading":
     case "pending":
@@ -37,7 +40,8 @@ function getKind(entry: JournalEntry): CardKind {
 }
 
 // The status line of a reflection that is saved on this phone and not prepared yet (entry.pending). The card shows it
-// and a screen reader speaks it, so it is one string.
+// and a screen reader speaks it, so it is one string. A reflection being sent says only that it is being prepared: its
+// progress is shown once, on New Entry's overlay, and never as a bar or a narration here (2026-11-10, the owner's request).
 function getPendingLine(entry: HomeEntry, online: boolean | null, heldForPermission: boolean): string | null {
   const { pending } = entry;
   if (!pending) return null;
@@ -57,12 +61,15 @@ function getLabel(entry: HomeEntry, kind: CardKind, timestamp: string, pendingLi
   }
   switch (kind) {
     case "ready":
+    case "audioPending":
     case "textOnly": {
       if (entry.dominantEmotion) parts.push(a11y.emotion(entry.dominantEmotion.toLowerCase()));
       if (entry.scripture) parts.push(entry.scripture.reference);
       const durationMs = entry.devotional?.durationMs;
       if (kind === "textOnly") {
         parts.push(copy.journal.card.textOnly);
+      } else if (kind === "audioPending") {
+        parts.push(a11y.audioPending);
       } else {
         parts.push(
           durationMs ? a11y.devotional(formatDurationSpoken(durationMs)) : a11y.devotionalAudio,
@@ -217,7 +224,8 @@ function PendingFooter({ entry, line, online, heldForPermission, onReview, onUnl
       </View>
     );
   }
-  // Being sent now, or about to be: a spinner. Waiting for the phone to connect, a sign-in or the person's permission: the hourglass.
+  // Being sent now, or about to be: a spinner. Waiting for the phone to connect, a sign-in or the person's permission: the
+  // hourglass.
   if (status === "sending" || (status === "queued" && online !== false && !heldForPermission)) {
     return (
       <View className="flex-row items-center gap-2 pt-0.5">
@@ -268,6 +276,7 @@ function CardFooter({
   }
   switch (kind) {
     case "ready":
+    case "audioPending":
     case "textOnly":
       return (
         <View className="flex-row items-center justify-end pt-0.5">
@@ -284,6 +293,12 @@ function CardFooter({
               durationMs={entry.devotional?.durationMs}
               onPlay={onPlay === undefined ? undefined : () => onPlay(entry)}
             />
+          ) : kind === "audioPending" ? (
+            // The spoken devotional is on its way (2026-11-09): the chip stands where the play pill will be.
+            <View className="chip gap-1.5">
+              <ActivityIndicator size="small" color={colors.mauve} style={styles.chipSpinner} />
+              <Text className="chip__label">{card.audioPending}</Text>
+            </View>
           ) : (
             <View className="chip">
               <Text className="chip__label">{card.textOnly}</Text>
@@ -363,11 +378,11 @@ export function JournalCard({
   onUnlock,
   onPlay,
 }: JournalCardProps) {
-  const kind = getKind(entry);
+  const kind = getKind(entry, now.getTime());
   const timestamp = formatEntryTimestamp(entry.createdAt, now);
   const pendingLine = getPendingLine(entry, online, heldForPermission);
   const label = getLabel(entry, kind, timestamp, pendingLine);
-  const isFinished = kind === "ready" || kind === "textOnly" || kind === "words";
+  const isFinished = kind === "ready" || kind === "audioPending" || kind === "textOnly" || kind === "words";
   // A card with a button of its own is not one grouped element: a button inside it must be reachable on its own.
   const hasButton =
     entry.pending?.status === "needs_action" || entry.pending?.status === "limit_reached";
@@ -432,4 +447,6 @@ const styles = StyleSheet.create({
   pressedSoft: { opacity: 0.6 },
   disabled: { opacity: 0.5 },
   tabular: { fontVariant: ["tabular-nums"] },
+  // A small spinner inside a chip: drawn at 14 of its 20 points, so the chip keeps the height of its text-only twin.
+  chipSpinner: { width: 14, height: 14, transform: [{ scale: 0.7 }] },
 });

@@ -15,8 +15,12 @@ import type {
 // Developer check (shown by DevToolsPanel, never to users, so its strings stay inline). It calls the deployed
 // process-entry, confirm-scripture and delete-entry functions from this phone, through supabase.functions.invoke (the path the app itself
 // uses since step 25), with made-up text, and prints one line per case: a verdict, a status, a code, counts and a time. It never
-// shows or logs a token, an id, a link or the text of a reflection. Each case that reaches the model takes 5 to 40 seconds,
+// shows or logs a token, an id, a link or the text of a reflection. Each case that reaches the model takes 5 to 30 seconds,
 // and up to about 90 while the model is busy (the function tries again for that long before it answers AI_UNAVAILABLE).
+//
+// Since 2026-11-09 the function answers as soon as the reflection is saved and reads the devotional aloud behind the answer
+// (EdgeRuntime.waitUntil), so no answer carries an audio path: the audio cases read the row again every few seconds until the
+// audio lands (up to a minute), as the app does through Realtime and its polling.
 //
 // The first line is the account's plan, because the free tier's limit (step 22) changes what a run can do: a free account
 // stops at its third devotional of the week, so the cases that need a new one say SKIP when they get that 402, which is
@@ -26,6 +30,9 @@ import type {
 // $0.04 to $0.05 each once the month's first million characters are used) plus a fraction of a cent of Gemini.
 
 const TIMEOUT_MS = 130_000;
+// How long the audio cases wait for the spoken devotional that is made behind the answer, and how often they look.
+const AUDIO_WAIT_MS = 60_000;
+const AUDIO_POLL_MS = 3_000;
 const BIBLE_API = "https://bible.helloao.org/api/BSB";
 // A fixed id, so a recording uploaded by hand to {userId}/raw/<this>.m4a can be tried again and again.
 const RECORDING_ID = "00000000-0000-4000-8000-000000000019";
@@ -132,6 +139,31 @@ async function countEntries(): Promise<number | null> {
   return count ?? null;
 }
 
+// What became of a reflection's spoken devotional, read from its row with the app's own client (the row the person may read).
+type AudioLanding =
+  | { kind: "audio"; path: string; durationMs: number | null; waitedMs: number }
+  | { kind: "failed"; waitedMs: number }
+  | { kind: "none"; waitedMs: number };
+
+// Waits for a reflection's audio to land behind the answer (2026-11-09): the row is read every AUDIO_POLL_MS for up to
+// AUDIO_WAIT_MS. A TTS_FAILED error code is the speech step saying it failed; no path and no code after the wait is "none".
+async function awaitAudio(entryId: string): Promise<AudioLanding> {
+  const supabase = getSupabase();
+  const started = Date.now();
+  while (supabase) {
+    const { data } = await supabase.from("journal_entries").select("devotional_audio_path, devotional_duration_ms, error_code")
+      .eq("id", entryId).maybeSingle();
+    const waitedMs = Date.now() - started;
+    if (data?.devotional_audio_path) {
+      return { kind: "audio", path: data.devotional_audio_path, durationMs: data.devotional_duration_ms, waitedMs };
+    }
+    if (data?.error_code === "TTS_FAILED") return { kind: "failed", waitedMs };
+    if (waitedMs >= AUDIO_WAIT_MS) break;
+    await new Promise((resolve) => setTimeout(resolve, AUDIO_POLL_MS));
+  }
+  return { kind: "none", waitedMs: Date.now() - started };
+}
+
 type OwnEntry = { id: string; clientEntryId: string; text: string; script: string | null };
 
 // The account's newest written entry of a kind the step 22 cases need: a finished reflection that has its devotional and no
@@ -234,7 +266,7 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
       entry.scripture?.verified === true && verse.length > 0 && lineWords >= 5 && lineWords <= 24 && !stockLine;
     return {
       ok,
-      note: `${entry.status}, ${count} words, first line ${lineWords} words${stockLine ? " (a stock opening)" : ""}, ${affirmations.length} affirmations, ${entry.scripture?.reference ?? "no passage"} (${entry.scripture?.verified ? `verified, ${verse.length} characters` : "NOT verified"}), title "${entry.devotional?.title ?? ""}", audio ${entry.devotional?.audioPath ? (length ? seconds(length) : "of unknown length") : "none"}`,
+      note: `${entry.status}, ${count} words, first line ${lineWords} words${stockLine ? " (a stock opening)" : ""}, ${affirmations.length} affirmations, ${entry.scripture?.reference ?? "no passage"} (${entry.scripture?.verified ? `verified, ${verse.length} characters` : "NOT verified"}), title "${entry.devotional?.title ?? ""}", audio ${entry.devotional?.audioPath ? (length ? seconds(length) : "of unknown length") : "not in the answer (read aloud behind it)"}`,
     };
   });
 
@@ -260,16 +292,29 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
   }
   await matchesPublicBible("passage matches the public Bible", asSuccess(first)?.entry.scripture);
 
-  // 1c. The spoken devotional (step 22). With speech on, the reflection comes back with an audio path and a measured length,
-  // the app's own signed link reaches it, and the bucket is private. The link is made here with this phone's session, the
-  // way the player makes the link it downloads the file with (step 26), and it is never printed.
+  // 1c. The spoken devotional (step 22; made behind the answer since 2026-11-09). With speech on, the row gets an audio path
+  // and a measured length a few seconds after the answer: this waits for them, then the app's own signed link reaches the
+  // file and the bucket is private. The link is made here with this phone's session, the way the player makes the link it
+  // downloads the file with (step 26), and it is never printed.
   const firstEntry = asSuccess(first)?.entry;
-  const audioPath = firstEntry?.devotional?.audioPath ?? null;
+  let audioPath: string | null = null;
+  if (firstEntry?.devotional) {
+    const landed: AudioLanding = firstEntry.devotional.audioPath
+      ? { kind: "audio", path: firstEntry.devotional.audioPath, durationMs: firstEntry.devotional.durationMs, waitedMs: 0 }
+      : await awaitAudio(firstEntry.id);
+    if (landed.kind === "audio") {
+      audioPath = landed.path;
+      const when = landed.waitedMs === 0 ? "in the answer" : `landed ${seconds(landed.waitedMs)} after the answer`;
+      const length = landed.durationMs;
+      if (length !== null && length >= 20_000 && length <= 300_000) pass("devotional audio", `${seconds(length)}, ${when}`);
+      else fail("devotional audio", length === null ? `no length was measured (${when})` : `${seconds(length)} is not between 20 s and 5 min`);
+    } else if (landed.kind === "failed") {
+      fail("devotional audio", "the speech step failed behind the answer (error_code TTS_FAILED: see the log's second line, reason speech)");
+    } else {
+      skip("devotional audio", `none within ${seconds(landed.waitedMs)} (speech is off, or the row never got it: see the log's tts field)`);
+    }
+  }
   if (firstEntry && audioPath) {
-    const length = firstEntry.devotional?.durationMs ?? null;
-    if (length !== null && length >= 20_000 && length <= 300_000) pass("devotional audio", seconds(length));
-    else fail("devotional audio", length === null ? "no length was measured" : `${seconds(length)} is not between 20 s and 5 min`);
-
     try {
       const started = Date.now();
       const { data, error } = await supabase.storage.from("journal_media").createSignedUrl(audioPath, 60);
@@ -298,17 +343,17 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
     } catch {
       skip("the public address is refused", "this phone could not reach it");
     }
-  } else if (firstEntry) {
-    skip("devotional audio", "none (speech is off or failed: see the log's tts field)");
   }
 
   // 2. The same id again returns the same entry untouched: the model is not called a second time. Only a finished entry
   // can be returned like that (a failed one is processed again, which is the retry path), so without one this is skipped
-  // rather than counted as a second failure.
+  // rather than counted as a second failure. The row's updated_at is not compared: the speech made behind the first answer
+  // moves it (2026-11-09), while the entry, its devotional and its creation time stay.
   if (firstEntry) {
     await step("same id again", { clientEntryId: firstId, inputType: "text", text: WRITTEN }, (reply) => {
       const entry = asSuccess(reply)?.entry;
-      const same = entry?.id === firstEntry.id && entry.updatedAt === firstEntry.updatedAt;
+      const same = entry?.id === firstEntry.id && entry.createdAt === firstEntry.createdAt &&
+        entry.devotional?.script === firstEntry.devotional?.script;
       return { ok: same, note: same ? "same entry, not processed again" : "a different or reprocessed entry" };
     });
   } else {
@@ -366,7 +411,8 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
 
   // 2d. Speech added later (step 22). A reflection that has its devotional and no audio (speech was off, or failed) gets
   // its audio from the same request sent again, with no screening, no limit and no model call: the same entry, the same
-  // devotional, no second entry. Only when speech is on, which the written entry above shows.
+  // devotional, no second entry. Since 2026-11-09 the answer comes first and the audio lands behind it, so the row is
+  // waited for. Only when speech is on, which the written entry above shows.
   if (!audioPath) {
     skip(
       "speech added by a retry",
@@ -386,13 +432,22 @@ export async function runProcessEntryCheck(report: (line: string) => void): Prom
         async (reply) => {
           const entry = asSuccess(reply)?.entry;
           const after = await countEntries();
-          const ok = !!entry?.devotional?.audioPath && entry.id === silent.id &&
+          const sameEntry = !!entry?.devotional && entry.id === silent.id &&
             entry.devotional.script === silent.script && (before === null || after === before);
+          if (!entry || !sameEntry) {
+            return { ok: false, note: `expected the same entry and the same entry count, got ${reply.status} ${codeOf(reply)}` };
+          }
+          const landed: AudioLanding = entry.devotional?.audioPath
+            ? { kind: "audio", path: entry.devotional.audioPath, durationMs: entry.devotional.durationMs, waitedMs: 0 }
+            : await awaitAudio(entry.id);
+          const ok = landed.kind === "audio";
           return {
             ok,
             note: ok
-              ? "the same entry and devotional now have audio, and no second entry was made"
-              : `expected the same entry with audio and the same entry count, got ${reply.status} ${codeOf(reply)}`,
+              ? `the same entry and devotional now have audio (${landed.waitedMs === 0 ? "in the answer" : `${seconds(landed.waitedMs)} after it`}), and no second entry was made`
+              : landed.kind === "failed"
+                ? "the speech step failed behind the answer (error_code TTS_FAILED)"
+                : `no audio within ${seconds(landed.waitedMs)}`,
           };
         },
       );

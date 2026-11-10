@@ -19,7 +19,6 @@ import { images } from "@/constants/images";
 import { colors, emotionColors, layout, shadows } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { usePulse } from "@/hooks/usePulse";
-import type { ProcessingStage } from "@/types";
 
 const FADE_MS = 250;
 
@@ -103,16 +102,25 @@ export type OverlayFailure = {
   secondary: { label: string; onPress: () => void };
 };
 
+// The two moments the phone knows for sure while the reflection is on its way (2026-11-10): it is saved in the outbox, and
+// the request has left for the server. The third step, the server's own work, is in progress for as long as this screen
+// shows, and goes on behind the Reflection screen the handoff opens once this one has left.
+export type OverlaySteps = { saved: boolean; sent: boolean };
+
 type ProcessingOverlayProps = {
   entryKind: "audio" | "text";
-  stage: ProcessingStage | null;
+  steps: OverlaySteps;
   failure: OverlayFailure | null;
-  onClose: () => void;
 };
 
-// Fills the screen over the editing view, which stays mounted underneath so nothing the user wrote or
-// recorded is lost. The mock progress is real in shape: each stage is a step the server will report.
-export function ProcessingOverlay({ entryKind, stage, failure, onClose }: ProcessingOverlayProps) {
+// Fills the screen over the editing view, which stays mounted underneath so nothing the user wrote or recorded is lost.
+// Since 2026-11-10 it is a three-second handoff that keeps its three step cards: "Saving" ticks to "Saved" once the reflection
+// is in the outbox, "Sending" ticks to "Sent" once the request has left, and "Preparing your devotional" is in progress when
+// the screen leaves by itself (NEW_ENTRY_WAIT_MS) for the reflection's own screen, which fills in when the server has finished
+// (the owner's request: the progress is shown once, here, and never again as a card on Journal). A step says
+// Done only when its thing is done, so there is no Close button and nothing to press: the screen leaves on its own. The
+// failure view (the phone could not save it, or the server refused it) is the one view with buttons.
+export function ProcessingOverlay({ entryKind, steps, failure }: ProcessingOverlayProps) {
   const { width } = useWindowDimensions();
   const [opacity] = useState(() => new Animated.Value(0));
   const haloScale = usePulse(1.08, failure === null);
@@ -122,25 +130,25 @@ export function ProcessingOverlay({ entryKind, stage, failure, onClose }: Proces
     Animated.timing(opacity, { toValue: 1, duration: FADE_MS, useNativeDriver: true }).start();
   }, [opacity]);
 
-  const stepStates: StepState[] =
-    stage === "preparing"
-      ? ["done", "done", "active"]
-      : stage === "reflecting"
-        ? ["done", "active", "upcoming"]
-        : ["active", "upcoming", "upcoming"];
-  const receive = audio ? processing.steps.receiveAudio : processing.steps.receiveText;
-  const steps = [receive, processing.steps.reflect, processing.steps.prepare];
+  const states: StepState[] = [
+    steps.saved ? "done" : "active",
+    !steps.saved ? "upcoming" : steps.sent ? "done" : "active",
+    steps.sent ? "active" : "upcoming",
+  ];
+  const { save, send, prepare } = processing.steps;
+  const cards = [
+    { key: "save", title: steps.saved ? save.done : save.active, description: save.description },
+    { key: "send", title: steps.sent ? send.done : send.active, description: send.description },
+    { key: "prepare", title: prepare.title, description: prepare.description },
+  ];
 
-  // A screen-reader-only live region speaks each stage (and the failure) without moving focus.
-  const stageMessage =
-    stage === "preparing"
-      ? processing.announce.preparing
-      : stage === "reflecting"
-        ? processing.announce.reflecting
-        : audio
-          ? processing.announce.receivingAudio
-          : processing.announce.receivingText;
-  const announcement = failure ? failure.title : stageMessage;
+  // A screen-reader-only live region speaks each step (and the failure) without moving focus.
+  const stepMessage = steps.sent
+    ? processing.announce.sent
+    : steps.saved
+      ? processing.announce.saved
+      : processing.announce.saving;
+  const announcement = failure ? failure.title : stepMessage;
   useAnnounce(announcement);
 
   const padding = width < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding;
@@ -185,11 +193,7 @@ export function ProcessingOverlay({ entryKind, stage, failure, onClose }: Proces
                 className="items-center justify-center rounded-full bg-plum"
                 style={[styles.mark, shadows.orb]}
               >
-                <Image
-                  source={images.logoMarkLight}
-                  contentFit="contain"
-                  style={styles.logo}
-                />
+                <Image source={images.logoMarkLight} contentFit="contain" style={styles.logo} />
               </View>
             </View>
             <Text
@@ -204,12 +208,12 @@ export function ProcessingOverlay({ entryKind, stage, failure, onClose }: Proces
             </Text>
 
             <View className="mt-6 w-full gap-3">
-              {steps.map((step, index) => (
+              {cards.map((card, index) => (
                 <StepCard
-                  key={step.title}
-                  state={stepStates[index]}
-                  title={step.title}
-                  description={step.description}
+                  key={card.key}
+                  state={states[index]}
+                  title={card.title}
+                  description={card.description}
                 />
               ))}
             </View>
@@ -217,19 +221,6 @@ export function ProcessingOverlay({ entryKind, stage, failure, onClose }: Proces
             <View className="card card--blush mt-6 w-full flex-row items-center gap-2.5 p-3.5">
               <Icon name={icons.journal} size={20} color={colors.plum} />
               <Text className="flex-1 text-label-md text-ink">{processing.note}</Text>
-            </View>
-
-            <View className="mt-4 w-full">
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={processing.close}
-                onPress={onClose}
-                style={({ pressed }) => pressed && styles.pressed}
-              >
-                <View className="btn-ghost">
-                  <Text className="btn-ghost__label">{processing.close}</Text>
-                </View>
-              </Pressable>
             </View>
           </>
         )}
@@ -259,6 +250,5 @@ const styles = StyleSheet.create({
   logo: { width: 36, height: 36 },
   title: { maxWidth: 320 },
   subtitle: { maxWidth: 384 },
-  pressed: { transform: [{ scale: 0.98 }] },
   hidden: { position: "absolute", width: 1, height: 1, opacity: 0.01 },
 });

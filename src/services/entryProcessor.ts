@@ -59,12 +59,13 @@ function toProcessCode(code: string): ProcessEntryErrorCode | "NETWORK" | "UNKNO
   return PROCESS_CODES.find((candidate) => candidate === code) ?? "UNKNOWN";
 }
 
-// The function reports nothing while it works, so the overlay's steps follow the time a reflection usually takes (the hosted
-// runs: a few seconds to read and screen it, then the reflection, then the passage and the spoken devotional). It is a
-// progress indication and nothing more: the answer decides what happens.
+// The function reports nothing while it works, so the stages follow the time a reflection usually takes (the hosted runs: a
+// few seconds to read and screen it, then the reflection, then the passage and the verses; since 2026-11-09 the answer comes
+// before the spoken devotional, at about 10 to 15 seconds). Journal's card shows them (2026-11-09; the New Entry overlay did
+// until then). It is a progress indication and nothing more: the answer decides what happens.
 const STAGE_TIMELINE: readonly (readonly [number, ProcessingStage])[] = [
-  [4_000, "reflecting"],
-  [12_000, "preparing"],
+  [3_000, "reflecting"],
+  [9_000, "preparing"],
 ];
 
 function followStages(onStage: (stage: ProcessingStage) => void): () => void {
@@ -116,7 +117,6 @@ async function processReal(
 ): Promise<ProcessOutcome> {
   const userId = getSupabaseUserId();
   if (userId === null) return { ok: false, code: "UNAUTHORIZED" };
-  onStage("receiving");
   let request: ProcessEntryRequest;
   if (item.inputType === "text") {
     if (item.text === null) return { ok: false, code: "INVALID_REQUEST" };
@@ -136,6 +136,9 @@ async function processReal(
       mimeType: item.mimeType,
     };
   }
+  // "receiving" is reported when the request is handed to the server, after a recording's upload (2026-11-10): New Entry's
+  // overlay ticks "Sent" on it, and the Journal's card starts its stages from it.
+  onStage("receiving");
   const stopFollowing = followStages(onStage);
   try {
     return toOutcome(await processEntry(request));

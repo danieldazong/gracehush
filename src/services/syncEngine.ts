@@ -1,5 +1,6 @@
 import { AppState } from "react-native";
 
+import { NEW_ENTRY_WAIT_MS } from "@/constants/app";
 import { dropPrayerChange, sendPrayerChange } from "@/data/entriesLive";
 import { getKnownTier } from "@/data/journalRepository";
 import * as cache from "@/db/cache";
@@ -53,7 +54,8 @@ export type SyncEvent =
   // A reflection was deleted for good (step 29b): the lists that are on screen drop it at once.
   | { type: "deleted"; entryId: string }
   | { type: "stage"; clientEntryId: string; stage: ProcessingStage }
-  // Step 34: three facts analytics may send about a reflection that is not a crisis (services/analytics.ts).
+  // Step 34: two facts analytics may send about a reflection that is not a crisis (services/analytics.ts). The audio is no
+  // fact of the answer since 2026-11-09: the server makes it behind the answer.
   | {
       type: "finished";
       clientEntryId: string;
@@ -61,7 +63,6 @@ export type SyncEvent =
       isCrisis: boolean;
       inputType: InputType;
       scriptureVerified: boolean;
-      hasAudio: boolean;
     }
   | {
       type: "settled";
@@ -81,8 +82,9 @@ export type WaitResult =
 // A processor call that has not answered after this long counts as no answer, so a call that never returns cannot stall
 // the queue. The server stops a request at about 150 s.
 export const MAX_PROCESS_MS = 200_000;
-// How long New Entry waits on the overlay before it lets go and the engine carries on without it.
-export const WAIT_MS = 90_000;
+// How long New Entry waits on the overlay before it lets go and the engine carries on without it (2026-11-09: a few seconds,
+// then Journal's card shows the progress; it was 90 seconds, a wait that held the person on a screen).
+export const WAIT_MS = NEW_ENTRY_WAIT_MS;
 const MIN_TIMER_MS = 1_000;
 const MAX_TIMER_MS = 6 * 60 * 60 * 1000;
 
@@ -221,7 +223,6 @@ async function applySuccess(item: OutboxItem, outcome: Extract<ProcessOutcome, {
     isCrisis: outcome.entry.isCrisis,
     inputType: outcome.entry.inputType,
     scriptureVerified: outcome.entry.scripture?.verified === true,
-    hasAudio: outcome.entry.devotional?.audioPath != null,
   });
   emit({ type: "changed" });
 }

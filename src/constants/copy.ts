@@ -270,6 +270,8 @@ export const copy = {
       textOnly: "Text only",
       preparing: "Preparing your devotional…",
       saving: "Saving your reflection…",
+      // A finished reflection whose spoken devotional is still being made (2026-11-09): the chip where the play pill will be.
+      audioPending: "Preparing audio",
       waiting: "Waiting to sync",
       failed: "We couldn’t finish this one.",
       tryAgain: "Try again",
@@ -308,6 +310,7 @@ export const copy = {
         emotion: (emotion: string) => `Emotion: ${emotion}`,
         devotional: (spoken: string) => `Devotional ${spoken}`,
         devotionalAudio: "Devotional audio",
+        audioPending: "Audio being prepared",
         preparing: "Preparing your devotional",
         saving: "Saving your reflection",
         failed: "We couldn’t finish this one",
@@ -336,11 +339,11 @@ export const copy = {
         cancel: "Keep",
       },
     },
-    // The calm line New Entry leaves on Journal after it saved something that has not been prepared yet, or after the person
-    // said "Not now" to the AI permission. It stays until it is dismissed or the list is refreshed, never on a timer.
+    // The calm line New Entry leaves on Journal after it saved something offline, or after the person said "Not now" to the
+    // AI permission. It stays until it is dismissed or the list is refreshed, never on a timer. A reflection handed over while
+    // it is being prepared opens its own screen (2026-11-10) and leaves no note.
     notes: {
       offline: "Saved. We’ll prepare your reflection when you’re back online.",
-      retry: "Saved. We’ll finish your reflection as soon as we can.",
       permission: "Nothing was sent. You can allow Google’s AI anytime in Profile, or the next time you start a reflection.",
     },
     synced: "All reflections synced",
@@ -434,17 +437,19 @@ export const copy = {
       confirm: "Discard",
       cancel: "Keep recording",
     },
+    // The handoff (2026-11-09; three seconds and the three step cards since 2026-11-10): the overlay shows for at most
+    // NEW_ENTRY_WAIT_MS and keeps the screen the owner chose, its steps ticking on real moments. "Saving" becomes "Saved" once
+    // the reflection is in the outbox, "Sending" becomes "Sent" once the request has left, and "Preparing your devotional" is
+    // in progress when the screen leaves for Reflection, which opens on the reflection being prepared and turns into it when
+    // the server has finished (2026-11-10: the progress is shown once, here, and never again as a card on Journal). A step
+    // says Done only when its thing is done, and nothing here promises a time: the server takes 10 to 30 seconds.
     processing: {
       titleAudio: "Listening, praying, and finding scripture…",
       titleText: "Reading, praying, and finding scripture…",
       subtitle: "Gathering your thoughts into a contemplative benediction.",
       steps: {
-        receiveAudio: { title: "Listening", description: "Your words are held in stillness." },
-        receiveText: { title: "Reading", description: "Your words are held in stillness." },
-        reflect: {
-          title: "Reflecting",
-          description: "Discerning the themes in what’s on your heart.",
-        },
+        save: { active: "Saving", done: "Saved", description: "Your words, kept safe on this phone." },
+        send: { active: "Sending", done: "Sent", description: "On its way to be prepared for you." },
         prepare: {
           title: "Preparing your devotional",
           description: "A short devotional and a verse chosen for you.",
@@ -455,15 +460,12 @@ export const copy = {
       stepLabel: (title: string, status: string, description: string) =>
         `${title}, ${status.toLowerCase()}. ${description}`,
       announce: {
-        receivingAudio: "Listening to your reflection.",
-        receivingText: "Reading your reflection.",
-        reflecting: "Reflecting on what you shared.",
-        preparing: "Preparing your devotional.",
+        saving: "Saving your reflection.",
+        saved: "Saved. Sending your reflection.",
+        sent: "Sent. Preparing your devotional, which opens in a moment.",
       },
-      // The reflection is in the outbox before this screen shows. The app prepares it while it is open (never in the
-      // background), so this does not promise more than that.
-      note: "Your reflection is saved on this phone. If you leave this screen, it will finish in your Journal.",
-      close: "Close",
+      // The screen leaves by itself within NEW_ENTRY_WAIT_MS for the reflection's own screen, which fills in when it is ready.
+      note: "Your reflection is saved. It’ll open in a moment.",
       // The two ways the overlay can fail now: the phone could not save the reflection, or the server refused it for a
       // reason only the person can fix. Anything else is saved and retried by itself, with no error shown.
       failures: {
@@ -517,6 +519,8 @@ export const copy = {
     player: {
       subtitle: (minutes: number) => `${minutes} min • Personalized devotional`,
       noAudio: "Your devotional is ready to read below.",
+      // The spoken devotional is still being made behind the answer (2026-11-09): the card becomes the player when it lands.
+      audioPending: "Preparing your audio. You can read the devotional below.",
       play: (title: string) => `Play devotional, ${title}`,
       pause: "Pause devotional",
       open: "Open full player",
@@ -610,7 +614,14 @@ export const copy = {
       loading: "Loading your reflection",
       preparing: {
         title: "Your devotional is still being prepared.",
-        body: "It will be waiting in your Journal when it’s ready.",
+        // The screen turns into the reflection by itself: Realtime, the sync engine's finish, or its own reads.
+        body: "It’ll appear here as soon as it’s ready.",
+      },
+      // A reflection this phone handed to Reflection (2026-11-10) that the server refused for a reason only the person can fix:
+      // the reason (copy.problems.reason) comes first, then this; the card on Journal offers Review.
+      refused: {
+        title: "We couldn’t finish this reflection.",
+        body: "It’s in your Journal, where Review shows what you can do.",
       },
       failed: {
         title: "We couldn’t finish this reflection.",

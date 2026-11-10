@@ -138,6 +138,31 @@ function AudioCard({ track, ambientDefault, onOpen }: AudioCardProps) {
   );
 }
 
+// A reflection whose spoken devotional is still being made (2026-11-09): the server answers with the text and reads it aloud
+// behind the answer, about fifteen seconds. The card says so, with the line as a polite live region, and becomes the player
+// when the audio lands (Realtime, or the next read of the entry).
+function PreparingAudioCard({ title }: { title: string }) {
+  return (
+    <View className="flex-row items-center gap-3.5 rounded-card bg-plum p-4" style={shadows.card}>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        className="size-12 items-center justify-center rounded-full bg-rose"
+      >
+        <ActivityIndicator size="small" color={colors.plumDeep} />
+      </View>
+      <View className="flex-1">
+        <Text className="text-section text-white" numberOfLines={2}>
+          {title}
+        </Text>
+        <Text accessibilityLiveRegion="polite" className="text-body-sm text-white/70">
+          {player.audioPending}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 // An entry whose voice could not be made (or has no measured length) still has its text.
 function NoAudioCard({ title }: { title: string }) {
   return (
@@ -162,13 +187,16 @@ type MiniPlayerCardProps = {
   track: PlaybackTrack | null;
   // What the player's ambient choice starts from, when the app has not played anything yet (the profile).
   ambientDefault: AmbientDefault;
+  // With no track: the spoken devotional is still being made (isAudioPending, 2026-11-09), so the card says so instead of
+  // "ready to read below".
+  audioPending?: boolean;
   onOpen: () => void;
 };
 
 // Reads the shared player store (usePlayback), so this card and Now Playing always agree.
-export function MiniPlayerCard({ devotional, track, ambientDefault, onOpen }: MiniPlayerCardProps) {
+export function MiniPlayerCard({ devotional, track, ambientDefault, audioPending = false, onOpen }: MiniPlayerCardProps) {
   if (track === null) {
-    return <NoAudioCard title={devotional.title} />;
+    return audioPending ? <PreparingAudioCard title={devotional.title} /> : <NoAudioCard title={devotional.title} />;
   }
   return <AudioCard track={track} ambientDefault={ambientDefault} onOpen={onOpen} />;
 }

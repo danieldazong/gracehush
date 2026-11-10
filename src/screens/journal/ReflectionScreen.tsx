@@ -53,6 +53,7 @@ import {
   ReflectionLoading,
   ReflectionNotFound,
   ReflectionPreparing,
+  ReflectionRefused,
 } from "./ReflectionStateViews";
 
 const { subline, words, request, footer, wordsOnly } = copy.reflection;
@@ -216,6 +217,8 @@ type ReadyViewProps = {
   devotional: Devotional;
   affirmations: Affirmation[];
   profile: UserProfile;
+  // The spoken devotional is still being made behind the server's answer (2026-11-09): the player card says so.
+  audioPending: boolean;
   initialTab: ReflectionTab | undefined;
   onOpenPlayer: () => void;
   onReturn: () => void;
@@ -236,6 +239,7 @@ function ReadyView({
   devotional,
   affirmations,
   profile,
+  audioPending,
   initialTab,
   onOpenPlayer,
   onReturn,
@@ -285,6 +289,7 @@ function ReadyView({
           devotional={devotional}
           track={getPlaybackTrack(entry)}
           ambientDefault={profile}
+          audioPending={audioPending}
           onOpen={onOpenPlayer}
         />
       </FadeIn>
@@ -407,6 +412,16 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
   const [deleteOffline, setDeleteOffline] = useState(false);
   useAnnounce(deleteOffline ? deleteText.offline : null);
 
+  // Held by the free limit after New Entry handed the reflection to this screen (2026-11-10): the Paywall, as New Entry opens
+  // it when the 402 comes inside its three seconds. Once; with the entry the server saved when it named one, else the phone's id.
+  const held = state.status === "ready" && state.entry.pending?.status === "limit_reached" ? state.entry : null;
+  const redirected = useRef(false);
+  useEffect(() => {
+    if (held === null || redirected.current) return;
+    redirected.current = true;
+    navigation.replace("Paywall", { source: "limit", entryId: held.pending?.serverEntryId ?? held.id });
+  }, [held, navigation]);
+
   // One more affirmation (2026-11-09). The tap goes to the hook, which replaces the list; a failure shows a calm line until the
   // next tap. With no connection nothing is asked: the line says so (null, before NetInfo has answered, counts as online). A heavy
   // moment gets one like any reflection and sends no event (Analytics Rules).
@@ -449,6 +464,15 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
     body = <ReflectionNotFound onReturn={returnToJournal} />;
   } else if (state.status === "error") {
     body = <ReflectionError onRetry={state.retry} onReturn={returnToJournal} />;
+  } else if (state.entry.pending?.status === "needs_action") {
+    // A reflection this phone handed to this screen that the server refused for a reason only the person can fix (2026-11-10):
+    // the reason, and the way back to Journal, where its card offers Review.
+    body = (
+      <ReflectionRefused reason={copy.problems.reason(state.entry.pending.lastErrorCode)} onReturn={returnToJournal} />
+    );
+  } else if (state.entry.pending?.status === "limit_reached") {
+    // The effect above is opening the Paywall: nothing of the reflection meanwhile.
+    body = <ReflectionLoading />;
   } else if (
     state.entry.status === "pending" ||
     state.entry.status === "uploading" ||
@@ -478,6 +502,7 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
         devotional={state.entry.devotional}
         affirmations={state.affirmations}
         profile={state.profile}
+        audioPending={state.audioPending}
         initialTab={route.params.tab}
         onOpenPlayer={() => navigation.navigate("NowPlaying", { entryId: state.entry.id })}
         onReturn={returnToJournal}

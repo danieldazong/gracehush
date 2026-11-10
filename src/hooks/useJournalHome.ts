@@ -17,6 +17,7 @@ import { mergePending, toPendingEntry } from "@/data/pendingEntries";
 import { getCurrentSlot, getReflectionDays, isListedEntry, mergeEntries } from "@/data/selectors";
 import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
 import { track } from "@/services/analytics";
+import { haptics } from "@/services/haptics";
 import { startOfflineSession } from "@/services/offlineSession";
 import { subscribeRealtime } from "@/services/realtime";
 import { getSupabaseUserId } from "@/services/supabaseClient";
@@ -248,6 +249,8 @@ export function useJournalHome(): HomeState {
       if (before === null) return;
       const wasReady = before.entries.some((item) => item.id === entryId && item.status === "ready");
       const nowMs = Date.now();
+      // The cards read the clock from here (a finished reflection's audio window among other things), so it moves with them.
+      setNow(new Date(nowMs));
       setResult((previous) =>
         previous?.status === "ready" && previous.key === key
           ? { ...previous, ...placeChangedEntry(previous, entryId, entry, nowMs), affirmations }
@@ -280,6 +283,10 @@ export function useJournalHome(): HomeState {
         if (event.type === "finished") {
           // What New Entry left behind is no longer true once the reflection is ready.
           useOfflineStore.getState().setSavedNote(null);
+          // A reflection finished while Journal is in front (the person came back before the server was done): one success tap
+          // here, none for a heavy moment. Since 2026-11-10 the handoff lands on Reflection, which gives the tap otherwise; only
+          // the screen in front is subscribed, so a finish is never felt twice.
+          if (!event.isCrisis) haptics.success();
           load();
         } else if (event.type === "changed") {
           refreshPending();

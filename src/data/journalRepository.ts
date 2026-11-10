@@ -267,19 +267,26 @@ export async function loadEntriesPage(cursor: string | null): Promise<RepoResult
 }
 
 // A reflection that is still only on this phone has no server id: its id is its client entry id, and it is an entry
-// that is not finished yet (Reflection shows "still being prepared"), never "not found" (step 24). Otherwise the real source
-// asks the server (null when it has no such entry) and falls back to the cached copy when there is no answer; with neither,
-// it throws, and the screen shows its error state.
+// that is not finished yet (Reflection shows "still being prepared"), never "not found" (step 24). One that has finished since
+// is found in the cache by that same id (2026-11-10). Otherwise the real source asks the server (null when it has no such
+// entry) and falls back to the cached copy when there is no answer; with neither, it throws, and the screen shows its error
+// state.
 export async function getEntry(id: string): Promise<HomeEntry | null> {
   if (getDataSource() === "mock") {
     await simulateLatency();
-    const found = readEntries().find((entry) => entry.id === id);
+    const entries = readEntries();
+    const found = entries.find((entry) => entry.id === id) ?? entries.find((entry) => entry.clientEntryId === id);
     if (found) return found;
     const waiting = await findPendingItem(id);
     return waiting === null ? null : toPendingEntry(waiting);
   }
   const waiting = await findPendingItem(id);
   if (waiting !== null) return toPendingEntry(waiting);
+  // Reflection opens by the id this phone gave a reflection the moment New Entry hands it over (2026-11-10). Once the sync
+  // engine has finished it, the item is gone from the outbox and the reflection is in the cache under its server id: it is
+  // found by the client id here, so a finish that lands between the handoff and the first read never reads as "not found".
+  const finished = await live.readCachedEntryByClientId(id);
+  if (finished !== null) return finished;
   return live.fetchEntry(id);
 }
 

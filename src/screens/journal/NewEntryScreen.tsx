@@ -19,7 +19,13 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { SegmentedControl } from "@/components/SegmentedControl";
-import { MIN_RECORDING_MS, MIN_TEXT_LENGTH, PRIVACY_POLICY_URL } from "@/constants/app";
+import {
+  MIN_RECORDING_MS,
+  MIN_TEXT_LENGTH,
+  NEW_ENTRY_STEP_SAVED_MS,
+  NEW_ENTRY_STEP_SENT_MS,
+  PRIVACY_POLICY_URL,
+} from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors, layout } from "@/constants/theme";
 import * as outbox from "@/db/outbox";
@@ -30,10 +36,9 @@ import { openLegalPage } from "@/services/externalLinks";
 import { haptics } from "@/services/haptics";
 import { discardItem, syncAndWait, syncNow } from "@/services/syncEngine";
 import { selectIsOnline, useOfflineStore, type SavedNote } from "@/store/offlineStore";
-import type { ProcessingStage } from "@/types";
 
 import { AiPermissionSheet } from "./AiPermissionSheet";
-import { ProcessingOverlay, type OverlayFailure } from "./ProcessingOverlay";
+import { ProcessingOverlay, type OverlayFailure, type OverlaySteps } from "./ProcessingOverlay";
 import { SpeakSection } from "./SpeakSection";
 import { WriteSection } from "./WriteSection";
 
@@ -75,7 +80,8 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
   const [mode, setMode] = useState(route.params.mode);
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>("editing");
-  const [stage, setStage] = useState<ProcessingStage | null>(null);
+  // The overlay's two ticks while sending (2026-11-10): the reflection is saved in the outbox, and the request has left.
+  const [steps, setSteps] = useState<OverlaySteps>({ saved: false, sent: false });
   const [failure, setFailure] = useState<Failure | null>(null);
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   // True while a reflection is being saved on this phone with no overlay (the phone is offline).
@@ -92,6 +98,10 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
   const lastItem = useRef<QueuedItem | null>(null);
   // True once the reflection is in the outbox. Leaving on purpose with "Discard" then deletes it as well.
   const inOutbox = useRef(false);
+  // When the overlay opened, and the timers that tick its steps: a step ticks when its thing is done, and not before its
+  // place on the screen (NEW_ENTRY_STEP_*_MS), so the cards are read in turn and never all at once.
+  const sendingSince = useRef(0);
+  const stepTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // A take that is recording or paused is already something to keep, and the toggle stays locked until it is stopped.
   const recordingOpen = recorder.state === "recording" || recorder.state === "paused";
@@ -105,8 +115,10 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
 
   useEffect(() => {
     mounted.current = true;
+    const timers = stepTimers.current;
     return () => {
       mounted.current = false;
+      for (const timer of timers) clearTimeout(timer);
     };
   }, []);
 
@@ -171,21 +183,40 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
     await recorder.discard();
   }
 
-  // A reflection that is saved and not finished leaves this screen for Journal, where its card is, with one calm line.
+  // A reflection saved offline, or refused and closed, leaves this screen for Journal, where its card is, with one calm line
+  // when there is one to say.
   function leaveToJournal(note: SavedNote | null) {
     if (note !== null) useOfflineStore.getState().setSavedNote(note);
     leaving.current = true;
     navigation.popTo("MainTabs", { screen: "Journal" });
   }
 
+  function clearStepTimers() {
+    for (const timer of stepTimers.current) clearTimeout(timer);
+    stepTimers.current.length = 0;
+  }
+
+  // Ticks one step of the overlay once its thing is done, and not before its place on the screen.
+  function tickStep(step: keyof OverlaySteps, notBeforeMs: number) {
+    const wait = Math.max(0, sendingSince.current + notBeforeMs - Date.now());
+    const timer = setTimeout(() => {
+      if (mounted.current) setSteps((previous) => (previous[step] ? previous : { ...previous, [step]: true }));
+    }, wait);
+    stepTimers.current.push(timer);
+  }
+
   // Saves the reflection on this phone first, and only then tries the network: what is saved is never lost to a failed
-  // request. Online, the overlay shows while the sync engine prepares it. Offline, there is nothing to wait for.
+  // request. Online, the overlay shows for the handoff (three seconds, 2026-11-10) while the sync engine starts on it; a
+  // reflection that takes longer, which is the usual case, opens its own screen, which fills in when the server has finished.
+  // Offline, there is nothing to wait for.
   async function save(item: QueuedItem) {
     const online = selectIsOnline(useOfflineStore.getState()) !== false;
     if (online) {
+      clearStepTimers();
+      sendingSince.current = Date.now();
+      setSteps({ saved: false, sent: false });
       setFailure(null);
       setPhase("sending");
-      setStage("receiving");
     } else {
       setSaving(true);
     }
@@ -198,6 +229,7 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
       }
       await outbox.enqueue(item);
       inOutbox.current = true;
+      if (online) tickStep("saved", NEW_ENTRY_STEP_SAVED_MS);
     } catch {
       if (!mounted.current) return;
       submitting.current = false;
@@ -212,12 +244,17 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
       leaveToJournal("offline");
       return;
     }
+    // The wait is the engine's WAIT_MS (NEW_ENTRY_WAIT_MS, three seconds): a fast answer opens the reflection, and otherwise
+    // Reflection opens on the reflection being prepared, by the id this phone gave it, and turns into it when the engine has
+    // finished (2026-11-10, the owner's request: the progress is shown once, here, and never again as a card on Journal).
+    // "Sent" ticks when the processor hands the request to the server (its "receiving" stage, after a recording's upload).
     const result = await syncAndWait(item.clientEntryId, {
-      onStage: (next) => {
-        if (mounted.current) setStage(next);
+      onStage: (stage) => {
+        if (stage === "receiving") tickStep("sent", NEW_ENTRY_STEP_SENT_MS);
       },
     });
     if (!mounted.current) return;
+    clearStepTimers();
     switch (result.kind) {
       case "ready":
         leaving.current = true;
@@ -238,8 +275,12 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
         setPhase("error");
         break;
       case "later":
-        // No answer yet (offline again, busy, a retry is scheduled): the engine goes on by itself.
-        leaveToJournal("retry");
+        // No answer within the handoff (the usual case: the server takes 10 to 30 seconds), or none at all yet (offline again,
+        // busy, a retry is scheduled): the engine goes on by itself, and the reflection's own screen opens on it, by the id this
+        // phone gave it. Reflection shows it being prepared and turns into the reflection the moment the engine finishes it;
+        // a refusal or the free limit are shown there too (its card on Journal keeps Review and See plans).
+        leaving.current = true;
+        navigation.replace("Reflection", { entryId: item.clientEntryId });
         break;
     }
   }
@@ -297,11 +338,6 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
   // The item stays in the outbox: Journal shows it with "Review".
   function closeAfterRefusal() {
     leaveToJournal(null);
-  }
-
-  function closeWhileSending() {
-    // The engine goes on with it, and Journal shows its card.
-    leaveToJournal("retry");
   }
 
   let overlayFailure: OverlayFailure | null = null;
@@ -415,9 +451,8 @@ export function NewEntryScreen({ navigation, route }: RootStackScreenProps<"NewE
         {editing ? null : (
           <ProcessingOverlay
             entryKind={mode === "speak" ? "audio" : "text"}
-            stage={stage}
+            steps={steps}
             failure={overlayFailure}
-            onClose={closeWhileSending}
           />
         )}
       </KeyboardAvoidingView>

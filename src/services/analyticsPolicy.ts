@@ -15,7 +15,7 @@ export type AddedPosition = 4 | 5 | 6 | 7 | 8 | 9 | 10;
 // signing in or out, or anything a person wrote; there are no ids, titles, verses, counts of words or free text.
 export type AnalyticsEvent =
   | { name: "onboarding_completed"; props: { permissions_prompted: boolean } }
-  | { name: "reflection_ready"; props: { input: "text" | "voice"; scripture_verified: boolean; has_audio: boolean } }
+  | { name: "reflection_ready"; props: { input: "text" | "voice"; scripture_verified: boolean } }
   | { name: "entry_failed"; props: { code: EntryFailedCode } }
   | { name: "devotional_played"; props: { rate: PlaybackRate } }
   | { name: "devotional_completed"; props: { rate: PlaybackRate } }
@@ -93,7 +93,7 @@ const ADDED_POSITIONS: readonly AddedPosition[] = [4, 5, 6, 7, 8, 9, 10];
 // Each event's own properties: all of them must be there and valid, or the event is dropped.
 const EVENT_PROPS: { [N in AnalyticsEventName]: { [K in keyof AnalyticsProps<N>]-?: Check } } = {
   onboarding_completed: { permissions_prompted: bool },
-  reflection_ready: { input: oneOf(["text", "voice"]), scripture_verified: bool, has_audio: bool },
+  reflection_ready: { input: oneOf(["text", "voice"]), scripture_verified: bool },
   entry_failed: { code: oneOf(ENTRY_FAILED_CODES) },
   devotional_played: { rate: oneOf(PLAYBACK_RATES) },
   devotional_completed: { rate: oneOf(PLAYBACK_RATES) },

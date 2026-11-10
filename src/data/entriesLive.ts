@@ -65,6 +65,13 @@ export function readCachedEntry(id: string): Promise<JournalEntry | null> {
   return safely(() => cache.getEntry(id), null);
 }
 
+// The cached copy of a reflection by the id this phone gave it (2026-11-10): what Reflection, opened by that id the moment New
+// Entry hands the reflection over, finds once the sync engine has written the finished reflection to the cache under its
+// server id.
+export function readCachedEntryByClientId(clientEntryId: string): Promise<JournalEntry | null> {
+  return safely(() => cache.getEntryByClientId(clientEntryId), null);
+}
+
 export async function readCachedAffirmations(entryId: string): Promise<Affirmation[]> {
   return safely(() => cache.listAffirmationsForEntry(entryId), []);
 }

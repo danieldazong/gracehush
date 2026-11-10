@@ -639,7 +639,9 @@ async function engineChecks() {
     assert.equal(w.use("@/db/database").isDatabaseOpen(), false);
   });
 
-  await test("the waiting screen is told how it ended, gives up after 90 seconds, and the engine goes on without it", async (w) => {
+  // Since 2026-11-09 New Entry waits NEW_ENTRY_WAIT_MS (3 s since 2026-11-10): a reflection that takes longer, the usual case,
+  // goes to Journal, where its card shows the progress, and the engine goes on without the screen.
+  await test("the waiting screen is told how it ended, gives up after 3 seconds, and the engine goes on without it", async (w) => {
     const { outbox } = await openAs(w);
     const { engine } = await startEngine(w);
     await outbox.enqueue(text("a"));
@@ -659,9 +661,10 @@ async function engineChecks() {
     const stages = [];
     let outcome = null;
     engine.syncAndWait("d", { onStage: (s) => stages.push(s) }).then((value) => (outcome = value));
-    await advance(89_000);
+    assert.equal(engine.WAIT_MS, 3_000, "the handoff is three seconds");
+    await advance(2_900);
     assert.equal(outcome, null);
-    await advance(2000);
+    await advance(200);
     assert.deepEqual(outcome, { kind: "later" });
     assert.deepEqual(stages, ["receiving"]);
     finish();

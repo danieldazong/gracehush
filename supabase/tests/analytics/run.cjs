@@ -373,9 +373,9 @@ async function policyChecks() {
       ["ambient_changed", { sound: "rain", source: "profile" }],
       ["ambient_changed", { sound: "soft-rain", source: "settings" }],
       ["ambient_changed", { sound: "soft-rain" }],
-      ["reflection_ready", { input: "audio", scripture_verified: true, has_audio: true }],
-      ["reflection_ready", { input: "text", scripture_verified: "yes", has_audio: true }],
-      ["reflection_ready", { input: "text", has_audio: true }],
+      ["reflection_ready", { input: "audio", scripture_verified: true }],
+      ["reflection_ready", { input: "text", scripture_verified: "yes" }],
+      ["reflection_ready", { input: "text" }],
       ["entry_failed", { code: "AI_UNAVAILABLE" }],
       ["affirmation_favorited", {}],
       ["affirmation_notification_opened", { slot: "midday" }],
@@ -392,7 +392,7 @@ async function policyChecks() {
       ["devotional_played", { rate: 0.8 }],
       ["devotional_completed", { rate: 1 }],
       ["ambient_changed", { sound: "off", source: "now_playing" }],
-      ["reflection_ready", { input: "voice", scripture_verified: false, has_audio: false }],
+      ["reflection_ready", { input: "voice", scripture_verified: false }],
       ["entry_failed", { code: "OTHER" }],
       ["affirmation_notification_opened", { slot: "afternoon" }],
       ["purchase_failed", { code: "CANCELLED" }],
@@ -626,7 +626,7 @@ async function consentChecks() {
       w.analytics().track("data_export_requested", {});
       w.nav.route = "Journal";
       w.analytics().trackCurrentScreen();
-      w.emit({ type: "finished", clientEntryId: "c", entryId: "e", isCrisis: false, inputType: "text", scriptureVerified: true, hasAudio: true });
+      w.emit({ type: "finished", clientEntryId: "c", entryId: "e", isCrisis: false, inputType: "text", scriptureVerified: true });
       w.player.setState({ entryId: "e1", status: "playing", rate: 1 });
       await settle();
       assert.equal(w.posthog.instances.length, 0, String(consent));
@@ -688,7 +688,7 @@ async function consentChecks() {
     w.nav.route = "Prayers";
     w.analytics().trackCurrentScreen();
     w.player.setState({ entryId: "e1", status: "playing", rate: 1 });
-    w.emit({ type: "finished", clientEntryId: "c", entryId: "e", isCrisis: false, inputType: "text", scriptureVerified: true, hasAudio: true });
+    w.emit({ type: "finished", clientEntryId: "c", entryId: "e", isCrisis: false, inputType: "text", scriptureVerified: true });
     await settle();
     assert.equal(w.captures().length, capturesBefore, "nothing more is captured");
     assert.equal(client.calls.filter((call) => call[0] === "screen").length, 0);
@@ -705,18 +705,18 @@ async function consentChecks() {
   await test("consent: track hands the catalog event to the SDK as given, and the filter drops what the type system would not allow", async () => {
     const w = world({ consent: "granted" });
     await w.start();
-    w.analytics().track("reflection_ready", { input: "voice", scripture_verified: true, has_audio: false });
+    w.analytics().track("reflection_ready", { input: "voice", scripture_verified: true });
     w.analytics().track("devotional_played", { rate: 2 });
     w.analytics().track("made_up_event", { anything: "x" });
     const capture = w.captures()[0];
-    assert.deepEqual(capture.slice(1), ["reflection_ready", { input: "voice", scripture_verified: true, has_audio: false }]);
+    assert.deepEqual(capture.slice(1), ["reflection_ready", { input: "voice", scripture_verified: true }]);
     assert.deepEqual(w.queued(), ["reflection_ready"]);
     const queued = w.client().queue[0];
     assert.equal(queued.properties.$process_person_profile, false);
     assert.equal(queued.properties.$geoip_disable, true);
     assert.equal(queued.$set, undefined);
     for (const key of Object.keys(queued.properties)) {
-      assert.ok(ALLOWED_COMMON.includes(key) || ["input", "scripture_verified", "has_audio"].includes(key), key);
+      assert.ok(ALLOWED_COMMON.includes(key) || ["input", "scripture_verified"].includes(key), key);
     }
   });
 }
@@ -763,17 +763,20 @@ async function resetChecks() {
 
 // ================================================================== the sync engine
 async function engineChecks() {
-  await test("engine: a finished reflection sends reflection_ready with its three facts; a crisis entry sends nothing", async () => {
+  // Since 2026-11-09 the event has two facts, not three: the audio is made behind the server's answer, so whether a reflection
+  // has it at the moment it finishes would always be no.
+  await test("engine: a finished reflection sends reflection_ready with its two facts; a crisis entry sends nothing", async () => {
     const w = world({ consent: "granted" });
     await w.start();
-    w.emit({ type: "finished", clientEntryId: "c1", entryId: "e1", isCrisis: false, inputType: "audio", scriptureVerified: true, hasAudio: true });
-    w.emit({ type: "finished", clientEntryId: "c2", entryId: "e2", isCrisis: false, inputType: "text", scriptureVerified: false, hasAudio: false });
-    w.emit({ type: "finished", clientEntryId: "c3", entryId: "e3", isCrisis: true, inputType: "text", scriptureVerified: false, hasAudio: false });
+    w.emit({ type: "finished", clientEntryId: "c1", entryId: "e1", isCrisis: false, inputType: "audio", scriptureVerified: true });
+    w.emit({ type: "finished", clientEntryId: "c2", entryId: "e2", isCrisis: false, inputType: "text", scriptureVerified: false });
+    w.emit({ type: "finished", clientEntryId: "c3", entryId: "e3", isCrisis: true, inputType: "text", scriptureVerified: false });
     const sent = w.captures().map((call) => [call[1], call[2]]);
     assert.deepEqual(sent, [
-      ["reflection_ready", { input: "voice", scripture_verified: true, has_audio: true }],
-      ["reflection_ready", { input: "text", scripture_verified: false, has_audio: false }],
+      ["reflection_ready", { input: "voice", scripture_verified: true }],
+      ["reflection_ready", { input: "text", scripture_verified: false }],
     ]);
+    assert.ok(!JSON.stringify(sent).includes("has_audio"), "no has_audio: it would always be false");
   });
 
   await test("engine: a reflection only the person can fix sends entry_failed with its mapped code; any other outcome sends nothing", async () => {

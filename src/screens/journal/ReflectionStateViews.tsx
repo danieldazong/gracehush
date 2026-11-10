@@ -69,10 +69,21 @@ export function ReflectionLoading() {
 }
 
 // Pending, uploading and processing entries. Reflection reads an entry that a server is preparing again every few seconds
-// while it is in front (useReflection, step 25), so this view turns into the reflection by itself.
+// while it is in front (useReflection, step 25), and follows the sync engine for a reflection this phone handed to it
+// (2026-11-10), so this view turns into the reflection by itself.
 export function ReflectionPreparing({ onReturn }: { onReturn: () => void }) {
   return (
     <MessageView title={states.preparing.title} body={states.preparing.body} busy>
+      <PrimaryButton label={footer.returnToJournal} onPress={onReturn} />
+    </MessageView>
+  );
+}
+
+// A reflection this phone handed to this screen that the server refused for a reason only the person can fix (2026-11-10):
+// the reason, and the way back to Journal, where its card offers Review (edit and resend, or delete).
+export function ReflectionRefused({ reason, onReturn }: { reason: string; onReturn: () => void }) {
+  return (
+    <MessageView title={states.refused.title} body={`${reason} ${states.refused.body}`}>
       <PrimaryButton label={footer.returnToJournal} onPress={onReturn} />
     </MessageView>
   );

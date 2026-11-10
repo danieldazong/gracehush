@@ -900,6 +900,33 @@ async function repositoryChecks() {
     assert.equal(w.server.state.requests.length, 0, "the mock never reaches the server");
   });
 
+  // 2026-11-10: Reflection opens by the client entry id after New Entry's handoff. The mock's getEntry finds the clone the mock
+  // processor made under its own id by that client id, as the real source finds the finished reflection in the cache.
+  await test("repository: the mock's getEntry answers a finished mock reflection by its client entry id too, and an outbox item by its id", async (w) => {
+    const repo = w.use("@/data/journalRepository");
+    const dev = w.use("@/store/devStore").useDevStore;
+    const { addMockEntry } = w.use("@/data/mock/db");
+    dev.getState().setDataSource("mock");
+    const madeId = addMockEntry("ready", { clientEntryId: "c-mock-1", inputType: "text", text: "a made-up prayer about rest" });
+    const byServerId = repo.getEntry(madeId);
+    await advance(400);
+    assert.equal((await byServerId).id, madeId, "by its own id");
+    const byClientId = repo.getEntry("c-mock-1");
+    await advance(400);
+    const found = await byClientId;
+    assert.equal(found.id, madeId, "by the client entry id, the same reflection");
+    assert.equal(found.clientEntryId, "c-mock-1");
+    assert.equal(found.isLocalOnly, false, "the clone is a finished reflection, not an item on the phone");
+    await w.use("@/db/outbox").enqueue(text("c-mock-2"));
+    const waiting = repo.getEntry("c-mock-2");
+    await advance(400);
+    assert.equal((await waiting).pending?.status, "queued", "an item still on the phone is the pending entry");
+    const missing = repo.getEntry("c-mock-none");
+    await advance(400);
+    assert.equal(await missing, null, "nothing for an id nobody has");
+    assert.equal(w.server.state.requests.length, 0, "the mock never reaches the server");
+  });
+
   await test("repository: a page of the real source, and of the mock; the page size comes from the dev store", async (w) => {
     const repo = w.use("@/data/journalRepository");
     const dev = w.use("@/store/devStore").useDevStore;
@@ -1002,7 +1029,8 @@ async function processorChecks() {
     assert.equal(w.upload.calls.length, 0, "a written entry uploads nothing");
   });
 
-  await test("processor: the overlay's steps follow the usual time (4 s, 12 s) and stop when the answer comes", async (w) => {
+  // Since 2026-11-09 the stages are the Journal card's (New Entry leaves after 4 s): reflecting at 3 s, preparing at 9 s.
+  await test("processor: the card's stages follow the usual time (3 s, 9 s) and stop when the answer comes", async (w) => {
     const processor = w.use("@/services/entryProcessor");
     const item = await itemOf(w, text("c1"));
     let release;
@@ -1014,11 +1042,11 @@ async function processorChecks() {
     );
     const stages = [];
     const run = processor.processItem(item, (stage) => stages.push(stage));
-    await advance(3900);
+    await advance(2900);
     assert.deepEqual(stages, ["receiving"]);
     await advance(200);
     assert.deepEqual(stages, ["receiving", "reflecting"]);
-    await advance(7800);
+    await advance(5800);
     assert.deepEqual(stages, ["receiving", "reflecting"]);
     await advance(300);
     assert.deepEqual(stages, ["receiving", "reflecting", "preparing"]);
@@ -1026,7 +1054,7 @@ async function processorChecks() {
     assert.equal((await run).ok, true);
     await advance(60_000);
     assert.deepEqual(stages, ["receiving", "reflecting", "preparing"], "no step after the answer");
-    assert.equal([...W.clock.timers.values()].filter((t) => t.ms === 4000 || t.ms === 12000).length, 0, "the step timers are cleared");
+    assert.equal([...W.clock.timers.values()].filter((t) => t.ms === 3000 || t.ms === 9000).length, 0, "the step timers are cleared");
 
     // An answer that comes early (a retry of a reflection the server already has): the later steps never show.
     const early = await itemOf(w, text("c2"));
@@ -1047,6 +1075,23 @@ async function processorChecks() {
     const [call] = functionCalls(w, "process-entry");
     assert.deepEqual(call.body, { clientEntryId: "a1", inputType: "audio", audioPath: "user_a/raw/a1.m4a", durationMs: 20000, mimeType: "audio/mp4" });
     assert.equal((await outbox.get("a1")).uploaded, true, "remembered");
+  });
+
+  await test("processor: receiving is reported once a recording is uploaded, so New Entry's Sent and the card's stages follow the request and not the upload; a failed upload reports no stage", async (w) => {
+    const processor = w.use("@/services/entryProcessor");
+    const outbox = w.use("@/db/outbox");
+    const item = await itemOf(w, audio("a1"));
+    const uploadsAtStage = [];
+    const outcome = await processor.processItem(item, (stage) => uploadsAtStage.push([stage, w.upload.calls.length]));
+    assert.equal(outcome.ok, true);
+    assert.deepEqual(uploadsAtStage[0], ["receiving", 1], "the upload was done when receiving was reported");
+    assert.deepEqual(uploadsAtStage.map(([stage]) => stage), ["receiving"], "no stage before the request");
+    await itemOf(w, audio("a2"));
+    w.upload.script.push({ ok: false, code: "NETWORK" });
+    const stages = [];
+    const failed = await processor.processItem(await outbox.get("a2"), (stage) => stages.push(stage));
+    assert.equal(failed.ok, false);
+    assert.deepEqual(stages, [], "a recording that could not be uploaded was never handed to the server");
   });
 
   await test("processor: the times of the entry the function answers with are in the form the app keeps, the prayer's too", async (w) => {
@@ -1543,7 +1588,7 @@ async function journalChecks() {
     const offlineStore = w.use("@/store/offlineStore").useOfflineStore;
     const handle = await render(w);
     await until(handle, (s) => s.status === "ready" && s.entries.length === 3, "the entries");
-    offlineStore.getState().setSavedNote("retry");
+    offlineStore.getState().setSavedNote("offline");
     await w.use("@/db/outbox").enqueue(text("c-new"));
     const waiting = engine.syncAndWait("c-new", { waitMs: 60_000 });
     const result = await waiting;
@@ -1552,6 +1597,83 @@ async function journalChecks() {
     assert.equal(state.entries.some((e) => e.isLocalOnly), false, "no waiting card is left");
     assert.equal(state.savedNote, null);
     assert.equal(state.entryCount, 4);
+    handle.unmount();
+  });
+
+  // 2026-11-10: a reflection being prepared is one card that says only that ("Preparing your reflection…"): the progress is
+  // shown once, on New Entry's overlay, and the handoff lands on Reflection. Journal tracks no stage any more (the 2026-11-09
+  // progress bar and its stage lines went at the owner's request), and gives the success tap only when it is the screen in front.
+  await test("journal: a reflection being prepared is one plain card with no stage of its own, and a finish while Journal is in front gives one success tap; a heavy moment gives none", async (w) => {
+    seedServer(w, 2);
+    await w.startEngine();
+    const engine = w.use("@/services/syncEngine");
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 2, "the entries");
+    assert.equal("stages" in handle.result.current, false, "Journal keeps no stages");
+    let release;
+    w.server.state.functions["process-entry"].push(
+      () =>
+        new Promise((resolve) => {
+          release = () => {
+            // What the fake server does by itself for an ungated call: the row and its affirmations exist from the answer on.
+            const made = readyResult(text("c-new"));
+            w.server.state.entries.push(made.row);
+            w.server.state.affirmations.push(...made.affirmations);
+            resolve(json(200, made.response));
+          };
+        }),
+    );
+    await w.use("@/db/outbox").enqueue(text("c-new"));
+    let outcome = null;
+    engine.syncAndWait("c-new").then((value) => (outcome = value));
+    let state = await until(handle, (s) => s.status === "ready" && s.entries[0]?.pending?.status === "sending", "the card being sent");
+    assert.equal(state.entries[0].isLocalOnly, true, "the card is the item on this phone");
+    assert.equal(state.entries[0].transcript, null, "and never its words");
+    await advance(2_900);
+    assert.equal(outcome, null, "New Entry is still on its screen inside the three seconds");
+    await advance(200);
+    assert.deepEqual(outcome, { kind: "later" }, "New Entry has left after its 3 seconds");
+    await advance(6_000);
+    state = handle.result.current;
+    assert.equal(state.entries[0].pending?.status, "sending", "still the one plain card while the server works");
+    assert.equal("stages" in state, false, "and no stage of its own at any point");
+    assert.deepEqual(w.hapticsCalls, [], "no tap before the answer");
+    release();
+    state = await until(handle, (s) => s.status === "ready" && s.entries.length === 3 && !s.entries[0].isLocalOnly, "the finished reflection");
+    assert.equal(state.entries[0].clientEntryId, "c-new");
+    assert.deepEqual(w.hapticsCalls, ["success"], "one success tap when the reflection finishes with Journal in front");
+
+    // A heavy moment finishes like any other, with no tap (Crisis Safety Rules: nothing louder than the screen).
+    w.server.state.makeEntry = crisisResult;
+    await w.use("@/db/outbox").enqueue(text("c-heavy"));
+    const heavy = await engine.syncAndWait("c-heavy", { waitMs: 60_000 });
+    assert.equal(heavy.isCrisis, true);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 4, "the heavy moment");
+    assert.deepEqual(w.hapticsCalls, ["success"], "no tap for a heavy moment");
+    handle.unmount();
+  });
+
+  await test("journal: a reflection the server refuses for good stays as its card with Review, and gives no tap", async (w) => {
+    seedServer(w, 1);
+    await w.startEngine();
+    const engine = w.use("@/services/syncEngine");
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 1, "the entries");
+    let release;
+    w.server.state.functions["process-entry"].push(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(fnError(422, "TOO_SHORT"));
+        }),
+    );
+    await w.use("@/db/outbox").enqueue(text("c-short"));
+    engine.syncNow("submit");
+    await until(handle, (s) => s.status === "ready" && s.entries[0]?.pending?.status === "sending", "the card while it is sent");
+    release();
+    const state = await until(handle, (s) => s.status === "ready" && s.entries[0].pending?.status === "needs_action", "the refusal");
+    assert.equal(state.entries.length, 2, "the refused card stays, with Review");
+    assert.equal(state.entries[0].pending?.lastErrorCode, "TOO_SHORT");
+    assert.deepEqual(w.hapticsCalls, [], "no tap for a refusal");
     handle.unmount();
   });
 
@@ -1775,13 +1897,60 @@ async function reflectionChecks() {
     assert.equal(reads(), first, "not before 5 s");
     await advance(200);
     assert.equal(reads(), first + 1);
-    Object.assign(w.server.state.entries[0], serverRow(1, { updated_at: stamp(BASE + 6_000) }));
+    Object.assign(w.server.state.entries[0], serverRow(1, { updated_at: stamp(BASE + 6_000), devotional_audio_path: "user_a/devotionals/1.wav", devotional_duration_ms: 90_000 }));
     await advance(5_000);
     state = await until(handle, (s) => s.status === "ready" && s.entry.status === "ready", "the finished entry");
     assert.equal(state.entry.devotional.title, "Title 1");
     const done = reads();
     await advance(60_000);
     assert.equal(reads(), done, "a finished entry is not read again");
+    handle.unmount();
+  });
+
+  // 2026-11-09: the server answers with the text and reads the devotional aloud behind the answer, so a finished reflection
+  // without audio, changed within AUDIO_PENDING_MS, is read again like one still being prepared, and says so.
+  await test("reflection: a finished reflection whose audio is still being made says audioPending and is read again every 5 s until the audio lands, then left alone", async (w) => {
+    seedServer(w, 1, () => ({ updated_at: stamp(BASE - 1_000) }));
+    const handle = await render(w, serverRow(1).id);
+    let state = await until(handle, (s) => s.status === "ready", "the entry");
+    assert.equal(state.entry.devotional.audioPath, null);
+    assert.equal(state.audioPending, true, "the audio is on its way");
+    const reads = () => journalReads(w).length;
+    const first = reads();
+    await advance(4_900);
+    assert.equal(reads(), first, "not before 5 s");
+    await advance(200);
+    assert.equal(reads(), first + 1, "read again at 5 s");
+    Object.assign(w.server.state.entries[0], serverRow(1, { updated_at: stamp(clock.now), devotional_audio_path: "user_a/devotionals/1.wav", devotional_duration_ms: 88_000 }));
+    await advance(5_000);
+    state = await until(handle, (s) => s.status === "ready" && s.entry.devotional.audioPath !== null, "the audio landed");
+    assert.equal(state.audioPending, false);
+    assert.equal(state.entry.devotional.durationMs, 88_000);
+    const done = reads();
+    await advance(60_000);
+    assert.equal(reads(), done, "a reflection with its audio is not read again");
+    handle.unmount();
+  });
+
+  await test("reflection: an audio that never lands stops being pending when its window passes, and a reflection whose speech failed is never pending", async (w) => {
+    const { AUDIO_PENDING_MS } = w.use("@/constants/app");
+    assert.equal(AUDIO_PENDING_MS, 120_000);
+    seedServer(w, 2, (n) => (n === 1 ? { updated_at: stamp(BASE - 1_000) } : { updated_at: stamp(BASE - 1_000), error_code: "TTS_FAILED" }));
+    const failed = await render(w, serverRow(2).id);
+    const failedState = await until(failed, (s) => s.status === "ready", "the entry whose speech failed");
+    assert.equal(failedState.audioPending, false, "TTS_FAILED is an answer, not a wait");
+    const failedReads = journalReads(w).length;
+    await advance(30_000);
+    assert.equal(journalReads(w).length, failedReads, "and it is not read again");
+    failed.unmount();
+    const handle = await render(w, serverRow(1).id);
+    await until(handle, (s) => s.status === "ready" && s.audioPending === true, "the pending entry");
+    await advance(AUDIO_PENDING_MS + 5_000);
+    const state = await until(handle, (s) => s.status === "ready" && s.audioPending === false, "the window passed");
+    assert.equal(state.entry.devotional.audioPath, null, "still no audio: the card now reads as text only");
+    const after = journalReads(w).length;
+    await advance(30_000);
+    assert.equal(journalReads(w).length, after, "no more reads once the window has passed");
     handle.unmount();
   });
 
@@ -1815,6 +1984,159 @@ async function reflectionChecks() {
     assert.equal(affirmationReads(w).length, 0, "no affirmations exist for a reflection the server has not seen");
     assert.deepEqual(state.affirmations, []);
     handle.unmount();
+  });
+
+  // 2026-11-10: New Entry hands a reflection to Reflection after its three seconds, by the id this phone gave it. The hook shows
+  // the item being prepared, turns it into the reflection on the engine's finish (with the success tap New Entry used to give),
+  // and reads by the server's id from then on.
+  await test("reflection: opened by the id this phone gave it, it shows the reflection being prepared, becomes the reflection on the engine's finish with one success tap, and follows the server's id from then on", async (w) => {
+    seedServer(w, 1);
+    await w.startEngine();
+    const engine = w.use("@/services/syncEngine");
+    let release;
+    let made = null;
+    w.server.state.functions["process-entry"].push(
+      () =>
+        new Promise((resolve) => {
+          release = () => {
+            made = readyResult(text("c-new"));
+            w.server.state.entries.push(made.row);
+            w.server.state.affirmations.push(...made.affirmations);
+            resolve(json(200, made.response));
+          };
+        }),
+    );
+    await w.use("@/db/outbox").enqueue(text("c-new"));
+    engine.syncNow("submit");
+    const handle = await render(w, "c-new");
+    let state = await until(handle, (s) => s.status === "ready" && s.entry.isLocalOnly === true, "the item on this phone");
+    assert.ok(["pending", "processing"].includes(state.entry.status), "shown as being prepared (queued or being sent: one view)");
+    assert.ok(["queued", "sending"].includes(state.entry.pending?.status), "the item is waiting or on its way");
+    assert.equal(state.addAffirmation, null, "nothing to add to yet");
+    await advance(10_000);
+    assert.equal(handle.result.current.entry.isLocalOnly, true, "still the item on this phone while the server works");
+    assert.deepEqual(w.hapticsCalls, [], "no tap before the answer");
+    release();
+    state = await until(handle, (s) => s.status === "ready" && s.entry.status === "ready" && !s.entry.isLocalOnly, "the finished reflection");
+    assert.equal(state.entry.id, made.row.id, "the server's id");
+    assert.equal(state.entry.clientEntryId, "c-new");
+    assert.equal(state.entry.devotional.title, made.response.entry.devotional.title);
+    assert.equal(state.affirmations.length, 3, "its three affirmations");
+    assert.deepEqual(w.hapticsCalls, ["success"], "one success tap, the moment the reflection is there");
+    assert.notEqual(state.addAffirmation, null, "and one more affirmation can be added");
+    // From here the hook works by the server's id: a prayer change lands on the reflection.
+    const changed = await state.setTracked(true);
+    assert.equal(changed.ok, true, "the prayer change goes by the server's id");
+    state = await until(handle, (s) => s.status === "ready" && s.entry.prayer !== null, "the prayer shown");
+    assert.equal(state.entry.id, made.row.id);
+    assert.equal(journalReads(w).filter((r) => query(r).get("id") === "eq.c-new").length, 0, "the server is never asked for the client id");
+    handle.unmount();
+  });
+
+  await test("reflection: a finish that landed before the first read is found by the client id through the cache, and the hook follows the server's id; a heavy moment gives no tap", async (w) => {
+    seedServer(w, 1);
+    await w.startEngine();
+    const engine = w.use("@/services/syncEngine");
+    await w.use("@/db/outbox").enqueue(text("c-fast"));
+    const fast = await engine.syncAndWait("c-fast", { waitMs: 60_000 });
+    assert.equal(fast.kind, "ready", "finished before the screen opened");
+    const handle = await render(w, "c-fast");
+    const state = await until(handle, (s) => s.status === "ready" && s.entry.status === "ready", "the finished reflection, by the client id");
+    assert.equal(state.entry.id, fast.entryId, "the server's id");
+    assert.equal(state.entry.clientEntryId, "c-fast");
+    assert.equal(state.affirmations.length, 3);
+    assert.equal(journalReads(w).filter((r) => query(r).get("id") === "eq.c-fast").length, 0, "the server is never asked for the client id");
+    handle.unmount();
+
+    // A heavy moment finishing on this screen is met as calmly as any reflection: no tap (Crisis Safety Rules).
+    w.hapticsCalls.length = 0;
+    let release;
+    w.server.state.functions["process-entry"].push(
+      () =>
+        new Promise((resolve) => {
+          release = () => {
+            const made = crisisResult(text("c-heavy"));
+            w.server.state.entries.push(made.row);
+            w.server.state.affirmations.push(...made.affirmations);
+            resolve(json(200, made.response));
+          };
+        }),
+    );
+    await w.use("@/db/outbox").enqueue(text("c-heavy"));
+    engine.syncNow("submit");
+    const heavy = await render(w, "c-heavy");
+    await until(heavy, (s) => s.status === "ready" && s.entry.isLocalOnly === true, "the heavy moment on its way");
+    release();
+    const shown = await until(heavy, (s) => s.status === "ready" && s.entry.status === "ready" && s.entry.isCrisis, "the heavy moment");
+    assert.equal(shown.entry.isLocalOnly, false);
+    assert.deepEqual(w.hapticsCalls, [], "no tap for a heavy moment");
+    heavy.unmount();
+  });
+
+  await test("reflection: a refusal after the handoff is shown as the refused item with its reason, and the free limit as the held item with the entry the server saved", async (w) => {
+    seedServer(w, 1);
+    await w.startEngine();
+    const engine = w.use("@/services/syncEngine");
+    let refuse;
+    w.server.state.functions["process-entry"].push(() => new Promise((resolve) => (refuse = () => resolve(fnError(422, "TOO_SHORT")))));
+    await w.use("@/db/outbox").enqueue(text("c-short"));
+    engine.syncNow("submit");
+    const short = await render(w, "c-short");
+    await until(short, (s) => s.status === "ready" && s.entry.isLocalOnly === true, "the item on its way");
+    refuse();
+    const refused = await until(short, (s) => s.status === "ready" && s.entry.pending?.status === "needs_action", "the refusal");
+    assert.equal(refused.entry.status, "failed", "a refused item reads as failed, with its reason");
+    assert.equal(refused.entry.pending?.lastErrorCode, "TOO_SHORT");
+    assert.equal(refused.entry.isLocalOnly, true, "the words stay on the phone, with Review on Journal");
+    assert.deepEqual(w.hapticsCalls, [], "no tap for a refusal");
+    short.unmount();
+
+    let hold;
+    const resetsAt = new Date(BASE + 3 * 86_400_000).toISOString();
+    w.server.state.functions["process-entry"].push(
+      () => new Promise((resolve) => (hold = () => resolve(json(402, limitBody("00000000-0000-4000-8000-000000000402", resetsAt))))),
+    );
+    await w.use("@/db/outbox").enqueue(text("c-held"));
+    engine.syncNow("submit");
+    const held = await render(w, "c-held");
+    await until(held, (s) => s.status === "ready" && s.entry.isLocalOnly === true, "the item on its way");
+    hold();
+    const limited = await until(held, (s) => s.status === "ready" && s.entry.pending?.status === "limit_reached", "the held item");
+    assert.equal(limited.entry.pending?.serverEntryId, "00000000-0000-4000-8000-000000000402", "the entry the server saved, for the Paywall");
+    assert.equal(limited.entry.pending?.resetsAt, resetsAt);
+    assert.deepEqual(w.hapticsCalls, []);
+    held.unmount();
+  });
+
+  await test("reflection: the screens' source: New Entry's handoff opens Reflection by the client id, Reflection shows a refusal and opens the Paywall for the free limit, and Journal's card draws no progress bar", async () => {
+    const read = (file) => fs.readFileSync(path.join(REPO, file), "utf8").replace(/\r\n/g, "\n");
+    const has = (haystack, needle, message) => assert.ok(haystack.includes(needle), `${message}: ${needle}`);
+    const lacks = (haystack, needle, message) => assert.ok(!haystack.includes(needle), `${message}: ${needle}`);
+    const newEntry = read("src/screens/journal/NewEntryScreen.tsx");
+    const laterAt = newEntry.indexOf('case "later":');
+    const later = newEntry.slice(laterAt, newEntry.indexOf("break;", laterAt));
+    has(later, "leaving.current = true;", "the deliberate exit passes the leave guard");
+    has(later, 'navigation.replace("Reflection", { entryId: item.clientEntryId });', "Reflection opens by the client id");
+    lacks(later, "leaveToJournal", "no handoff to Journal any more");
+    const screen = read("src/screens/journal/ReflectionScreen.tsx");
+    has(screen, 'state.entry.pending?.status === "needs_action"', "a refusal has its own branch");
+    has(screen, "<ReflectionRefused reason={copy.problems.reason(state.entry.pending.lastErrorCode)} onReturn={returnToJournal} />", "the refused view with its reason");
+    has(screen, 'navigation.replace("Paywall", { source: "limit", entryId: held.pending?.serverEntryId ?? held.id });', "the free limit opens the Paywall with the entry the server saved");
+    const card = read("src/components/JournalCard.tsx");
+    for (const gone of ["PreparingProgress", "progressFill", "ProcessingStage", "stage="]) lacks(card, gone, "no progress bar and no stage on the Journal card");
+    const home = read("src/hooks/useJournalHome.ts");
+    for (const gone of ["stages", "ProcessingStage"]) lacks(home, gone, "Journal keeps no stages");
+    const copyText = read("src/constants/copy.ts");
+    lacks(copyText, "Reflecting on what you shared…", "the stage lines are gone");
+    has(copyText, 'body: "It’s in your Journal, where Review shows what you can do.",', "the refused view's words");
+    has(copyText, 'body: "It’ll appear here as soon as it’s ready.",', "the preparing view no longer sends the person to Journal");
+    has(copyText, 'note: "Your reflection is saved. It’ll open in a moment.",', "the overlay's note");
+    has(copyText, 'sent: "Sent. Preparing your devotional, which opens in a moment.",', "the overlay's last announcement");
+    for (const file of ["src/screens/journal/ReflectionStateViews.tsx", "src/hooks/useReflection.ts"]) {
+      const source = read(file);
+      lacks(source, "console.", `${file} logs nothing`);
+      for (const tap of ["haptics.selection", "haptics.light", "haptics.medium"]) lacks(source, tap, `${file} taps only success`);
+    }
   });
 
   await test("reflection: a passage kept as a reference is asked for again once, shown when verified, cached, and not asked again within a minute", async (w) => {
@@ -2003,6 +2325,23 @@ async function selectorChecks() {
     assert.deepEqual(selectors.mergeEntries([tieA], [tieB]).map((e) => e.id), ["id-b", "id-a"]);
     assert.deepEqual(selectors.mergeEntries([tieB], [tieA]).map((e) => e.id), ["id-b", "id-a"], "the same whichever came first");
     assert.deepEqual(selectors.mergeEntries([], []), []);
+  }, { signIn: false });
+
+  // 2026-11-09: isAudioPending is the one rule the Journal card, the Reflection player card and the Reflection hook share.
+  await test("selectors: a finished reflection with no audio, no TTS_FAILED and a change within two minutes has its audio pending; anything else does not", async (w) => {
+    const selectors = w.use("@/data/selectors");
+    const { AUDIO_PENDING_MS } = w.use("@/constants/app");
+    const now = clock.now;
+    const entry = (extra = {}) => modelOf(w, 1, { updated_at: ISO(now - 1_000), ...extra });
+    assert.equal(selectors.isAudioPending(entry(), now), true);
+    assert.equal(selectors.isAudioPending(entry({ updated_at: ISO(now - AUDIO_PENDING_MS + 1) }), now), true, "inside the window");
+    assert.equal(selectors.isAudioPending(entry({ updated_at: ISO(now - AUDIO_PENDING_MS) }), now), false, "the window has passed");
+    assert.equal(selectors.isAudioPending(entry({ updated_at: ISO(now + 30_000) }), now), true, "a clock a little behind the server's");
+    assert.equal(selectors.isAudioPending(entry({ error_code: "TTS_FAILED" }), now), false, "the speech step failed");
+    assert.equal(selectors.isAudioPending(entry({ devotional_audio_path: "user_a/devotionals/1.wav", devotional_duration_ms: 90_000 }), now), false, "it has its audio");
+    assert.equal(selectors.isAudioPending(entry({ processing_status: "processing", devotional_script: null, devotional_title: null, closing_prayer: null }), now), false, "not finished");
+    assert.equal(selectors.isAudioPending(entry({ is_crisis: true, dominant_emotion: null, scripture_reference: null, scripture_text: null, scripture_verified: false, devotional_title: null, devotional_script: null, closing_prayer: null }), now), false, "no devotional");
+    assert.equal(selectors.isAudioPending(entry({ is_crisis: true }), now), true, "a heavy moment's audio is made like any other's");
   }, { signIn: false });
 
   await test("selectors: the newest finished reflection, a heavy moment's included; one with no devotional is passed over; or none", async (w) => {

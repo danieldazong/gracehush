@@ -1,4 +1,4 @@
-import { STALE_PROCESSING_MS } from "@/constants/app";
+import { AUDIO_PENDING_MS, STALE_PROCESSING_MS } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import type {
   Affirmation,
@@ -185,6 +185,18 @@ export function getPlaybackTrack(entry: JournalEntry): PlaybackTrack | null {
     durationMs,
     audioPath,
   };
+}
+
+// A finished reflection whose spoken devotional is still being made (2026-11-09): the server answers as soon as the text is
+// saved and reads it aloud behind the answer, so for a while a ready entry has no audio and no failure mark. The window is
+// AUDIO_PENDING_MS from the entry's last change; after it (speech off on that project, or a speech that was lost) the entry
+// counts as having no audio, and a speech that failed says so at once (TTS_FAILED). The Journal card and the mini player read it.
+export function isAudioPending(entry: JournalEntry, nowMs: number): boolean {
+  const { devotional } = entry;
+  if (entry.status !== "ready" || devotional === null || devotional.audioPath !== null) return false;
+  if (entry.failureCode === "TTS_FAILED") return false;
+  const updated = Date.parse(entry.updatedAt);
+  return Number.isFinite(updated) && nowMs - updated < AUDIO_PENDING_MS;
 }
 
 export function getGreeting(now: Date): TimeSlot {
