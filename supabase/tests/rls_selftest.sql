@@ -18,6 +18,10 @@
 --
 -- 2026-11-08 (step 37, supabase/migrations/20261108130000_affirmation_verses.sql): checks 68 and 69 prove an affirmation's verse
 -- columns. Run it after that migration.
+--
+-- 2026-11-09 (more affirmations, supabase/migrations/20261109120000_more_affirmations.sql): check 29 also proves that an
+-- affirmation without a slot is accepted, and checks 70 to 73 prove the position column, the slot move and who may call it. Run it
+-- after that migration.
 
 drop table if exists pg_temp.rls_results;
 create temp table rls_results (position integer, check_name text, passed boolean);
@@ -402,10 +406,14 @@ begin
       $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text)
          values ('selftest_b', 'a0000000-0000-4000-8000-000000000001', 'evening', 'h', 't')$q$) = '23503');
 
-  insert into rls_results values (29, 'an entry has one affirmation per slot',
+  -- 2026-11-09: one affirmation per slot, and any number (up to ten, check 70) without a slot.
+  insert into rls_results values (29, 'an entry has one affirmation per slot, and more affirmations without a slot',
     pg_temp.try_as('service_role', no_claims, null,
       $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text)
-         values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', 'morning', 'h', 't')$q$) = '23505');
+         values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', 'morning', 'h', 't')$q$) = '23505'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text)
+         values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', null, 'h', 't')$q$) = 'ok:1');
 
   insert into rls_results values (30, 'an unknown time slot is refused',
     pg_temp.try_as('service_role', no_claims, null,
@@ -923,6 +931,91 @@ begin
                      where table_schema = 'public' and table_name = 'daily_affirmations'
                        and column_name in ('verse_reference', 'verse_text')
                        and grantee in ('authenticated', 'anon') and privilege_type in ('INSERT', 'UPDATE')));
+
+  -- ===== more affirmations (2026-11-09) =====
+  -- The order of the cards: 1 to 10, unique in its entry, filled in by the trigger when the server gives none (the fixture above
+  -- took 1 that way, and a multi-row insert takes the next numbers in order).
+  insert into rls_results values (70, 'an affirmation has a position from 1 to 10, unique in its entry, filled in when none is given',
+    exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'daily_affirmations' and column_name = 'position'
+               and is_nullable = 'NO')
+    and (select position from public.daily_affirmations where id = 'a0000000-0000-4000-8000-0000000000f1') = 1
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text, position)
+         values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', null, 'h', 't', 0)$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text, position)
+         values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', null, 'h', 't', 11)$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text, position)
+         values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', null, 'h', 't', 1)$q$) = '23505'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$do $d$
+         declare p integer;
+         begin
+           insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text)
+             values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', null, 'h', 't'),
+                    ('selftest_a', 'a0000000-0000-4000-8000-000000000001', null, 'h', 't');
+           select max(position) into p from public.daily_affirmations
+            where entry_id = 'a0000000-0000-4000-8000-000000000001';
+           if p <> 3 then
+             raise exception 'positions were not filled in order: %', p using errcode = 'P0002';
+           end if;
+         end $d$ $q$) = 'ok:0');
+
+  -- The server moves a lock-screen slot to another affirmation of the same entry in one step: the holder loses it, the other
+  -- takes it, a slot that does not exist is refused, and an affirmation of another entry moves nothing (the holder keeps its slot).
+  insert into rls_results values (71, 'the server moves a slot to another affirmation of the same entry in one step',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$do $d$
+         declare new_id uuid;
+         begin
+           insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text)
+             values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', null, 'h2', 't2') returning id into new_id;
+           perform public.feature_affirmation('a0000000-0000-4000-8000-000000000001', new_id, 'morning');
+           if (select time_slot from public.daily_affirmations where id = 'a0000000-0000-4000-8000-0000000000f1') is not null
+              or (select time_slot from public.daily_affirmations where id = new_id) is distinct from 'morning' then
+             raise exception 'the slot did not move' using errcode = 'P0002';
+           end if;
+         end $d$ $q$) = 'ok:0'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.feature_affirmation('a0000000-0000-4000-8000-000000000001',
+                                           'a0000000-0000-4000-8000-0000000000f1', 'night')$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.feature_affirmation('a0000000-0000-4000-8000-000000000001',
+                                           'b0000000-0000-4000-8000-0000000000f1', 'morning')$q$) = 'P0002');
+
+  -- The app and visitors can neither move a slot nor add, reorder or unslot an affirmation: only the server does.
+  insert into rls_results values (72, 'the app and visitors can neither move a slot nor add an affirmation',
+    pg_temp.try_as('authenticated', claims_a, null,
+      $q$select public.feature_affirmation('a0000000-0000-4000-8000-000000000001',
+                                           'a0000000-0000-4000-8000-0000000000f1', 'evening')$q$) = '42501'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$select public.feature_affirmation('a0000000-0000-4000-8000-000000000001',
+                                           'a0000000-0000-4000-8000-0000000000f1', 'evening')$q$) = '42501'
+    and not has_function_privilege('authenticated', 'public.feature_affirmation(uuid, uuid, text)', 'execute')
+    and not has_function_privilege('anon', 'public.feature_affirmation(uuid, uuid, text)', 'execute')
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into public.daily_affirmations (user_id, entry_id, time_slot, headline, affirmation_text)
+         values ('selftest_a', 'a0000000-0000-4000-8000-000000000001', null, 'h', 't')$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.daily_affirmations set position = 5
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.daily_affirmations set time_slot = null
+         where id = 'a0000000-0000-4000-8000-0000000000f1'$q$) = '42501');
+
+  -- What the migration made, as it made it: the slot index is partial (two affirmations without a slot are not a clash), the
+  -- position trigger and both functions exist, and the slot column is optional.
+  insert into rls_results values (73, 'one affirmation per slot is kept by a partial index, and a position is filled by a trigger',
+    exists (select 1 from pg_index i join pg_class c on c.oid = i.indexrelid
+             where c.relname = 'daily_affirmations_entry_slot_key' and i.indisunique and i.indpred is not null)
+    and exists (select 1 from pg_trigger t
+                 where t.tgrelid = 'public.daily_affirmations'::regclass and t.tgname = 'daily_affirmations_position')
+    and to_regprocedure('public.set_affirmation_position()') is not null
+    and to_regprocedure('public.feature_affirmation(uuid, uuid, text)') is not null
+    and (select is_nullable from information_schema.columns
+          where table_schema = 'public' and table_name = 'daily_affirmations' and column_name = 'time_slot') = 'YES');
 
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
   delete from public.users_profile where id like 'selftest\_%';

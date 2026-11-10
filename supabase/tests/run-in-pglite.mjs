@@ -41,6 +41,7 @@ const REALTIME = migrations.find((name) => name.includes("realtime_broadcast"));
 const VALIDATION = migrations.find((name) => name.includes("validation_line"));
 const HEAVY = migrations.find((name) => name.includes("heavy_moments"));
 const VERSES = migrations.find((name) => name.includes("affirmation_verses"));
+const MORE = migrations.find((name) => name.includes("more_affirmations"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -266,7 +267,9 @@ if (process.argv.includes("--negative")) {
     ["a delete policy for the app on storage (masked by the hosted guard)", "off", (sql) => sql + "\ncreate policy journal_media_delete_own on storage.objects for delete to authenticated using (bucket_id = 'journal_media' and (storage.foldername(name))[1] = (select public.requesting_user_id()));", [41]],
     ["the app may insert entries", "off", (sql) => sql + "\ngrant insert on public.journal_entries to authenticated;\ncreate policy journal_entries_insert_any on public.journal_entries for insert to authenticated with check (true);", [13]],
     ["the bucket is public", "off", (sql) => sql.replace("values ('journal_media', 'journal_media', false,", "values ('journal_media', 'journal_media', true,").replace("      public = false,", "      public = true,"), [36]],
-    ["no unique (entry_id, time_slot)", "off", dropLine(/constraint daily_affirmations_entry_slot_key unique \(entry_id, time_slot\),/), [29]],
+    // 2026-11-09: the eleventh migration drops the v1 constraint and makes a partial unique index in its place, so the break is now
+    // that index missing (the v1 constraint stripped alone would be repaired by it).
+    ["no unique (entry_id, time_slot) once the slot is nullable", "off", (sql) => sql.replace(/create unique index if not exists daily_affirmations_entry_slot_key\s+on public\.daily_affirmations \(entry_id, time_slot\)\s+where time_slot is not null;/, ""), [29, 73], MORE],
     ["no composite owner key on affirmations", "off", (sql) => sql.replace(/constraint daily_affirmations_entry_user_fkey foreign key \(entry_id, user_id\)\s*references public\.journal_entries \(id, user_id\) on delete cascade/, "constraint daily_affirmations_entry_fkey foreign key (entry_id) references public.journal_entries (id) on delete cascade"), [28]],
     ["the app may change the plan again", "off", (sql) => sql + "\ngrant update (subscription_tier) on public.users_profile to authenticated;", [3, 35]],
     ["no rule that an answered prayer has its date", "off", (sql) => sql.replace("answered_fields_match check (is_answered = (answered_at is not null))", "answered_fields_match check (true)"), [43]],
@@ -323,6 +326,13 @@ if (process.argv.includes("--negative")) {
     ["a verse with no reference, or a reference with no words", "off", dropLine(/alter table public\.daily_affirmations add constraint affirmation_verse_pair\s+check \(\(verse_reference is null\) = \(verse_text is null\)\);/), [68], VERSES],
     ["a verse of any length", "off", (sql) => sql.replace("char_length(verse_text) between 1 and 200", "true").replace("char_length(verse_reference) between 1 and 60", "true"), [68], VERSES],
     ["the app may write an affirmation's verse", "off", (sql) => sql + "\ngrant update (verse_reference, verse_text) on public.daily_affirmations to authenticated;", [69], VERSES],
+    // More affirmations (2026-11-09, its own migration). Without the trigger the fixtures (no position, a not-null column) cannot be
+    // made and the self-test itself raises, which the runner counts as caught.
+    ["no trigger fills a missing position", "off", (sql) => sql.replace(/create trigger daily_affirmations_position\s+before insert on public\.daily_affirmations\s+for each row execute function public\.set_affirmation_position\(\);/, ""), [29, 31, 67, 70], MORE],
+    ["a position of any number", "off", (sql) => sql.replace("check (position between 1 and 10)", "check (position is not null)"), [70], MORE],
+    ["two affirmations may share a position", "off", dropLine(/alter table public\.daily_affirmations add constraint daily_affirmations_entry_position_key unique \(entry_id, position\);/), [70], MORE],
+    ["the slot column stays required (no affirmation without a slot)", "off", dropLine("alter table public.daily_affirmations alter column time_slot drop not null;"), [29, 70, 71], MORE],
+    ["the app may move a slot", "off", (sql) => sql + "\ngrant execute on function public.feature_affirmation(uuid, uuid, text) to authenticated;", [72], MORE],
     // Not a broken migration: the hosted project before the day's first Realtime connection. Nothing may fail, the checks that need
     // a message table say skipped, and a change is still saved (59).
     ["no message table today (nobody has connected yet)", "off", null, { skipped: [60, 61, 62], passed: [59, 63, 64] }, REALTIME, { stub: NO_MESSAGE_TABLE_TODAY }],

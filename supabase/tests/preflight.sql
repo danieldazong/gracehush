@@ -108,6 +108,22 @@ from (
                                    from pg_constraint c
                                    where c.conrelid = to_regclass('public.daily_affirmations')
                                      and c.conname in ('affirmation_verse_pair', 'affirmation_verse_length')), ''), 'none')
+        end),
+    (19, 'more affirmations (2026-11-09)',
+        case
+          when not exists (select 1 from information_schema.columns
+                            where table_schema = 'public' and table_name = 'daily_affirmations'
+                              and column_name = 'position') then 'absent'
+          else 'exists; time_slot '
+               || case (select is_nullable from information_schema.columns
+                         where table_schema = 'public' and table_name = 'daily_affirmations' and column_name = 'time_slot')
+                    when 'YES' then 'optional' else 'REQUIRED' end
+               || '; trigger: '
+               || case when exists (select 1 from pg_trigger t
+                                    where t.tgname = 'daily_affirmations_position'
+                                      and t.tgrelid = to_regclass('public.daily_affirmations')::oid) then 'exists' else 'absent' end
+               || '; feature_affirmation: '
+               || case when to_regprocedure('public.feature_affirmation(uuid, uuid, text)') is null then 'absent' else 'exists' end
         end)
 ) as checks (position, item, found)
 order by position;
