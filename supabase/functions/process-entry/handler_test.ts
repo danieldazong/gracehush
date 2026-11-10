@@ -120,6 +120,11 @@ function assertError(json: ProcessEntryError, code: string) {
 }
 
 const lastLog = (world: World) => JSON.parse(world.logs.at(-1)!);
+// Every log line, parsed; the request's own line and the speech stage's (2026-11-09: speech runs behind the answer and writes a
+// line of its own, with the reason "speech", once it is done).
+const logLines = (world: World) => world.logs.map((line) => JSON.parse(line));
+const requestLine = (world: World) => logLines(world).filter((line) => line.reason !== "speech").at(-1);
+const speechLine = (world: World) => logLines(world).filter((line) => line.reason === "speech").at(-1);
 
 // A heavy moment (gen-v2.4), in the response and in the database: a whole reflection with the flag, a passage and three
 // affirmations, and never a prayer made by the server. `fallback`: the written one (heavy.ts), with Isaiah 41:10.
@@ -1306,13 +1311,15 @@ Deno.test(
     const [row] = world.entries;
     const path = `${USER}/devotionals/${row.id}.wav`;
 
-    // The entry: ready, with the path and the measured length of the file, and nothing marked as failed.
+    // The answer goes out as soon as the reflection is saved (2026-11-09): ready, as text, with no audio yet and nothing
+    // failed, and its log line says the speech runs behind it.
     assertEquals(entry.status, "ready");
-    assertEquals([entry.devotional?.audioPath, entry.devotional?.durationMs, entry.failureCode], [
-      path,
-      FIXTURE_WAV_MS,
-      null,
-    ]);
+    assertEquals([entry.devotional?.audioPath, entry.devotional?.durationMs, entry.failureCode], [null, null, null]);
+    const sent = requestLine(world);
+    assertEquals([sent.tts, sent.ttsMs, sent.ttsAttempts, sent.ttsChars, sent.audioMs], ["background", 0, 0, 0, null]);
+    await world.settleBackground();
+
+    // The row: the path and the measured length of the file, and nothing marked as failed.
     assertEquals(
       [row.processing_status, row.devotional_audio_path, row.devotional_duration_ms, row.error_code],
       ["ready", path, FIXTURE_WAV_MS, null],
@@ -1339,9 +1346,9 @@ Deno.test(
     assert(script.markup.includes("A reading from Philippians chapter 4, verses 6 through 7."));
     assert(script.markup.includes("Be anxious for nothing"), "the Bible's own words are read");
     assert(script.markup.endsWith("Amen."));
-    const sent = call.json as { voice: unknown; audioConfig: unknown };
-    assertEquals(sent.voice, { languageCode: "en-US", name: SPEECH_VOICE });
-    assertEquals(sent.audioConfig, { audioEncoding: "LINEAR16", speakingRate: DEFAULT_SPEAKING_RATE });
+    const asked = call.json as { voice: unknown; audioConfig: unknown };
+    assertEquals(asked.voice, { languageCode: "en-US", name: SPEECH_VOICE });
+    assertEquals(asked.audioConfig, { audioEncoding: "LINEAR16", speakingRate: DEFAULT_SPEAKING_RATE });
     assertEquals(call.headers.get("authorization"), "Bearer ya29.test-1");
     assert(!call.url.search.includes("key"), "no API key anywhere: Text-to-Speech does not take one");
 
@@ -1349,10 +1356,20 @@ Deno.test(
     assert(!JSON.stringify(body).includes("http"), "no URL in the response");
     assert(!JSON.stringify(body).includes("token"));
 
-    const line = lastLog(world);
-    assertEquals(line.tts, "ok");
+    // The speech stage's own line: the same request, the reason "speech", the stage's word and numbers, nothing else.
+    const line = speechLine(world);
+    assertEquals([line.requestId, line.status, line.code, line.tts], [sent.requestId, 200, null, "ok"]);
     assertEquals([line.ttsAttempts, line.ttsChars, line.audioMs], [1, script.chars, FIXTURE_WAV_MS]);
     assert(Number.isInteger(line.ttsMs) && line.ttsMs >= 0);
+    assert(Number.isInteger(line.totalMs) && line.totalMs >= line.ttsMs, "the time since the request began");
+    assertEquals([line.inputType, line.user, line.screen, line.attempts, line.limit], [
+      "text",
+      sent.user,
+      null,
+      0,
+      null,
+    ]);
+    assertEquals(Object.keys(line).length, 43);
     assertEquals(unscopedRequests(world, USER), []);
   }),
 );
@@ -1364,12 +1381,14 @@ Deno.test(
     const { entry } = await ok(await post(world, handle, textBody()));
     assertEquals(entry.scripture?.verified, false);
     assertEquals(entry.scripture?.text, null);
-    assert(entry.devotional?.audioPath !== null, "the devotional and the prayer are still read");
+    assertEquals(requestLine(world).scripture, "unverified");
+    await world.settleBackground();
+    assert(world.entries[0].devotional_audio_path !== null, "the devotional and the prayer are still read");
     const markup = spokenMarkup(world.ttsCalls[0]);
     assert(!markup.includes("A reading from"));
     assert(!markup.includes("Be anxious"));
     assert(markup.includes("Let's pray."));
-    assertEquals(lastLog(world).scripture, "unverified");
+    assertEquals(speechLine(world).tts, "ok");
   }),
 );
 
@@ -1382,10 +1401,12 @@ Deno.test(
     const failed = await ok(first);
     assertEquals(failed.entry.status, "ready");
     assertEquals([failed.entry.devotional?.audioPath, failed.entry.devotional?.durationMs], [null, null]);
-    assertEquals(failed.entry.failureCode, "TTS_FAILED");
+    // The answer went out before Google refused: the failure is marked on the row behind it, never on the answer.
+    assertEquals(failed.entry.failureCode, null);
+    await world.settleBackground();
     assertEquals([world.entries[0].processing_status, world.entries[0].error_code], ["ready", "TTS_FAILED"]);
     assertEquals(world.uploads.length, 0);
-    const line = lastLog(world);
+    const line = speechLine(world);
     assertEquals(line.tts, "failed:tts_http_403:PERMISSION_DENIED/SERVICE_DISABLED");
     assertEquals(
       [line.ttsAttempts, line.ttsChars, line.audioMs],
@@ -1394,18 +1415,22 @@ Deno.test(
     );
     const calls = [world.screenCalls.length, world.geminiCalls.length];
 
-    // Google is fixed: the same request finds a finished reflection with no audio and adds the audio, and only that.
+    // Google is fixed: the same request finds a finished reflection with no audio and adds the audio behind its answer, and
+    // only that. The answer is the row as it stood, still marked, and the mark goes once the audio is stored.
     const retry = await post(world, handle, textBody());
     assertEquals(retry.status, 200);
     const done = await ok(retry);
     assertEquals(done.entry.id, failed.entry.id);
     assertEquals(done.entry.devotional?.script, failed.entry.devotional?.script, "the same devotional");
-    assertEquals(done.entry.devotional?.audioPath, `${USER}/devotionals/${done.entry.id}.wav`);
-    assertEquals([done.entry.failureCode, world.entries[0].error_code], [null, null], "TTS_FAILED is cleared");
+    assertEquals([done.entry.devotional?.audioPath, done.entry.failureCode], [null, "TTS_FAILED"]);
+    const retryLine = requestLine(world);
+    assertEquals([retryLine.tts, retryLine.screen, retryLine.attempts, retryLine.limit], ["background", null, 0, null]);
+    await world.settleBackground();
+    assertEquals(world.entries[0].devotional_audio_path, `${USER}/devotionals/${done.entry.id}.wav`);
+    assertEquals(world.entries[0].error_code, null, "TTS_FAILED is cleared");
     assertEquals([world.screenCalls.length, world.geminiCalls.length], calls, "no screening call and no Gemini call");
     assertEquals([world.entries.length, world.affirmations.length], [1, 3]);
-    const retryLine = lastLog(world);
-    assertEquals([retryLine.tts, retryLine.screen, retryLine.attempts, retryLine.limit], ["ok", null, 0, null]);
+    assertEquals(speechLine(world).tts, "ok");
   }),
 );
 
@@ -1419,17 +1444,20 @@ Deno.test(
     });
     const refused = await ok(await post(world, handle, textBody()));
     assertEquals(refused.entry.devotional?.audioPath, null);
-    assertEquals(refused.entry.failureCode, "TTS_FAILED");
-    assertEquals(lastLog(world).tts, "failed:tts_auth:invalid_grant");
+    await world.settleBackground();
+    assertEquals(world.entries[0].error_code, "TTS_FAILED");
+    assertEquals(speechLine(world).tts, "failed:tts_auth:invalid_grant");
     assertEquals(world.ttsCalls.length, 0, "no call was made without a token");
     assert(!world.logs.join("\n").includes("SECRET-WORDS"), "Google's own description is never kept");
 
     world.ttsQueue.push({ kind: "json", status: 503, body: { error: { code: 503, status: "UNAVAILABLE" } } });
     const busy = await ok(await post(world, handle, textBody({ clientEntryId: ID_2 })));
-    assert(busy.entry.devotional?.audioPath, "the second attempt worked");
-    const line = lastLog(world);
+    await world.settleBackground();
+    const second = world.entries.find((row) => row.id === busy.entry.id);
+    assert(second !== undefined && second.devotional_audio_path !== null, "the second attempt worked");
+    const line = speechLine(world);
     assertEquals([line.tts, line.ttsAttempts], ["ok", 2]);
-    assertEquals(busy.entry.failureCode, null);
+    assertEquals(second.error_code, null);
   }),
 );
 
@@ -1477,8 +1505,11 @@ Deno.test(
 
     speechTiming.latestStartMs = 100_000;
     const retry = await ok(await post(world, handle, textBody()));
-    assertEquals(retry.entry.devotional?.audioPath, `${USER}/devotionals/${entry.id}.wav`);
-    assertEquals(lastLog(world).tts, "ok");
+    assertEquals([retry.entry.id, retry.entry.devotional?.audioPath], [entry.id, null]);
+    assertEquals(requestLine(world).tts, "background");
+    await world.settleBackground();
+    assertEquals(world.entries[0].devotional_audio_path, `${USER}/devotionals/${entry.id}.wav`);
+    assertEquals(speechLine(world).tts, "ok");
     assertEquals(world.geminiCalls.length, 1);
   }),
 );
@@ -1493,10 +1524,11 @@ Deno.test(
     assertEquals([first.entry.status, first.entry.devotional?.audioPath, first.entry.failureCode], [
       "ready",
       null,
-      "TTS_FAILED",
+      null,
     ]);
+    await world.settleBackground();
     assertEquals(world.entries[0].error_code, "TTS_FAILED");
-    const line = lastLog(world);
+    const line = speechLine(world);
     assertEquals([line.tts, line.ttsAttempts, line.ttsChars], ["failed:storage", 1, 0]);
     assertEquals(world.ttsCalls.length, 1, "Google had made the file; the upload is what failed");
     mend();
@@ -1505,26 +1537,26 @@ Deno.test(
     speechTiming.uploadTimeoutMs = 40;
     const stop = breakUploads("hang");
     const second = await ok(await post(world, handle, textBody({ clientEntryId: ID_2 })));
-    assertEquals([second.entry.status, second.entry.devotional?.audioPath, second.entry.failureCode], [
-      "ready",
-      null,
-      "TTS_FAILED",
-    ]);
-    assertEquals(lastLog(world).tts, "failed:storage");
+    assertEquals([second.entry.status, second.entry.devotional?.audioPath], ["ready", null]);
+    await world.settleBackground();
+    assertEquals(world.entries[1].error_code, "TTS_FAILED");
+    assertEquals(speechLine(world).tts, "failed:storage");
     stop();
 
-    // Storage is back: the same request adds the audio to each, and clears the mark.
+    // Storage is back: the same request adds the audio to each behind its answer, and clears the mark.
     for (const clientEntryId of [ENTRY_ID, ID_2]) {
       const retry = await ok(await post(world, handle, textBody({ clientEntryId })));
-      assert(retry.entry.devotional?.audioPath, "audio added");
-      assertEquals(retry.entry.failureCode, null);
+      assertEquals(retry.entry.devotional?.audioPath, null, "the answer does not wait for the audio");
+      assertEquals(requestLine(world).tts, "background");
+      await world.settleBackground();
+      assertEquals(speechLine(world).tts, "ok");
     }
     assert(world.entries.every((row) => row.error_code === null && row.devotional_audio_path !== null));
   }),
 );
 
 Deno.test(
-  "speech h) two requests asking for audio on one entry at once: one wins the row, both answer with the audio, one file",
+  "speech h) two requests asking for audio on one entry at once: both answer at once, one wins the row, one file",
   speechFlow([], async (world) => {
     // A finished reflection with no audio: what a request leaves when speech was off or failed.
     seedDevotional(world, USER, { client_entry_id: ENTRY_ID });
@@ -1535,8 +1567,11 @@ Deno.test(
     const [a, b] = await Promise.all(results.map(ok));
     const [row] = world.entries;
     const path = `${USER}/devotionals/${row.id}.wav`;
-    assertEquals([a.entry.devotional?.audioPath, b.entry.devotional?.audioPath], [path, path]);
-    assertEquals([a.entry.devotional?.durationMs, b.entry.devotional?.durationMs], [FIXTURE_WAV_MS, FIXTURE_WAV_MS]);
+    // Both answer with the row as it stood; the audio is made behind both answers.
+    assertEquals([a.entry.id, b.entry.id], [row.id, row.id]);
+    assertEquals([a.entry.devotional?.audioPath, b.entry.devotional?.audioPath], [null, null]);
+    await world.settleBackground();
+    assertEquals([row.devotional_audio_path, row.devotional_duration_ms], [path, FIXTURE_WAV_MS]);
     assertEquals(world.entries.length, 1);
     assertEquals(world.uploads.length, 2, "both made and uploaded the file: the second replaced the first");
     assertEquals([...world.storage.keys()].filter((key) => key.includes("/devotionals/")), [path]);
@@ -1560,7 +1595,16 @@ Deno.test(
     assertEquals(response.status, 200);
     const body = await ok(response);
     assertHeavy(world, body, PHRASE_TEXT);
-    assert(body.entry.devotional?.audioPath, "its audio is stored");
+    assertEquals(body.entry.devotional?.audioPath, null, "the answer does not wait for the audio");
+    const heavyLine = requestLine(world);
+    assertEquals([heavyLine.tts, heavyLine.limit, heavyLine.limitUsed, heavyLine.screen], [
+      "background",
+      null,
+      null,
+      "crisis",
+    ]);
+    await world.settleBackground();
+    assert(world.entries[0].devotional_audio_path, "its audio is stored");
     assertEquals([world.ttsCalls.length, world.uploads.length], [1, 1]);
     assert(
       !world.requests.some((request) => request.url.searchParams.get("is_crisis") === "eq.false"),
@@ -1570,8 +1614,7 @@ Deno.test(
       !world.requests.some((request) => request.method === "GET" && request.url.pathname.endsWith("/users_profile")),
       "the plan was not read",
     );
-    const line = lastLog(world);
-    assertEquals([line.tts, line.limit, line.limitUsed, line.screen], ["ok", null, null, "crisis"]);
+    assertEquals(speechLine(world).tts, "ok");
 
     const again = await post(world, handle, textBody({ text: PHRASE_TEXT }));
     assertEquals(again.status, 200);
@@ -1825,11 +1868,21 @@ Deno.test(
     const response = await post(world, handle, textBody({ text: `${TEXT} SECRET-MARKER` }), { token });
     assertEquals(response.status, 200);
     const { entry } = await ok(response);
-    assertEquals(world.logs.length, 1);
+    assertEquals(world.logs.length, 1, "the answer's line, before the speech behind it has written its own");
     const line = JSON.parse(world.logs[0]);
     assertEquals(Object.keys(line).length, 43);
-    assertEquals([line.tts, line.limit, line.limitUsed], ["ok", "free_ok", 0]);
+    assertEquals([line.tts, line.limit, line.limitUsed], ["background", "free_ok", 0]);
     assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
+    await world.settleBackground();
+    assertEquals(world.logs.length, 2, "the speech stage's own line, once it is done");
+    const spoken = JSON.parse(world.logs[1]);
+    assertEquals([spoken.requestId, spoken.reason, spoken.tts, spoken.user], [
+      line.requestId,
+      "speech",
+      "ok",
+      line.user,
+    ]);
+    assertEquals(Object.keys(spoken).length, 43);
 
     // And a call that Google refuses puts only its short words in the line, never its message.
     world.geminiQueue.push(geminiOk(readyOutput()));
@@ -1839,7 +1892,8 @@ Deno.test(
       body: { error: { code: 403, status: "PERMISSION_DENIED", message: "SECRET-GOOGLE-MESSAGE project-1234" } },
     });
     await post(world, handle, textBody({ clientEntryId: ID_2 }), { token });
-    assertEquals(lastLog(world).tts, "failed:tts_http_403:PERMISSION_DENIED");
+    await world.settleBackground();
+    assertEquals(speechLine(world).tts, "failed:tts_http_403:PERMISSION_DENIED");
 
     const everything = world.logs.join("\n");
     for (
@@ -1864,7 +1918,7 @@ Deno.test(
         "journal_media",
         "devotionals",
         String(entry.id),
-        String(entry.devotional?.audioPath),
+        String(world.entries[0].devotional_audio_path),
         SPEECH_EMAIL,
         "gserviceaccount",
         "PRIVATE KEY",
@@ -1914,7 +1968,9 @@ Deno.test(
     assertError(await failure(response), "INTERNAL");
     assertEquals(lastLog(world).reason, "db:affirmations_read:XX000");
 
-    // The reflection and its audio were saved before the answer was built, and nothing flipped the entry to failed.
+    // The reflection was saved before the answer was built, and nothing flipped the entry to failed; its audio was made
+    // behind the failed answer all the same.
+    await world.settleBackground();
     const [row] = world.entries;
     assertEquals([row.processing_status, row.error_code], ["ready", null]);
     assert(row.devotional_script !== null && row.devotional_audio_path !== null);

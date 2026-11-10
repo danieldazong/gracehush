@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SpeechStatus } from "../_shared/log.ts";
 import type { TtsSetup } from "../_shared/tts/config.ts";
 import { wavDurationMs } from "../_shared/tts/wavDuration.ts";
-import { buildSpeechScript } from "../_shared/tts/script.ts";
+import { buildSpeechScript, type SpeechScript } from "../_shared/tts/script.ts";
 import { storeDevotionalAudio } from "../_shared/tts/storeAudio.ts";
 import { synthesize } from "../_shared/tts/synthesize.ts";
 import { speechTiming } from "./constants.ts";
@@ -11,7 +11,9 @@ import { type EntryRow, findEntry, markSpeechFailed, saveAudio } from "./lifecyc
 
 // The spoken devotional (step 22): the last, best-effort step of a request. It runs on a reflection that is already saved
 // as ready, so nothing here can lose or fail one, and it never throws: every outcome is an answer, and a failure leaves the
-// entry as it was (ready, as text) with a log word that says why.
+// entry as it was (ready, as text) with a log word that says why. Since 2026-11-09 the handler runs it behind the answer
+// (EdgeRuntime.waitUntil): the person has the reflection as soon as it is saved, and the audio lands on the row about fifteen
+// seconds later.
 //
 //   script (the saved devotional, the passage only when verified, the prayer) -> Google Text-to-Speech -> a WAV -> its length
 //   -> the private journal_media bucket -> the path and the length on the entry
@@ -78,24 +80,49 @@ async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-export async function speechStage(job: SpeechJob): Promise<SpeechOutcome> {
-  const { admin, userId, row, setup, startedAt, db } = job;
+// What the stage reads from a row: the devotional, the passage and the closing prayer.
+export type SpeechRow = Pick<
+  EntryRow,
+  "devotional_script" | "scripture_verified" | "scripture_reference" | "scripture_text" | "closing_prayer"
+>;
 
-  if (setup.state === "off") return untouched(row, "off");
-  if (setup.state === "bad") return untouched(row, `bad_config:${setup.name}`);
-  // Later than this in the request there is no time left to speak in. Sending the same request again adds the audio.
-  if (Date.now() - startedAt >= speechTiming.latestStartMs) return untouched(row, "skipped:time");
-
-  // The passage is read aloud only when it is verified, and then only with the Bible's own words from the row.
+// The row's speech script. The passage is read aloud only when it is verified, and then only with the Bible's own words from
+// the row. Null when there is nothing to read.
+function scriptFor(row: SpeechRow) {
   const scripture = row.scripture_verified && row.scripture_reference !== null && row.scripture_text !== null
     ? { reference: row.scripture_reference, text: row.scripture_text }
     : null;
-  const script = buildSpeechScript({
+  return buildSpeechScript({
     devotional: row.devotional_script ?? "",
     scripture,
     closingPrayer: row.closing_prayer,
   });
-  if (script === null) return untouched(row, "skipped:script");
+}
+
+// Whether the stage would read this row aloud now (with what it needs: the settings and the script), or the word that says
+// why not (the words speechStage itself answers). The handler asks before it answers: since 2026-11-09 speech runs behind the
+// answer, so the request's own log line has to say "off", "bad_config:<NAME>" or "skipped:<why>" itself, and "background"
+// when the stage runs.
+export type SpeechPlan =
+  | { kind: "skip"; tts: SpeechStatus }
+  | { kind: "speak"; setup: Extract<TtsSetup, { state: "ready" }>; script: SpeechScript };
+
+export function planSpeech(row: SpeechRow, setup: TtsSetup, startedAt: number): SpeechPlan {
+  if (setup.state === "off") return { kind: "skip", tts: "off" };
+  if (setup.state === "bad") return { kind: "skip", tts: `bad_config:${setup.name}` };
+  // Later than this in the request there is no time left to speak in. Sending the same request again adds the audio.
+  if (Date.now() - startedAt >= speechTiming.latestStartMs) return { kind: "skip", tts: "skipped:time" };
+  const script = scriptFor(row);
+  if (script === null) return { kind: "skip", tts: "skipped:script" };
+  return { kind: "speak", setup, script };
+}
+
+export async function speechStage(job: SpeechJob): Promise<SpeechOutcome> {
+  const { admin, userId, row, setup, startedAt, db } = job;
+
+  const plan = planSpeech(row, setup, startedAt);
+  if (plan.kind === "skip") return untouched(row, plan.tts);
+  const { script } = plan;
 
   const started = Date.now();
   let attempts = 0;
@@ -114,7 +141,7 @@ export async function speechStage(job: SpeechJob): Promise<SpeechOutcome> {
   }
 
   try {
-    const spoken = await synthesize(script.markup, setup.config, startedAt + speechTiming.deadlineMs);
+    const spoken = await synthesize(script.markup, plan.setup.config, startedAt + speechTiming.deadlineMs);
     attempts = spoken.attempts;
     if (!spoken.ok) return await failed(spoken.reason);
 

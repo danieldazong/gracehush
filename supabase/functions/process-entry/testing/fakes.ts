@@ -252,6 +252,10 @@ export type World = {
   // False makes deleting a profile leave its entries, affirmations and records behind: a cascade that did not happen.
   cascade: boolean;
   logs: string[];
+  // Work the handler hands to EdgeRuntime.waitUntil (the spoken devotional behind the answer, 2026-11-09): the fake runtime
+  // collects it here, and settleBackground() awaits it, so a test reads the row and the log once the stage is done.
+  background: Promise<unknown>[];
+  settleBackground(): Promise<void>;
   // The database's clock: every call gives a later time than the one before, to the millisecond, so that two rows never
   // share a created_at (the real database hands out a distinct time to each insert).
   now(): string;
@@ -902,6 +906,7 @@ export function installWorld(): World {
     Deno.env.delete(name);
   }
   const originalLog = console.log;
+  const originalRuntime = (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime;
   const savedBibleTiming = { ...bibleTiming };
   bibleTiming.retryDelayMs = 1;
   bibleTiming.requestTimeoutMs = 300;
@@ -967,6 +972,10 @@ export function installWorld(): World {
     appleRevoked: [],
     cascade: true,
     logs: [],
+    background: [],
+    async settleBackground() {
+      while (world.background.length > 0) await Promise.all(world.background.splice(0));
+    },
     now: isoNow,
     async token(claims = {}, options = {}) {
       const seconds = Math.floor(Date.now() / 1000);
@@ -1001,6 +1010,8 @@ export function installWorld(): World {
     restore() {
       globalThis.fetch = original;
       console.log = originalLog;
+      if (originalRuntime === undefined) delete (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime;
+      else (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime = originalRuntime;
       Object.assign(bibleTiming, savedBibleTiming);
       Object.assign(ttsTiming, savedTtsTiming);
       Object.assign(speechTiming, savedSpeechTiming);
@@ -1015,6 +1026,12 @@ export function installWorld(): World {
 
   console.log = (...args: unknown[]) => {
     world.logs.push(args.map(String).join(" "));
+  };
+  // Supabase's runtime, as the handler sees it: what it hands over is kept for settleBackground().
+  (globalThis as { EdgeRuntime?: { waitUntil: (promise: Promise<unknown>) => void } }).EdgeRuntime = {
+    waitUntil: (promise) => {
+      world.background.push(promise);
+    },
   };
 
   globalThis.fetch = async (input, init) => {

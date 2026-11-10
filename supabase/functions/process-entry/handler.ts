@@ -7,6 +7,7 @@ import { AppError, errorResponse, jsonResponse } from "../_shared/errors.ts";
 import { checkDevotionalLimit, type LimitDecision, type LimitProfile } from "../_shared/limits/weekly.ts";
 import {
   type BillingStatus,
+  blankLogLine,
   type CrisisSource,
   type LimitStatus,
   type LogLine,
@@ -49,7 +50,7 @@ import { buildSystemInstruction, buildUserTurn, PROMPT_VERSION, type RecentRefle
 import { toResponse } from "./response.ts";
 import { buildSchema } from "./schema.ts";
 import { resolveScripture } from "./scripture.ts";
-import { type SpeechOutcome, speechStage } from "./speech.ts";
+import { planSpeech, type SpeechJob, speechStage } from "./speech.ts";
 import { resolveAffirmationVerses } from "./verses.ts";
 import { readJsonBody, validateRequest } from "./validate.ts";
 
@@ -64,7 +65,8 @@ import { readJsonBody, validateRequest } from "./validate.ts";
 // 2026-11-08): it is never counted and never blocked, and it is written in full by the instruction's "A heavy moment", from its
 // words alone. A heavy moment is never failed for want of a reply: when the model cannot write one (a safety filter blocks the
 // request, a recording was blocked before its words were read, or no usable reply comes in time) it gets the written
-// fallback. Speech comes last and is best effort: a reflection that was saved is never lost to it.
+// fallback. Speech comes last and is best effort: a reflection that was saved is never lost to it, and since 2026-11-09 it
+// runs behind the answer (EdgeRuntime.waitUntil), so the person has the reflection the moment it is saved.
 
 type Counters = { authMs: number; dbMs: number };
 
@@ -144,13 +146,45 @@ async function respond(
   return jsonResponse(200, toResponse(row, affirmations), corsHeaders);
 }
 
-// What the speech step did goes into the request's log line, one word and the numbers.
-function recordSpeech(context: Context, outcome: SpeechOutcome): void {
-  context.tts = outcome.tts;
-  context.ttsMs = outcome.ttsMs;
-  context.ttsAttempts = outcome.ttsAttempts;
-  context.ttsChars = outcome.ttsChars;
-  context.audioMs = outcome.audioMs;
+// Supabase's Edge Runtime keeps the instance alive for work handed to EdgeRuntime.waitUntil after the answer has gone out
+// (its "Background Tasks"). Plain Deno (the tests, a local run) has no EdgeRuntime: the work then runs detached, and a test
+// awaits it through the fake it installs. What is handed over never rejects.
+type EdgeRuntimeLike = { waitUntil?: (promise: Promise<unknown>) => void };
+
+function runInBackground(work: Promise<void>): void {
+  const guarded = work.catch(() => undefined);
+  (globalThis as { EdgeRuntime?: EdgeRuntimeLike }).EdgeRuntime?.waitUntil?.(guarded);
+}
+
+// The speech stage behind an answer (2026-11-09), and the line it writes when it is done: the same request id, the reason
+// "speech", the stage's word and numbers, its database time and the time since the request began; everything else empty.
+async function speakBehind(context: Context, job: Omit<SpeechJob, "db">): Promise<void> {
+  let dbMs = 0;
+  const outcome = await speechStage({
+    ...job,
+    db: async <T>(work: () => Promise<T>): Promise<T> => {
+      const started = Date.now();
+      try {
+        return await work();
+      } finally {
+        dbMs += Date.now() - started;
+      }
+    },
+  });
+  writeLog(blankLogLine({
+    requestId: context.requestId,
+    status: 200,
+    reason: "speech",
+    inputType: context.inputType,
+    user: context.userHash,
+    dbMs,
+    totalMs: Date.now() - context.startedAt,
+    tts: outcome.tts,
+    ttsMs: outcome.ttsMs,
+    ttsAttempts: outcome.ttsAttempts,
+    ttsChars: outcome.ttsChars,
+    audioMs: outcome.audioMs,
+  }));
 }
 
 function limitStatus(decision: LimitDecision): LimitStatus {
@@ -242,21 +276,30 @@ async function run(req: Request, context: Context): Promise<Response> {
   const admin = createAdmin();
   const db = <T>(work: () => Promise<T>) => timed(context, "dbMs", work);
 
+  // Answers with the row as it is and, when there is a spoken devotional to make, makes it behind the answer (2026-11-09):
+  // the person has the reflection the moment it is saved, and the audio lands on the row about fifteen seconds later (the
+  // app shows "Preparing your audio" meanwhile and learns of it through Realtime, or by reading the entry again). The
+  // request's own log line says "background" then, and the stage writes a line of its own when it is done; when nothing
+  // will be read aloud (speech off, a half-set secret, no time left) the line says why, as before.
+  function speakThenRespond(row: EntryRow): Promise<Response> {
+    const plan = planSpeech(row, speech, context.startedAt);
+    if (plan.kind === "skip") {
+      context.tts = plan.tts;
+    } else {
+      context.tts = "background";
+      runInBackground(
+        speakBehind(context, { admin, userId: user.userId, row, setup: speech, startedAt: context.startedAt }),
+      );
+    }
+    return respond(context, admin, user.userId, row);
+  }
+
   // An entry that already finished is answered as it is. The one exception is a reflection that has its devotional and no
-  // audio, when speech is on: then the same request adds the audio, and only that (no screening, no limit, no model
-  // call). A heavy moment saved before 2026-11-08 has no devotional, so it is always answered as it is.
+  // audio, when speech is on: then the same request adds the audio behind the answer, and only that (no screening, no
+  // limit, no model call). A heavy moment saved before 2026-11-08 has no devotional, so it is always answered as it is.
   async function answerReady(row: EntryRow): Promise<Response> {
     if (speech.state !== "ready" || !needsSpeech(row)) return await respond(context, admin, user.userId, row);
-    const outcome = await speechStage({
-      admin,
-      userId: user.userId,
-      row,
-      setup: speech,
-      startedAt: context.startedAt,
-      db,
-    });
-    recordSpeech(context, outcome);
-    return await respond(context, admin, user.userId, outcome.row);
+    return await speakThenRespond(row);
   }
 
   await db(() => ensureProfile(admin, user.userId));
@@ -474,17 +517,8 @@ async function run(req: Request, context: Context): Promise<Response> {
       context.validationLine = reflection.validationSource === "model" ? "ok" : "salvaged";
     }
 
-    // Speech, best effort, from the row that was just saved. It never throws and never changes the status.
-    const outcome = await speechStage({
-      admin,
-      userId: user.userId,
-      row,
-      setup: speech,
-      startedAt: context.startedAt,
-      db,
-    });
-    recordSpeech(context, outcome);
-    return await respond(context, admin, user.userId, outcome.row);
+    // Speech, best effort, from the row that was just saved, behind the answer. It never throws and never changes the status.
+    return await speakThenRespond(row);
   } catch (error) {
     const failure = error instanceof AppError
       ? error

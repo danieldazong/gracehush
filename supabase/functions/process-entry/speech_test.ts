@@ -7,7 +7,7 @@ import { assert, assertEquals } from "./testing/assert.ts";
 import { installWorld, seedDevotional, speechOn, type World } from "./testing/fakes.ts";
 import { speechTiming } from "./constants.ts";
 import type { EntryRow } from "./lifecycle.ts";
-import { type SpeechJob, speechStage, uploadCapMs } from "./speech.ts";
+import { planSpeech, type SpeechJob, speechStage, uploadCapMs } from "./speech.ts";
 
 // speechStage on its own, against the fake world. The handler tests (handler_test.ts, "speech a" to "speech i") drive the
 // whole request; these are the edges of the stage that no request reaches: the upload's time cap, a failure nobody
@@ -195,6 +195,33 @@ Deno.test(
     }));
     assertEquals([withoutReread.tts, withoutReread.row.devotional_audio_path], ["ok", null]);
     assertEquals(lost.devotional_audio_path, theirPath, "the first writer's path is kept");
+  }),
+);
+
+Deno.test(
+  "planSpeech answers the stage's own words for a row nothing will be read from, and the script for one that will (2026-11-09)",
+  speechWorld(async (world, _admin, setup) => {
+    const row = seedDevotional(world, USER, verified);
+    assertEquals(planSpeech(row, { state: "off" }, Date.now()), { kind: "skip", tts: "off" });
+    assertEquals(planSpeech(row, { state: "bad", name: "TTS_VOICE_NAME" }, Date.now()), {
+      kind: "skip",
+      tts: "bad_config:TTS_VOICE_NAME",
+    });
+    assertEquals(planSpeech(row, setup, Date.now() - speechTiming.latestStartMs), {
+      kind: "skip",
+      tts: "skipped:time",
+    });
+    assertEquals(planSpeech({ ...row, devotional_script: "   " }, setup, Date.now()), {
+      kind: "skip",
+      tts: "skipped:script",
+    });
+    const plan = planSpeech(row, setup, Date.now());
+    assert(plan.kind === "speak", "a row with a devotional is read aloud");
+    assert(plan.script.markup.includes("A reading from Philippians"), "with its verified passage");
+    assertEquals(plan.setup, setup);
+    // Planning touches nothing: no Google, no database.
+    assertEquals([world.tokenCalls.length, world.ttsCalls.length, world.requests.length], [0, 0, 0]);
+    await Promise.resolve();
   }),
 );
 

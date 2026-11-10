@@ -36,8 +36,10 @@ export const GEMINI_DEADLINE_MS = 90_000;
 //   the upload                               20 s, and never later than 5 s after the 135 s (speech.ts)
 //   the platform                             150 s of wall clock on the free plan, 2 s of CPU (waiting is free), 256 MB
 //
-// So even when every step is slow the answer is sent at about 145 s. A request that the platform does stop still leaves a
-// good "ready" entry, and the same request sent again adds the audio.
+// Since 2026-11-09 the answer goes out as soon as the reflection is saved (about 10 to 15 s), and speech runs behind it in
+// the same instance (EdgeRuntime.waitUntil), under the same budget: so even when every step is slow the instance is done at
+// about 145 s. A speech that the platform does stop leaves a good "ready" entry with no audio, and the same request sent
+// again adds the audio.
 export const speechTiming = { latestStartMs: 100_000, deadlineMs: 135_000, uploadTimeoutMs: 20_000 };
 
 // The expiry guard (step 30): one look at RevenueCat, cut short, so a lapsed plan costs a reflection at most this long.

@@ -1,4 +1,5 @@
-// One JSON line per request.
+// One JSON line per request, and since 2026-11-09 a second line for a spoken devotional made behind the answer (the same
+// requestId, the reason "speech", the speech fields and the times; everything else empty).
 //
 // Allowed: the request id, a short hash of the user id, the status, an error code or category, the input kind,
 // durations, attempt and token counts, the model name, what became of the passage as one word (step 20), what the
@@ -27,13 +28,15 @@ export type ScreenStatus = "clear" | "crisis" | "no_speech" | "failed";
 // words when it is the one that catches a crisis the screening called clear.
 export type CrisisSource = "phrase" | "model" | "uncertain" | "blocked";
 
-// What the speech step did (step 22). null in the log: it did not run (a refused request, a crisis, an entry the free limit
-// held back, or a retry of an entry that needed no speech). "bad_config" names the secret to look at, and "failed" holds
-// Google's or storage's short words only (tts_http_403:PERMISSION_DENIED/SERVICE_DISABLED, tts_timeout, storage...), never
-// a message of theirs.
+// What the speech step did (step 22). null in the log: it did not run (a refused request, an entry the free limit held back,
+// or a retry of an entry that needed no speech). "bad_config" names the secret to look at, and "failed" holds Google's or
+// storage's short words only (tts_http_403:PERMISSION_DENIED/SERVICE_DISABLED, tts_timeout, storage...), never a message of
+// theirs. "background" (2026-11-09): the stage runs behind the answer, and a second line with the same requestId and the
+// reason "speech" says what it did, with its numbers.
 export type SpeechStatus =
   | "ok"
   | "off"
+  | "background"
   | "skipped:time"
   | "skipped:script"
   | `bad_config:${string}`
