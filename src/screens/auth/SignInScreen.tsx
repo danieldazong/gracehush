@@ -107,6 +107,10 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
   const [pending, setPending] = useState<"apple" | "google" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emailOpen, setEmailOpen] = useState(false);
+  // The email sheet keeps a pending code across a dismiss (2026-11-09), so this key is what drops it on purpose: a tap on
+  // Apple or Google remounts the sheet, because Clerk replaces the client's sign-in attempt with the provider's own and the
+  // code could not be verified afterwards.
+  const [emailSheetKey, setEmailSheetKey] = useState(0);
   const hasSignedIn = useOnboardingStore((state) => state.hasSignedIn);
   const insets = useSafeAreaInsets();
   // The scenes' motion runs only while this screen is in front.
@@ -120,6 +124,7 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
   async function signInWith(provider: "apple" | "google") {
     setError(null);
     setPending(provider);
+    setEmailSheetKey((key) => key + 1);
     const result = await (provider === "apple" ? continueWithApple() : continueWithGoogle());
     // On success the navigator replaces this screen once the session is active, so keep the spinner.
     if (result.ok) {
@@ -255,7 +260,7 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
         </View>
       ) : null}
 
-      <EmailSheet visible={emailOpen} onClose={() => setEmailOpen(false)} />
+      <EmailSheet key={emailSheetKey} visible={emailOpen} onClose={() => setEmailOpen(false)} />
     </SafeAreaView>
   );
 }

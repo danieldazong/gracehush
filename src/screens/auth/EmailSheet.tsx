@@ -47,7 +47,8 @@ export function EmailSheet({ visible, onClose }: EmailSheetProps) {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const emailInput = useRef<TextInputInstance>(null);
   const codeInput = useRef<TextInputInstance>(null);
-  // Bumped whenever the flow is abandoned, so a request that finishes late is ignored.
+  // Bumped whenever the attempt is abandoned on purpose ("Use a different email", a sign-in that worked), so a request that
+  // finishes late is ignored. A dismiss does not bump it: the attempt lives on (see dismiss below).
   const session = useRef(0);
 
   useAnnounce(error);
@@ -76,7 +77,19 @@ export function EmailSheet({ visible, onClose }: EmailSheetProps) {
   // A loose check on purpose: Clerk decides what is a valid address.
   const canSend = trimmedEmail.includes("@");
 
-  function close() {
+  // A dismiss (the scrim, the Android back key) only hides the sheet (2026-11-09). The step, the address, the typed digits
+  // and the resend countdown stay, so "Continue with email" reopens it where it was and the code Clerk sent, valid for ten
+  // minutes on the server, is not thrown away; before this, a tap outside reset the whole flow and the person had to ask
+  // for a new code. Only the error line clears: it belongs to the moment. A request still on its way finishes and keeps
+  // its result (a verify that worked signs the person in, a failed one waits as the error line for the next opening).
+  function dismiss() {
+    setError(null);
+    onClose();
+  }
+
+  // A sign-in that worked: everything goes and the sheet closes. The navigator swaps this screen for the main tabs by
+  // itself once the session is active.
+  function finish() {
     session.current += 1;
     setStep("email");
     setEmail("");
@@ -119,13 +132,13 @@ export function EmailSheet({ visible, onClose }: EmailSheetProps) {
       return;
     }
     setVerifying(false);
-    // The navigator swaps this screen for the main tabs by itself once the session is active.
     if (result.ok) {
-      close();
+      finish();
       return;
     }
     setCode("");
     setError(result.message);
+    // No-op while the sheet is hidden (the Modal's children are not mounted then); the reopen focuses the field itself.
     codeInput.current?.focus();
   }
 
@@ -168,7 +181,7 @@ export function EmailSheet({ visible, onClose }: EmailSheetProps) {
   const resendLabel = secondsLeft > 0 ? sheet.resendIn(secondsLeft) : sheet.resend;
 
   return (
-    <BottomSheet visible={visible} onClose={close}>
+    <BottomSheet visible={visible} onClose={dismiss}>
       {step === "email" ? (
         <>
           <Text className="text-headline text-ink">{sheet.emailTitle}</Text>
