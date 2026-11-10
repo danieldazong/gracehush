@@ -1153,7 +1153,7 @@ Deno.test(
     assertEquals(line.tokensOut, 1308);
     assertEquals(line.tokensThought, 174);
     assertEquals(line.scripture, "verified");
-    assertEquals(line.promptVersion, "gen-v2.5");
+    assertEquals(line.promptVersion, "gen-v2.6");
     assert(Number.isInteger(line.bibleMs) && line.bibleMs >= 0);
     assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
     const everything = world.logs.join("\n");
@@ -2209,7 +2209,7 @@ Deno.test(
     assertEquals(books.length, 65);
     assert(!books.includes("SNG"));
     assert("validation_line" in body.response_format.schema.properties);
-    assertEquals(lastLog(world).promptVersion, "gen-v2.5");
+    assertEquals(lastLog(world).promptVersion, "gen-v2.6");
   }),
 );
 

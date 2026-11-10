@@ -20,6 +20,7 @@ import {
   NEVER_SAY,
   openingSentence,
   openingStart,
+  prayerPetitions,
   prayerVoice,
   prayerVoiceProblem,
   privateWords,
@@ -590,6 +591,27 @@ Deno.test("style measures of gen-v2.3: grounding, the prayer's voice and the val
   assert(measured.grounding >= 2, `${measured.grounding}`);
   const none = styleMeasures(reflection());
   assertEquals([none.validationWords, none.grounding], [0, 0]);
+});
+
+Deno.test("gen-v2.6: the prayer's petitions are the clauses that ask God, and its range is 50 to 75 words", () => {
+  const prayer = [
+    "Father, you are the God who provides.",
+    "I failed the exam again and I feel like running away.",
+    "Give me rest tonight, and clear sight before I decide anything.",
+    "Help me take the next step tomorrow, and steady my hands when the results come.",
+    "You have not left me, and your grace is enough for this.",
+    "I trust you with what I cannot see.",
+  ].join(" ");
+  assertEquals(prayerPetitions(prayer), 3, "give, help and steady ask; the rest declares");
+  assertEquals(prayerPetitions("Lord, you know how tired I am. Thank you for staying close. I trust you."), 0);
+  assertEquals(prayerPetitions("Lord, please show me what to do. I ask for wisdom and I pray for rest."), 3);
+  assertEquals(prayerPetitions("Be near me tonight, Lord. Don’t let me face it alone."), 2);
+  const measured = styleMeasures(reflection({ closingPrayer: prayer }));
+  assertEquals([measured.prayerPetitions, measured.prayerSentences, measured.prayerWords], [3, 6, 64]);
+  assertEquals(measured.prayerInRange, true);
+  // The sample prayer of the fixture is 15 words and asks twice ("hold us close", "give us rest").
+  const sample = styleMeasures(reflection());
+  assertEquals([sample.prayerPetitions, sample.prayerInRange], [2, false]);
 });
 
 // ---- Step 37 (gen-v2.5): the headlines are a lock screen's bold title -------------------------------------------------------

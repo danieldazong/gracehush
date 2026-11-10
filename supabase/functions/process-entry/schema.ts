@@ -85,7 +85,7 @@ export function buildSchema(): JsonSchema {
         required: PASSAGE_REQUIRED,
       },
       devotional_text: text("110 to 150 words in 3 or 4 short paragraphs."),
-      closing_prayer: text("2 to 4 sentences, 30 to 50 words, without Amen."),
+      closing_prayer: text("5 to 7 sentences, 50 to 75 words, without Amen."),
       prayer: {
         type: "object",
         properties: {

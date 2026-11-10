@@ -18,7 +18,9 @@
 //                  second run pays nothing for them), and today's reflections must not score below them. With
 //                  --compare gen-v2.2 (step 36) a case gen-v2.2 never wrote for a model is written now with the frozen
 //                  gen-v2.2 instruction (prompt_v2_2.ts) and gen-v2.2's own output rules, so the baseline is measured in the
-//                  same run, on the same 32 cases
+//                  same run, on the same cases. With --compare gen-v2.5 (gen-v2.6, 2026-11-10) a case gen-v2.5 never wrote
+//                  is written now with gen-v2.5's instruction, rebuilt from today's by putting its closing-prayer bullet
+//                  back (the one change), so the four setback cases have a baseline too
 //   --variety      four made-up entries from one person about the same work stress, each one's title, first word and passage
 //                  fed into the next as recent reflections: how many come out distinct
 //   --speak N      read the first N cases of the first model aloud into tone-eval/audio/{id}.wav, and print their lengths
@@ -64,7 +66,14 @@ import {
   stripMarkup,
   tidyParagraphs,
 } from "../output.ts";
-import { buildSystemInstruction, buildUserTurn, openingSentence, PROMPT_VERSION, wrapEntry } from "../prompt.ts";
+import {
+  buildSystemInstruction,
+  buildUserTurn,
+  CLOSING_PRAYER_RULE,
+  openingSentence,
+  PROMPT_VERSION,
+  wrapEntry,
+} from "../prompt.ts";
 import { buildSchema } from "../schema.ts";
 import { flowText, resolveAffirmationVerses } from "../verses.ts";
 import type { AffirmationVerse } from "../contracts.ts";
@@ -241,11 +250,32 @@ function parseV22(text: string, entry: string, recentFirstWords: readonly string
   });
 }
 
-// v2 is today's instruction (PROMPT_VERSION), v22 the frozen gen-v2.2 (prompt_v2_2.ts), v1 the frozen gen-v1.2.
-type Version = "v2" | "v22" | "v1";
+// v2 is today's instruction (PROMPT_VERSION), v25 gen-v2.5 rebuilt from it (below), v22 the frozen gen-v2.2 (prompt_v2_2.ts),
+// v1 the frozen gen-v1.2.
+type Version = "v2" | "v25" | "v22" | "v1";
+
+// gen-v2.5 (step 37), the baseline of gen-v2.6: today's instruction with gen-v2.5's closing-prayer bullet put back (the one
+// change between the two versions) and its schema with that bullet's description. Proven equal, byte for byte, to the
+// gen-v2.5 code's instruction and schema on 2026-11-10 (the gen-v2.6 log entry in AGENTS.md).
+const PROMPT_VERSION_V2_5 = "gen-v2.5";
+const CLOSING_PRAYER_RULE_V2_5 =
+  `the person's own prayer, which they will hear read in a steady voice and can pray along with. Write it in the first person singular ("I", "my", "me"), never "we", "us" or "our" unless the person themselves prayed as "we" in the entry. When they pray for someone else, still pray as "I": "help me be patient with her", never "help us". Begin by addressing God the way the person addressed him in the entry ("Father", "Lord", "Jesus", "God"), or "Lord" if they did not. Bring to God each thing they asked for, in their words, and the feeling they named, honestly. End with one line of trust in who God is, never with a promised outcome. 2 to 4 sentences, 30 to 50 words. Do not write "Amen".`;
+function buildSystemInstructionV2_5(): string {
+  const text = buildSystemInstruction();
+  if (!text.includes(CLOSING_PRAYER_RULE)) {
+    throw new Error("today's instruction no longer holds the closing-prayer rule");
+  }
+  return text.replace(CLOSING_PRAYER_RULE, () => CLOSING_PRAYER_RULE_V2_5);
+}
+function buildSchemaV2_5(): Record<string, unknown> {
+  const schema = JSON.parse(JSON.stringify(buildSchema())) as { properties: Record<string, { description?: string }> };
+  schema.properties.closing_prayer.description = "2 to 4 sentences, 30 to 50 words, without Amen.";
+  return schema;
+}
 
 const VERSION_NAMES: Record<Version, string> = {
   v2: PROMPT_VERSION,
+  v25: PROMPT_VERSION_V2_5,
   v22: PROMPT_VERSION_V2_2,
   v1: PROMPT_VERSION_V1,
 };
@@ -261,7 +291,7 @@ async function makeReflection(
   const recentFirstWords = recent.flatMap((item) => (item.devotional ? [firstWord(item.devotional)] : []));
   const validate = (reply: string): EvalReply => {
     try {
-      const result = version === "v2"
+      const result = version === "v2" || version === "v25"
         ? parseReflection(reply, { entry, recentFirstWords })
         : version === "v22"
         ? parseV22(reply, entry, recentFirstWords)
@@ -291,18 +321,26 @@ async function makeReflection(
       thinkingLevel: "low",
       system: version === "v2"
         ? buildSystemInstruction()
+        : version === "v25"
+        ? buildSystemInstructionV2_5()
         : version === "v22"
         ? buildSystemInstructionV2_2()
         : buildSystemInstructionV1(),
       input: {
         kind: "text",
-        text: version === "v2"
+        text: version === "v2" || version === "v25"
           ? buildUserTurn(entry, recent)
           : version === "v22"
           ? buildUserTurnV2_2(entry, recent)
           : wrapEntry(entry),
       },
-      schema: version === "v2" ? buildSchema() : version === "v22" ? buildSchemaV2_2() : buildSchemaV1(),
+      schema: version === "v2"
+        ? buildSchema()
+        : version === "v25"
+        ? buildSchemaV2_5()
+        : version === "v22"
+        ? buildSchemaV2_2()
+        : buildSchemaV1(),
       deadlineAt: Date.now() + GEMINI_DEADLINE_MS,
       validate,
     }, stats);
@@ -350,6 +388,10 @@ const RUBRIC = [
   [
     "specific_not_generic",
     "5: clearly written for this entry: the first line, the devotional and the prayer use what the person told (what happened, where, who it involves, what they asked for) in their own plain words, and add nothing they did not say. 3: partly generic, or it matches only the entry's topic. 1: could sit under any entry.",
+  ],
+  [
+    "prayer_meets_need",
+    "The closing prayer is the person's own, read aloud after the devotional (gen-v2.6). 5: it addresses God by who he is for this need, hands the pain over once in the person's own words, asks for two or three concrete things that meet the need beneath their words (strength, wisdom, rest, courage, provision, a next step), prays for the need and never for a despairing wish itself (dropping out, giving up, quitting, walking away), never argues with the person, declares one lifting truth about God with no promised outcome, and closes on trust. 3: honest but asks for little or nothing concrete, or stays with the feeling, or lifts only in general words. 1: it prays for the despairing wish, argues with or scolds the person, or promises an outcome.",
   ],
   [
     "lock_screen_safe",
@@ -703,8 +745,8 @@ async function runCase(model: string, version: Version, item: Case): Promise<Res
     result.toneProblem = hardProblem(reflection, item.text)?.reason ?? privacyProblem(reflection, item.text)?.reason ??
       null;
     shown = shownLine(reflection, today);
-    if (today) {
-      // As the function does after it reads the passage: one verse per affirmation from the Bible, with one follow-up for the
+    if (today || version === "v25") {
+      // As the function does after it reads the passage (gen-v2.5 did it too, so its rebuilt baseline gets its verses): one verse per affirmation from the Bible, with one follow-up for the
       // ones that cannot be used. Its calls count toward this reflection's cost.
       const versesFound = await resolveAffirmationVerses({
         affirmations: reflection.affirmations,
@@ -820,6 +862,9 @@ type Summary = {
   made: number;
   swap: number;
   voiceI: number;
+  // gen-v2.6: the cases whose prayer asks God for at least two things, and whose prayer is 50 to 75 words.
+  petitionsOk: number;
+  prayerInRange: number;
   groundingOk: number;
   groundingApplies: number;
   // Today's version only: an older one wrote no validation line.
@@ -891,6 +936,8 @@ function summarize(label: string, model: string, results: Result[]): Summary {
     made: ready.length,
     swap: results.filter((result) => result.swap?.correct === true).length,
     voiceI: styled.filter(({ style }) => style.prayerVoice === "i").length,
+    petitionsOk: styled.filter(({ style }) => style.prayerPetitions >= 2).length,
+    prayerInRange: styled.filter(({ style }) => style.prayerInRange).length,
     groundingOk: applies.filter(({ result, style }) => style.grounding >= result.threshold).length,
     groundingApplies: applies.length,
     lineOk: today ? ready.filter((result) => result.lineOk === true).length : null,
@@ -1068,6 +1115,18 @@ function report(
       fixed(median(lineWords), 0)
     } words | the same line on two cases: ${lineTwins.join(", ") || "none"}`,
   );
+  // gen-v2.6: the closing prayer, today and before: how many ask God for at least two things, and their lengths.
+  const prayers = (summary: Result[]) => {
+    const styles = summary.flatMap((result) => (result.style ? [result.style] : []));
+    return `${
+      styles.filter((style) => style.prayerPetitions >= 2).length
+    }/${styles.length} with two or more petitions, median ${
+      fixed(median(styles.map((style) => style.prayerPetitions)), 0)
+    } petitions and ${fixed(median(styles.map((style) => style.prayerWords)), 0)} words, inside 50 to 75: ${
+      styles.filter((style) => style.prayerInRange).length
+    }`;
+  };
+  print(`closing prayer (gen-v2.6): ${prayers(ready)}${versus(prayers(before?.results ?? []))}`);
   if (today.headlines !== null) {
     print(
       `affirmation verses (step 37): ${today.versesFound}/${
@@ -1145,6 +1204,7 @@ function report(
       style.paragraphsInRange ? "" : `paragraphs ${style.devotionalParagraphs}`,
       style.devotionalInRange ? "" : `words ${style.devotionalWords}`,
       style.prayerInRange ? "" : `prayer words ${style.prayerWords}`,
+      style.prayerPetitions < 2 ? `prayer petitions ${style.prayerPetitions}` : "",
       style.titleInRange ? "" : `title ${style.titleWords} words/${style.titleChars} chars`,
       style.titleEndPunctuation ? "title punctuation" : "",
       style.headlinesOutOfRange ? `headlines ${style.headlinesOutOfRange}` : "",
@@ -1163,6 +1223,20 @@ function report(
   const swapNeeded = total - 3;
   if (today.swap < swapNeeded) misses.push(`swap test ${today.swap}/${total} (needs ${swapNeeded})`);
   if (today.voiceI < total) misses.push(`prayer voice "i" ${today.voiceI}/${total}`);
+  // gen-v2.6: every prayer asks God for at least two things, and no prayer prays a despairing wish or argues with the
+  // person (the grader's prayer_meets_need at 1 or 2).
+  const fewPetitions = ready.filter((result) => (result.style?.prayerPetitions ?? 0) < 2);
+  if (fewPetitions.length > 0) {
+    misses.push(`prayers with fewer than two petitions: ${fewPetitions.map((result) => result.id).join(", ")}`);
+  }
+  const wishPrayed = ready.filter((result) => (result.grades?.scores.prayer_meets_need ?? 5) <= 2);
+  if (wishPrayed.length > 0) {
+    misses.push(
+      `prayers that pray the wish, argue or promise (prayer_meets_need at 1 or 2): ${
+        wishPrayed.map((result) => result.id).join(", ")
+      }`,
+    );
+  }
   if (today.groundingOk < today.groundingApplies) {
     const under = ready.filter((result) => result.threshold > 0 && (result.style?.grounding ?? 0) < result.threshold);
     misses.push(`grounding under its threshold: ${under.map((result) => result.id).join(", ")}`);
@@ -1188,7 +1262,7 @@ function report(
   if (lineTwins.length > 0) misses.push(`the same validation line: ${lineTwins.join(", ")}`);
   if (openings.sharedStarts.length > 0) misses.push(`begun the same way: ${openings.sharedStarts.join(", ")}`);
   if (!beforeScores) {
-    misses.push("no baseline to compare with (run with --compare gen-v2.2)");
+    misses.push("no baseline to compare with (run with --compare gen-v2.5)");
   } else {
     for (const [name] of RUBRIC) {
       if (!(scores[name] >= beforeScores[name] - 0.05)) {
@@ -1439,6 +1513,13 @@ type Saved = {
   usage?: GeminiStats["usage"];
 };
 
+// The verses saved with an earlier version's affirmations (gen-v2.5 and later wrote them), so its grader sees what the
+// person saw; null for a version that named none.
+function savedVerses(reflection: Measured): Verses {
+  const verses = (reflection.affirmations as { verse?: AffirmationVerse | null }[]).map((item) => item.verse ?? null);
+  return verses.some((verse) => verse !== null) ? verses : null;
+}
+
 async function compareWith(model: string, version: string): Promise<Result[] | null> {
   const folder = `tone-eval/out/${version}/${model}`;
   const assessed = await pool(selected, async (item): Promise<Result | null> => {
@@ -1449,7 +1530,11 @@ async function compareWith(model: string, version: string): Promise<Result[] | n
       saved = null;
     }
     if (saved === null || saved.entry !== item.text) {
-      return version === PROMPT_VERSION_V2_2 ? await runCase(model, "v22", item) : null;
+      return version === PROMPT_VERSION_V2_2
+        ? await runCase(model, "v22", item)
+        : version === PROMPT_VERSION_V2_5
+        ? await runCase(model, "v25", item)
+        : null;
     }
     const stats = newStats();
     if (saved.usage) Object.assign(stats.usage, saved.usage);
@@ -1503,7 +1588,7 @@ async function compareWith(model: string, version: string): Promise<Result[] | n
       if (spentSoFar() >= budget) return result;
       const shown = shownLine(reflection, false);
       [grades, swap] = await Promise.all([
-        grades ?? grade(item.text, reflection, saved.passage, shown),
+        grades ?? grade(item.text, reflection, saved.passage, shown, savedVerses(reflection)),
         swap ?? swapTest(item, shown, reflection.devotional),
       ]);
       await Deno.mkdir(`${folder}/regraded`, { recursive: true });
@@ -1514,7 +1599,7 @@ async function compareWith(model: string, version: string): Promise<Result[] | n
     return result;
   });
   const results = assessed.filter((result): result is Result => result !== null);
-  if (results.length < assessed.length && version === PROMPT_VERSION_V2_2) {
+  if (results.length < assessed.length && (version === PROMPT_VERSION_V2_2 || version === PROMPT_VERSION_V2_5)) {
     print(`\nBUDGET: $${budget} reached, ${assessed.length - results.length} ${version} case(s) not written`);
   }
   return results.length > 0 ? results : null;
@@ -1625,6 +1710,8 @@ if (columns.length > 0) {
     ["made", (summary) => `${summary.made}/${summary.total}`],
     ["swap test", (summary) => `${summary.swap}/${summary.total}`],
     ["prayer voice i", (summary) => `${summary.voiceI}/${summary.made}`],
+    ["prayer petitions >= 2", (summary) => `${summary.petitionsOk}/${summary.made}`],
+    ["prayer words 50 to 75", (summary) => `${summary.prayerInRange}/${summary.made}`],
     ["grounding at threshold", (summary) => `${summary.groundingOk}/${summary.groundingApplies}`],
     [
       "line ok, salvaged",

@@ -421,7 +421,9 @@ export type StyleMeasures = {
   devotionalWords: number;
   devotionalInRange: boolean; // 110 to 150
   prayerWords: number;
-  prayerInRange: boolean; // 30 to 50
+  prayerInRange: boolean; // 50 to 75 (gen-v2.6; 30 to 50 before)
+  prayerSentences: number;
+  prayerPetitions: number; // clauses that ask God for something (gen-v2.6 asks for two or three)
   titleWords: number;
   titleChars: number;
   titleInRange: boolean; // 2 to 6 words, at most 40 characters
@@ -472,7 +474,9 @@ export function styleMeasures(reflection: ToneReflection, entry = ""): StyleMeas
     devotionalWords,
     devotionalInRange: between(devotionalWords, 110, 150),
     prayerWords,
-    prayerInRange: between(prayerWords, 30, 50),
+    prayerInRange: between(prayerWords, 50, 75),
+    prayerSentences: sentences(reflection.closingPrayer).length,
+    prayerPetitions: prayerPetitions(reflection.closingPrayer),
     titleWords,
     titleChars: reflection.title.length,
     titleInRange: between(titleWords, 2, 6) && reflection.title.length <= 40,
@@ -630,6 +634,34 @@ export function prayerVoiceProblem(prayer: string, entry: string): SoftProblem |
   };
 }
 
+// -- The prayer's petitions (gen-v2.6) --
+
+// The verbs a prayer asks with, at the start of a clause ("give me rest", "steady my hands", "be near me"). A statement
+// opens with "you" or "I" instead ("you give rest", "I trust you"), so it is not counted; nor is thanks.
+const PETITION_VERBS: ReadonlySet<string> = new Set(
+  ("help give grant show teach lead guide keep let remind steady hold carry strengthen surround meet quiet calm settle bring " +
+    "open send speak stay walk come fill cover provide lift heal forgive free draw wrap anchor restore renew comfort protect " +
+    "watch supply lighten soften shape stir rebuild mend uphold sustain shelter breathe pour plant ground slow still move make " +
+    "turn take be do don").split(" "),
+);
+// What a clause may begin with before its verb: how God is addressed, and a word that only leads in.
+const PETITION_LEAD =
+  /^(?:(?:o|oh|dear|please|and|so|now|today|tonight|lord|father|god|jesus|spirit|holy spirit|king|shepherd|savior|saviour|my (?:god|lord|father|king|shepherd|savior|saviour))[,:]?\s+)+/i;
+
+// How many clauses of a prayer ask God for something: a clause that opens with a petition verb (after the address), or that
+// says "I ask", "I pray" or "please". A style measure (gen-v2.6 asks for two or three petitions), never a reason to refuse
+// a reply: the evaluation counts it and the instruction's wording fixes it.
+export function prayerPetitions(prayer: string): number {
+  let found = 0;
+  for (const sentence of sentences(prayer)) {
+    for (const clause of sentence.split(/[,;:]\s+|\s+(?:and|but|so|then)\s+/i)) {
+      const bare = clause.trim().replace(PETITION_LEAD, "");
+      const first = bare.match(/^\p{L}+/u)?.[0].toLowerCase();
+      if ((first !== undefined && PETITION_VERBS.has(first)) || /\b(?:i ask|i pray|please)\b/i.test(clause)) found += 1;
+    }
+  }
+  return found;
+}
 // -- Grounding --
 
 // Common English words of four letters or more: they carry no part of what a person told.

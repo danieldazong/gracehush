@@ -8,6 +8,7 @@ import {
   buildUserTurn,
   buildVersesInstruction,
   buildVersesTurn,
+  CLOSING_PRAYER_RULE,
   HEAVY_MOMENT_BLOCK,
   HEAVY_REPLACEMENT_NOTE,
   openingSentence,
@@ -35,8 +36,8 @@ const section = (text: string, heading: string) => {
   return next < 0 ? text.slice(start) : text.slice(start, next);
 };
 
-Deno.test("the version is gen-v2.4: a heavy moment is written in full, and the instruction says how", () => {
-  assertEquals(PROMPT_VERSION, "gen-v2.5");
+Deno.test("the version is gen-v2.6, and the heavy moment of gen-v2.4 is still written in full", () => {
+  assertEquals(PROMPT_VERSION, "gen-v2.6");
   const text = buildSystemInstruction();
   assert(text.includes(HEAVY_INSTRUCTION), "the heavy moment's section is in the instruction");
   assert(text.includes("- is_crisis: Set is_crisis to true"));
@@ -225,6 +226,37 @@ Deno.test("gen-v2.3: the prayer is the person's own, the validation line is aske
       "A stranger can read it, so it never holds a name, a place, an illness, an event or a feeling from the entry",
     ),
   );
+});
+
+Deno.test("gen-v2.6: the closing prayer meets the need beneath the words and lifts, in five moves", () => {
+  const text = buildSystemInstruction();
+  const write = section(text, "What to write");
+  assert(write.includes(`- closing_prayer: ${CLOSING_PRAYER_RULE}`), "the rule is the exported constant");
+  for (
+    const part of [
+      "It moves in five steps, in this order.",
+      "name him by who he is for this need",
+      "Hand him the pain once, in their own plain words and with no quotation marks",
+      "Ask him for two or three concrete things that meet the need beneath their words, each in a short sentence of its own that opens with the asking",
+      "in plain words of your own and never the passage's",
+      'Every petition stays "me" and "my", also when it is for another person or for a shared home',
+      "Pray for the need, never for a despairing wish itself",
+      "do not ask God to let them, and do not argue with them",
+      "ask instead for rest and clear sight before any decision, and for his wisdom in it",
+      "Tie one petition to the next step the devotional offered",
+      "Declare one lifting truth about who God is to them now, in your own words and never the passage's, with no promised outcome",
+      "never that the exam, the job, the test or the person will turn out well",
+      "(5) End with one line of trust in who God is, never with a promised outcome.",
+      "5 to 7 sentences, 50 to 75 words and never more.",
+    ]
+  ) {
+    assert(write.includes(part), part);
+  }
+  assert(!text.includes("30 to 50 words"), "the old length is gone");
+  assert(!text.includes("2 to 4 sentences") && !text.includes("4 to 6 sentences"), "the old counts are gone");
+  // The schema asks for the same length.
+  const schema = buildSchema() as { properties: Record<string, { description?: string }> };
+  assert(schema.properties.closing_prayer.description?.includes("5 to 7 sentences, 50 to 75 words"));
 });
 
 Deno.test("gen-v2.3: the recent block follows the entry and says nothing of what earlier reflections said", () => {
