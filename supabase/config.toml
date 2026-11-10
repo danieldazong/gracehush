@@ -30,3 +30,7 @@ verify_jwt = false
 [functions.delete-account]
 # The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
 verify_jwt = false
+
+[functions.add-affirmation]
+# The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false

@@ -82,7 +82,11 @@ export interface AffirmationVerse {
 export interface Affirmation {
   id: string;
   entryId: string;
-  slot: TimeSlot;
+  // The lock-screen slot it carries, or null for an affirmation added beyond the first three (2026-11-09): the three slotted
+  // ones are the notifications, and a new one may take a slot over when it fits that time of day better.
+  slot: TimeSlot | null;
+  // Its place among the reflection's affirmations, 1 to 10 (AFFIRMATION_LIMIT): the order the cards are shown in.
+  position: number;
   headline: string;
   text: string;
   isFavorite: boolean;
@@ -222,6 +226,25 @@ export interface ProcessEntryLimitError {
 // the function returns and stores no link (step 22), and the app asks Supabase for a short-lived link of its own to download
 // the file once (step 26).
 export type ProcessEntryResponse = { entry: JournalEntry; affirmations: Affirmation[] };
+
+// add-affirmation (2026-11-09): one more affirmation for a finished reflection, up to AFFIRMATION_LIMIT (10) in all. The
+// answer is every affirmation of the reflection as it now stands, in position order: the new one, and the slot a lock-screen
+// affirmation may have lost to it. AFFIRMATION_LIMIT is a reflection that already has all ten; NOT_FOUND another person's
+// entry or one that does not exist; ALREADY_PROCESSING a reflection still being made (or two requests at once).
+export type AddAffirmationRequest = { entryId: string };
+export type AddAffirmationResponse = { affirmations: Affirmation[] };
+export type AddAffirmationErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "NOT_FOUND"
+  | "ALREADY_PROCESSING"
+  | "AFFIRMATION_LIMIT"
+  | "METHOD_NOT_ALLOWED"
+  | "AI_UNAVAILABLE"
+  | "INTERNAL";
+export interface AddAffirmationError {
+  error: { code: AddAffirmationErrorCode; message: string; requestId: string };
+}
 
 // confirm-scripture (step 20): asked again for the passage of a reflection whose text could not be read when it was made.
 // The answer is the entry's passage as it now stands: verified with its text, still unverified, or null when the entry has

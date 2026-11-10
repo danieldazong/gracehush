@@ -168,11 +168,13 @@ function serverRow(n, extra = {}) {
 }
 
 function affirmationRows(entryId, userId = "user_a") {
-  return SLOTS.map((slot) => ({
+  return SLOTS.map((slot, index) => ({
     id: `aff-${entryId.slice(-12)}-${slot}`,
     entry_id: entryId,
     user_id: userId,
     time_slot: slot,
+    // 2026-11-09: its place among the reflection's affirmations.
+    position: index + 1,
     headline: `Headline ${slot}`,
     affirmation_text: `Text ${slot}`,
     is_favorite: false,
@@ -219,19 +221,22 @@ function readyResult(request, userId = "user_a", n = 900) {
     failureCode: null,
     isLocalOnly: false,
   };
-  const response = {
-    entry,
-    affirmations: affirmations.map((a) => ({
-      id: a.id,
-      entryId: a.entry_id,
-      slot: a.time_slot,
-      headline: a.headline,
-      text: a.affirmation_text,
-      isFavorite: false,
-      verse: null,
-    })),
-  };
+  const response = { entry, affirmations: affirmations.map(affirmationModel) };
   return { row, affirmations, response };
+}
+
+// An affirmation row as the functions answer it (the app's model), with its verse when the row has one.
+function affirmationModel(a) {
+  return {
+    id: a.id,
+    entryId: a.entry_id,
+    slot: a.time_slot,
+    position: a.position,
+    headline: a.headline,
+    text: a.affirmation_text,
+    isFavorite: a.is_favorite === true,
+    verse: a.verse_reference && a.verse_text ? { reference: a.verse_reference, text: a.verse_text } : null,
+  };
 }
 
 // A heavy moment, as process-entry answers it since gen-v2.4 (2026-11-08): a whole reflection with its three affirmations, marked
@@ -296,6 +301,9 @@ function makeServer() {
     functionCalls: [],
     // The ids delete-entry deleted (step 29b), in order.
     deletedEntries: [],
+    // 2026-11-09: for each add-affirmation call in turn, the lock-screen slot the new affirmation takes over, or null (the usual
+    // answer). An empty queue is null.
+    addFeatures: [],
     // Step 31: the accounts delete-account deleted, in order. An empty queue answers as the real function does: only the exact
     // confirm body deletes (since step 35 with or without a well-formed Apple code), and then everything of the caller goes.
     // appleCodesSent says, for each of them, whether an Apple code came.
@@ -476,6 +484,31 @@ function makeServer() {
         }
         state.deletedEntries.push(gone.id);
         return json(200, { deleted: true });
+      }
+      if (name === "add-affirmation") {
+        // 2026-11-09: one more affirmation for the caller's finished reflection, at the next position with no slot, and the whole
+        // list in position order. A foreign or missing entry is 404; one with ten already is 409 AFFIRMATION_LIMIT. The real
+        // function writes what the model gives; the fake gives a fixed one, and takes a lock-screen slot over when the test
+        // asks it to (state.addFeatures).
+        const entry = state.entries.find((row) => row.id === body?.entryId && row.user_id === sub && row.processing_status === "ready");
+        if (!entry) return fnError(404, "NOT_FOUND");
+        const own = state.affirmations.filter((row) => row.entry_id === entry.id);
+        if (own.length >= 10) return fnError(409, "AFFIRMATION_LIMIT");
+        const position = Math.max(own.length, ...own.map((row) => row.position ?? 0)) + 1;
+        const feature = state.addFeatures.shift() ?? null;
+        if (feature !== null) for (const row of own) if (row.time_slot === feature) row.time_slot = null;
+        state.affirmations.push({
+          ...affirmationRows(entry.id, sub)[0],
+          id: `aff-${entry.id.slice(-12)}-p${position}`,
+          time_slot: feature,
+          position,
+          headline: `Headline ${position}`,
+          affirmation_text: `Text ${position}`,
+          verse_reference: "Psalm 46:1",
+          verse_text: "God is our refuge and strength,\nan ever-present help in times of trouble.",
+        });
+        const list = state.affirmations.filter((row) => row.entry_id === entry.id).sort((a, b) => a.position - b.position);
+        return json(200, { affirmations: list.map(affirmationModel) });
       }
       if (name === "export-data") {
         // Step 31: a link to the caller's ZIP, valid for an hour, as the real function signs it.

@@ -1,5 +1,5 @@
 // The data the screens read and write. The profile (step 17), the entries, the affirmations and the usage (step 25), and the prayers (step 29) are real: they come from Supabase through the read cache of step 24, unless the data source is the mock (a development switch). Keep the names and argument order.
-import { deleteEntry as deleteEntryOnServer } from "@/api/journalApi";
+import { addAffirmation as addAffirmationOnServer, deleteEntry as deleteEntryOnServer } from "@/api/journalApi";
 import {
   AMBIENT_SOUNDS,
   FREE_DEVOTIONALS_PER_WEEK,
@@ -11,7 +11,7 @@ import type { PrayerPatch } from "@/data/columns";
 import * as live from "@/data/entriesLive";
 import { selectReflectionStreak } from "@/data/entriesRemote";
 import { getDeviceTimezone, toAffirmation, toJournalEntry, toUserProfile } from "@/data/mappers";
-import { addMockEntry, getMockDb, removeMockEntry } from "@/data/mock/db";
+import { addMockAffirmation, addMockEntry, getMockDb, removeMockEntry } from "@/data/mock/db";
 import {
   getDataSource,
   getEntriesPageSize,
@@ -47,14 +47,12 @@ import type {
   ProfilePatch,
   RepoResult,
   SubscriptionTier,
-  TimeSlot,
   UserProfile,
 } from "@/types";
+import { byPosition } from "@/utils/affirmationOrder";
 import { answeredDateToTimestamp, isValidAnsweredDate } from "@/utils/prayerDates";
 import { weekWindow } from "@/utils/week";
 import { calendarDayIn, isTimeZone } from "@/utils/zonedTime";
-
-const SLOT_ORDER: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 
 // Where the real server answers: the free limit is checked before the devotional is written, so a "limit" outcome stops
 // earlier. A heavy moment ("crisis") is a whole reflection since 2026-11-08, so it goes through every stage.
@@ -84,7 +82,7 @@ function readAffirmations(entryId: string): Affirmation[] {
   return affirmations
     .filter((row) => row.entry_id === entryId)
     .map(toAffirmation)
-    .sort((a, b) => SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot));
+    .sort(byPosition);
 }
 
 // The next week start at 00:00 local. When today is that day, it is a week away.
@@ -558,7 +556,7 @@ export function getMockSubscriptionTier(): SubscriptionTier {
   return toUserProfile(getMockDb().profile).subscriptionTier;
 }
 
-// Ordered morning, afternoon, evening. The real source asks the server and falls back to the cached copy; with neither it throws.
+// In position order (2026-11-09). The real source asks the server and falls back to the cached copy; with neither it throws.
 // A reflection that is only in this phone's outbox has no affirmations yet and no row on the server, so nobody is asked.
 export async function listAffirmationsForEntry(entryId: string): Promise<Affirmation[]> {
   if (getDataSource() === "mock") {
@@ -594,6 +592,32 @@ export async function setAffirmationFavorite(id: string, value: boolean): Promis
   if (row === undefined) return failure("NOT_FOUND", copy.journal.affirmation.saveError);
   row.is_favorite = value;
   return { ok: true, data: toAffirmation(row) };
+}
+
+// One more affirmation for a finished reflection (2026-11-09): add-affirmation writes it from the entry, with a verse of its own,
+// and answers the whole list in position order, which replaces what the phone holds for that entry (a lock-screen slot may have
+// moved). Online only and never queued: the model writes it while the person waits, and a failure is a calm line and another tap.
+// At MAX_AFFIRMATIONS the server answers AFFIRMATION_LIMIT, which comes back as INVALID: the screen then reads the list again.
+// The mock data adds one of its own extras.
+export async function addAffirmation(entryId: string): Promise<RepoResult<Affirmation[]>> {
+  const message = copy.reflection.affirmations.addError;
+  if (getDataSource() === "mock") {
+    await simulateLatency();
+    if (takeMockPrayerMutationFailure()) return failure("NETWORK", message);
+    if (!addMockAffirmation(entryId)) return failure("INVALID", message);
+    return { ok: true, data: readAffirmations(entryId) };
+  }
+  const result = await addAffirmationOnServer(entryId);
+  if (!result.ok) {
+    if (result.code === "AFFIRMATION_LIMIT") return failure("INVALID", message);
+    if (result.code === "NOT_FOUND") return failure("NOT_FOUND", message);
+    if (result.code === "NETWORK") return failure("NETWORK", message);
+    if (result.code === "UNAUTHORIZED") return failure("UNAUTHORIZED", message);
+    return failure("UNKNOWN", message);
+  }
+  const list = [...result.data.affirmations].sort(byPosition);
+  await live.replaceAffirmations(entryId, list);
+  return { ok: true, data: list };
 }
 
 // What the mock database needs of an outbox item. It reads the words of a written entry and nothing else.

@@ -498,6 +498,7 @@ async function queryChecks() {
       "headline",
       "id",
       "is_favorite",
+      "position",
       "time_slot",
       "verse_reference",
       "verse_text",

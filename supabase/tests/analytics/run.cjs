@@ -967,7 +967,7 @@ async function contractChecks() {
     }
     const policy = read("src/services/analyticsPolicy.ts");
     const names = [...policy.matchAll(/name: "([a-z_]+)"/g)].map((match) => match[1]);
-    assert.equal(names.length, 17, names.join(","));
+    assert.equal(names.length, 18, names.join(","));
     for (const name of names) assert.ok(!/crisis|support|sign/.test(name), name);
   });
 }

@@ -1,8 +1,9 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useRef, useState } from "react";
 
-import { REFLECTION_POLL_MAX_MS, REFLECTION_POLL_MS } from "@/constants/app";
+import { MAX_AFFIRMATIONS, REFLECTION_POLL_MAX_MS, REFLECTION_POLL_MS } from "@/constants/app";
 import {
+  addAffirmation as addAffirmationToEntry,
   getEntry,
   getProfile,
   listAffirmationsForEntry,
@@ -10,12 +11,12 @@ import {
   readCachedEntry,
   setPrayerTracked,
 } from "@/data/journalRepository";
-import { getCurrentSlot } from "@/data/selectors";
+import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
 import { isRealtimeLive, subscribeRealtime } from "@/services/realtime";
 import { confirmScriptureIfNeeded } from "@/services/scriptureConfirm";
 import { subscribe, syncNow } from "@/services/syncEngine";
 import { useDevStore } from "@/store/devStore";
-import type { Affirmation, JournalEntry, Prayer, RepoResult, TimeSlot, UserProfile } from "@/types";
+import type { Affirmation, JournalEntry, Prayer, RepoResult, UserProfile } from "@/types";
 
 export type ReflectionState =
   | { status: "loading" }
@@ -26,9 +27,12 @@ export type ReflectionState =
       entry: JournalEntry;
       affirmations: Affirmation[];
       profile: UserProfile;
-      currentSlot: TimeSlot;
       // Mark as Prayer Request (step 29): the entry shows the change at once, and the sync engine sends it.
       setTracked: (tracked: boolean) => Promise<RepoResult<Prayer | null>>;
+      // One more affirmation (2026-11-09), written by the server while the person waits; the list it answers replaces the one on
+      // screen. Null once the reflection has MAX_AFFIRMATIONS, or while it is still a cached copy with no server answer.
+      addAffirmation: (() => Promise<RepoResult<Affirmation[]>>) | null;
+      adding: boolean;
     };
 
 // What a load produced, with the entry it was for: another entry's data is never shown.
@@ -36,7 +40,6 @@ type LoadResult =
   | {
       entryId: string;
       status: "ready";
-      now: Date;
       entry: JournalEntry;
       affirmations: Affirmation[];
       profile: UserProfile;
@@ -80,7 +83,7 @@ export function useReflection(entryId: string): ReflectionState {
         setResult((previous) =>
           previous?.entryId === entryId && previous.status === "ready"
             ? previous
-            : { entryId, status: "ready", now: new Date(), entry: cachedEntry, affirmations: cachedAffirmations, profile },
+            : { entryId, status: "ready", entry: cachedEntry, affirmations: cachedAffirmations, profile },
         );
       }
       // What the server says.
@@ -93,10 +96,10 @@ export function useReflection(entryId: string): ReflectionState {
       }
       // An entry that is only in this phone's outbox is not read again here: the sync engine is preparing it.
       preparing.current = entry.status === "processing" && entry.pending === undefined;
-      setResult({ entryId, status: "ready", now: new Date(), entry, affirmations, profile });
+      setResult({ entryId, status: "ready", entry, affirmations, profile });
       const confirmed = await confirmScriptureIfNeeded(entry);
       if (request !== latestRequest.current || confirmed === entry) return;
-      setResult({ entryId, status: "ready", now: new Date(), entry: confirmed, affirmations, profile });
+      setResult({ entryId, status: "ready", entry: confirmed, affirmations, profile });
     } catch {
       if (request !== latestRequest.current) return;
       setResult((previous) =>
@@ -197,6 +200,37 @@ export function useReflection(entryId: string): ReflectionState {
     load();
   }, [load]);
 
+  // One more affirmation (2026-11-09). One at a time: a second tap while one is on its way does nothing. The server's list replaces
+  // the one on screen (a lock-screen slot may have moved), and the notifications are planned again from the phone's copy. A
+  // reflection the server says is full (INVALID) is read again, so the screen shows the ten it has.
+  const [adding, setAdding] = useState(false);
+  const addingRef = useRef(false);
+  const addAffirmation = useCallback(async (): Promise<RepoResult<Affirmation[]>> => {
+    if (addingRef.current) return { ok: false, code: "UNKNOWN", message: "" };
+    addingRef.current = true;
+    setAdding(true);
+    try {
+      const added = await addAffirmationToEntry(entryId);
+      if (added.ok) {
+        setResult((previous) =>
+          previous?.entryId === entryId && previous.status === "ready" ? { ...previous, affirmations: added.data } : previous,
+        );
+        requestAffirmationReschedule();
+      } else if (added.code === "INVALID") {
+        const affirmations = await listAffirmationsForEntry(entryId).catch(() => null);
+        if (affirmations !== null) {
+          setResult((previous) =>
+            previous?.entryId === entryId && previous.status === "ready" ? { ...previous, affirmations } : previous,
+          );
+        }
+      }
+      return added;
+    } finally {
+      addingRef.current = false;
+      setAdding(false);
+    }
+  }, [entryId]);
+
   const current = result?.entryId === entryId ? result : null;
   if (current === null) {
     return { status: "loading" };
@@ -207,12 +241,14 @@ export function useReflection(entryId: string): ReflectionState {
   if (current.status === "error") {
     return { status: "error", retry };
   }
+  const canAdd = current.entry.status === "ready" && current.entry.devotional !== null && current.affirmations.length < MAX_AFFIRMATIONS;
   return {
     status: "ready",
     entry: current.entry,
     affirmations: current.affirmations,
     profile: current.profile,
-    currentSlot: getCurrentSlot(current.now, current.profile.reminders),
     setTracked,
+    addAffirmation: canAdd ? addAffirmation : null,
+    adding,
   };
 }

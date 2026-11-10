@@ -47,7 +47,10 @@ export type AffirmationRow = {
   id: string;
   user_id: string;
   entry_id: string;
-  time_slot: string;
+  // Null since 2026-11-09 for an affirmation added beyond the first three (add-affirmation): only three carry a slot.
+  time_slot: string | null;
+  // The order of the cards, 1 to 10 (2026-11-09). Optional: a row made by a test, or read before the migration, may not name it.
+  position?: number | null;
   headline: string;
   affirmation_text: string;
   is_favorite: boolean;
@@ -293,7 +296,9 @@ export async function listAffirmations(
   entryId: string,
 ): Promise<AffirmationRow[]> {
   const { data, error } = await admin.from("daily_affirmations").select("*")
-    .eq("user_id", userId).eq("entry_id", entryId);
+    .eq("user_id", userId).eq("entry_id", entryId)
+    // In the order of the cards (2026-11-09).
+    .order("position", { ascending: true });
   if (error) throw dbFailure("affirmations_read", error);
   return data as AffirmationRow[];
 }
@@ -310,10 +315,12 @@ async function replaceAffirmations(
   if (affirmations.length === 0) return;
   // scheduled_for and is_delivered stay unset: the phone schedules the affirmation notifications itself (step 28), so the
   // two columns are unused.
-  const inserted = await admin.from("daily_affirmations").insert(affirmations.map((item) => ({
+  const inserted = await admin.from("daily_affirmations").insert(affirmations.map((item, index) => ({
     user_id: userId,
     entry_id: entryId,
     time_slot: item.slot,
+    // The order of the cards (2026-11-09): morning, afternoon, evening, then whatever add-affirmation adds.
+    position: index + 1,
     headline: item.headline,
     affirmation_text: item.text,
     verse_reference: item.verse?.reference ?? null,

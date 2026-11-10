@@ -81,11 +81,20 @@ function toPrayer(row: EntryRow, finished: boolean): Prayer | null {
   };
 }
 
-function toAffirmation(row: AffirmationRow): Affirmation {
+// A row's position (2026-11-09), or its slot's order for a row read before the column existed, or 1.
+function affirmationPosition(value: unknown, slot: TimeSlot | null): number {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1) return value;
+  return slot === null ? 1 : TIME_SLOTS.indexOf(slot) + 1;
+}
+
+export function toAffirmation(row: AffirmationRow): Affirmation {
+  const slot = pick<TimeSlot>(TIME_SLOTS, row.time_slot);
   return {
     id: row.id,
     entryId: row.entry_id,
-    slot: pick<TimeSlot>(TIME_SLOTS, row.time_slot) ?? "morning",
+    // Null (2026-11-09) for an affirmation beyond the first three: it carries no lock-screen slot.
+    slot,
+    position: affirmationPosition(row.position, slot),
     headline: row.headline,
     text: row.affirmation_text,
     isFavorite: row.is_favorite === true,
@@ -115,9 +124,9 @@ export function toResponse(row: EntryRow, affirmations: AffirmationRow[]): Proce
     failureCode: pick(ERROR_CODES, row.error_code),
     isLocalOnly: status === "pending" || status === "uploading",
   };
-  const slotOrder = (item: Affirmation) => TIME_SLOTS.indexOf(item.slot);
+  // In the order of the cards (2026-11-09): the three slotted ones first, then what add-affirmation added.
   return {
     entry,
-    affirmations: affirmations.map(toAffirmation).sort((a, b) => slotOrder(a) - slotOrder(b)),
+    affirmations: affirmations.map(toAffirmation).sort((a, b) => a.position - b.position),
   };
 }

@@ -8,6 +8,9 @@ import type { AmbientSound, PackageKind, PlaybackRate, PurchaseErrorCode, TimeSl
 // The needs_action codes of syncPolicy.ts that an entry_failed event may carry; any other code is "OTHER".
 export type EntryFailedCode = "TOO_SHORT" | "NO_SPEECH" | "PAYLOAD_TOO_LARGE" | "AUDIO_NOT_FOUND" | "UNREADABLE" | "OTHER";
 
+// The place of an affirmation a person added (2026-11-09): the fourth to the tenth of its reflection. A number, never the entry.
+export type AddedPosition = 4 | 5 | 6 | 7 | 8 | 9 | 10;
+
 // The catalog: the only events track() accepts. No event, property or value is about a crisis entry, Support Resources,
 // signing in or out, or anything a person wrote; there are no ids, titles, verses, counts of words or free text.
 export type AnalyticsEvent =
@@ -18,6 +21,7 @@ export type AnalyticsEvent =
   | { name: "devotional_completed"; props: { rate: PlaybackRate } }
   | { name: "ambient_changed"; props: { sound: AmbientSound; source: "now_playing" | "profile" } }
   | { name: "affirmation_favorited"; props: { favorited: boolean } }
+  | { name: "affirmation_added"; props: { position: AddedPosition } }
   | { name: "affirmation_notification_opened"; props: { slot: TimeSlot } }
   | { name: "prayer_tracked_changed"; props: { tracked: boolean } }
   | { name: "prayer_marked_answered"; props: { has_note: boolean } }
@@ -84,6 +88,7 @@ const PURCHASE_CODES = everyKey<PurchaseErrorCode>({
 });
 const SLOTS = everyKey<TimeSlot>({ morning: true, afternoon: true, evening: true });
 const PLANS = everyKey<PackageKind>({ annual: true, monthly: true });
+const ADDED_POSITIONS: readonly AddedPosition[] = [4, 5, 6, 7, 8, 9, 10];
 
 // Each event's own properties: all of them must be there and valid, or the event is dropped.
 const EVENT_PROPS: { [N in AnalyticsEventName]: { [K in keyof AnalyticsProps<N>]-?: Check } } = {
@@ -94,6 +99,7 @@ const EVENT_PROPS: { [N in AnalyticsEventName]: { [K in keyof AnalyticsProps<N>]
   devotional_completed: { rate: oneOf(PLAYBACK_RATES) },
   ambient_changed: { sound: oneOf(AMBIENT_SOUNDS), source: oneOf(["now_playing", "profile"]) },
   affirmation_favorited: { favorited: bool },
+  affirmation_added: { position: oneOf(ADDED_POSITIONS) },
   affirmation_notification_opened: { slot: oneOf(SLOTS) },
   prayer_tracked_changed: { tracked: bool },
   prayer_marked_answered: { has_note: bool },

@@ -1,6 +1,7 @@
 import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
 
 import {
+  ADD_AFFIRMATION_TIMEOUT_MS,
   CONFIRM_SCRIPTURE_TIMEOUT_MS,
   DELETE_ACCOUNT_TIMEOUT_MS,
   DELETE_ENTRY_TIMEOUT_MS,
@@ -10,6 +11,8 @@ import {
 } from "@/constants/app";
 import { getSupabase } from "@/services/supabaseClient";
 import type {
+  AddAffirmationRequest,
+  AddAffirmationResponse,
   Affirmation,
   ConfirmScriptureRequest,
   ConfirmScriptureResponse,
@@ -26,11 +29,12 @@ import type {
   Scripture,
   SyncSubscriptionResponse,
 } from "@/types";
+import { affirmationPosition } from "@/utils/affirmationOrder";
 import { readAffirmationVerse } from "@/utils/affirmationVerse";
 import { NO_SESSION_ERROR_NAME } from "@/utils/supabaseErrors";
 
-// The only code that calls the Edge Functions (step 25, delete-entry since step 29b, sync-subscription since step 30, and export-data
-// and delete-account since step 31). supabase-js sends the Clerk session token as the bearer
+// The only code that calls the Edge Functions (step 25, delete-entry since step 29b, sync-subscription since step 30, export-data
+// and delete-account since step 31, and add-affirmation since 2026-11-09). supabase-js sends the Clerk session token as the bearer
 // token by itself (the accessToken option of src/services/supabaseClient.ts), so nothing here builds an Authorization
 // header or asks Clerk for a token. Every call answers with data or with a failure that carries the HTTP status and a
 // code; it never throws.
@@ -45,7 +49,8 @@ export type FunctionName =
   | "delete-entry"
   | "sync-subscription"
   | "export-data"
-  | "delete-account";
+  | "delete-account"
+  | "add-affirmation";
 
 export type FunctionResult<T> =
   | { ok: true; data: T }
@@ -151,8 +156,9 @@ function isAffirmation(value: unknown): value is Affirmation {
     isRecord(value) &&
     isString(value.id) &&
     isString(value.entryId) &&
-    isString(value.slot) &&
-    SLOTS.includes(value.slot) &&
+    // 2026-11-09: an added affirmation has no slot; a function from before then sends no position (normalizeAffirmation fills it).
+    (value.slot === null || (isString(value.slot) && SLOTS.includes(value.slot))) &&
+    (value.position === undefined || typeof value.position === "number") &&
     isString(value.headline) &&
     isString(value.text) &&
     typeof value.isFavorite === "boolean"
@@ -161,6 +167,16 @@ function isAffirmation(value: unknown): value is Affirmation {
 
 function isProcessEntryResponse(value: unknown): value is ProcessEntryResponse {
   return isRecord(value) && isEntry(value.entry) && Array.isArray(value.affirmations) && value.affirmations.every(isAffirmation);
+}
+
+function isAddAffirmationResponse(value: unknown): value is AddAffirmationResponse {
+  return isRecord(value) && Array.isArray(value.affirmations) && value.affirmations.every(isAffirmation);
+}
+
+// What the gateway hands on of an affirmation: its verse, or null (a function from before step 37 sends none), and its position (a
+// function from before 2026-11-09 sends none: its slot's place).
+function normalizeAffirmation(item: Affirmation): Affirmation {
+  return { ...item, position: affirmationPosition(item.position, item.slot), verse: readAffirmationVerse(item.verse) };
 }
 
 function isConfirmScriptureResponse(value: unknown): value is ConfirmScriptureResponse {
@@ -227,7 +243,13 @@ async function readFailure(error: unknown): Promise<{ status: number; code: stri
 
 async function callFunction<T>(
   name: FunctionName,
-  body: ProcessEntryRequest | ConfirmScriptureRequest | DeleteEntryRequest | DeleteAccountRequest | Record<string, never>,
+  body:
+    | ProcessEntryRequest
+    | ConfirmScriptureRequest
+    | DeleteEntryRequest
+    | DeleteAccountRequest
+    | AddAffirmationRequest
+    | Record<string, never>,
   timeout: number,
   isValid: (value: unknown) => value is T,
 ): Promise<FunctionResult<T>> {
@@ -252,14 +274,21 @@ async function callFunction<T>(
 export async function processEntry(request: ProcessEntryRequest): Promise<FunctionResult<ProcessEntryResponse>> {
   const result = await callFunction("process-entry", request, PROCESS_ENTRY_TIMEOUT_MS, isProcessEntryResponse);
   if (!result.ok) return result;
-  // Step 37: an affirmation's verse, or null (a function from before step 37 sends no verse at all).
-  const affirmations = result.data.affirmations.map((item) => ({ ...item, verse: readAffirmationVerse(item.verse) }));
-  return { ok: true, data: { ...result.data, affirmations } };
+  return { ok: true, data: { ...result.data, affirmations: result.data.affirmations.map(normalizeAffirmation) } };
 }
 
 // confirm-scripture (step 20): the passage of one reflection, read again from the Bible.
 export function confirmScripture(entryId: string): Promise<FunctionResult<ConfirmScriptureResponse>> {
   return callFunction("confirm-scripture", { entryId }, CONFIRM_SCRIPTURE_TIMEOUT_MS, isConfirmScriptureResponse);
+}
+
+// add-affirmation (2026-11-09): one more affirmation for a finished reflection, written by the model from the entry with a verse
+// of its own, and the whole list as it now stands, in position order. AFFIRMATION_LIMIT (409) means the reflection already has
+// MAX_AFFIRMATIONS; NOT_FOUND an entry that is not the caller's finished reflection.
+export async function addAffirmation(entryId: string): Promise<FunctionResult<AddAffirmationResponse>> {
+  const result = await callFunction("add-affirmation", { entryId }, ADD_AFFIRMATION_TIMEOUT_MS, isAddAffirmationResponse);
+  if (!result.ok) return result;
+  return { ok: true, data: { affirmations: result.data.affirmations.map(normalizeAffirmation) } };
 }
 
 // delete-entry (step 29b): one reflection, deleted for good on the server (its files, its affirmations and the row). NOT_FOUND

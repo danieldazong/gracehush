@@ -1,23 +1,18 @@
-import type { SymbolViewProps } from "expo-symbols";
+import { Image } from "expo-image";
 import { useState, type ReactElement } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import { AffirmationVerseBlock } from "@/components/AffirmationVerseBlock";
 import { FadeIn } from "@/components/FadeIn";
-import { Icon } from "@/components/Icon";
+import { PrimaryButton } from "@/components/PrimaryButton";
 import { SegmentedControl } from "@/components/SegmentedControl";
+import { MAX_AFFIRMATIONS } from "@/constants/app";
 import { copy } from "@/constants/copy";
-import { colors } from "@/constants/theme";
-import type { Affirmation, Devotional, ReflectionTab, TimeSlot } from "@/types";
-import { flowVerse, formatTime12, quoteVerse } from "@/utils/format";
+import { images } from "@/constants/images";
+import type { Affirmation, Devotional, ReflectionTab } from "@/types";
+import { flowVerse, quoteVerse } from "@/utils/format";
 
 const { tabs, affirmations: affirmationsCopy, closingPrayer: closingPrayerCopy } = copy.reflection;
-
-const slotIcons = {
-  morning: { android: "wb_twilight", ios: "sunrise.fill" },
-  afternoon: { android: "wb_sunny", ios: "sun.max.fill" },
-  evening: { android: "bedtime", ios: "moon.fill" },
-} satisfies Record<TimeSlot, SymbolViewProps["name"]>;
 
 // The script's paragraphs are separated by a blank line.
 function DevotionalPane({ script }: { script: string }) {
@@ -39,59 +34,93 @@ function DevotionalPane({ script }: { script: string }) {
   );
 }
 
-type AffirmationsPaneProps = {
-  affirmations: Affirmation[];
-  reminders: Record<TimeSlot, string>;
-  currentSlot: TimeSlot;
+// What the Affirmations pane offers under its last card (2026-11-09): one more affirmation at a time, up to MAX_AFFIRMATIONS.
+// `onAdd` is null while the reflection cannot take one (a cached copy with no server answer yet); `remaining` is how many may
+// still be added; at zero the button gives way to one line. `online` false shows the offline line instead of calling; `failed`
+// shows the calm error line until the next tap.
+export type AddAffirmationFooter = {
+  onAdd: (() => void) | null;
+  remaining: number;
+  adding: boolean;
+  online: boolean;
+  failed: boolean;
 };
 
-// One row per affirmation. The current slot is marked with a plum bar, and every row is one element for
-// a screen reader that says so.
-function AffirmationsPane({ affirmations, reminders, currentSlot }: AffirmationsPaneProps) {
+// One card per affirmation: the headline, its verse and its text under the brand mark. The slot and its time left the
+// cards on 2026-11-09 (the owner's request): which three reach the lock screen is the notifications' concern, not the
+// card's. Every card is one element for a screen reader, which hears its place in the list first.
+function AffirmationsPane({ affirmations, add }: { affirmations: Affirmation[]; add: AddAffirmationFooter | undefined }) {
   if (affirmations.length === 0) {
     return <Text className="text-body-sm text-mauve">{affirmationsCopy.empty}</Text>;
   }
 
   return (
     <View className="gap-2.5">
-      {affirmations.map((affirmation) => {
-        const slotName = copy.onboarding.rhythm.slots[affirmation.slot].name;
-        const time = formatTime12(reminders[affirmation.slot]);
-        const isCurrent = affirmation.slot === currentSlot;
-
-        return (
-          <View
-            key={affirmation.id}
-            accessible
-            accessibilityLabel={affirmationsCopy.rowLabel(
-              slotName,
-              time,
-              isCurrent,
-              affirmation.headline,
-              affirmation.text,
-              affirmation.verse
-                ? copy.affirmationVerse.spoken(quoteVerse(flowVerse(affirmation.verse.text)), affirmation.verse.reference)
-                : null,
-            )}
-            className="flex-row items-start gap-3 overflow-hidden rounded-xl border border-petal bg-linen/80 p-3"
-          >
-            {isCurrent ? <View className="absolute inset-y-0 left-0 w-[3px] bg-plum" /> : null}
-            <View className="size-8 items-center justify-center rounded-full border border-petal bg-blush">
-              <Icon name={slotIcons[affirmation.slot]} size={17} color={colors.rosewood} />
-            </View>
-            <View className="flex-1">
-              <Text className="eyebrow">{affirmationsCopy.eyebrow(slotName, time)}</Text>
-              <Text className="mt-0.5 text-section text-ink">{affirmation.headline}</Text>
-              {affirmation.verse ? (
-                <View className="mt-2">
-                  <AffirmationVerseBlock verse={affirmation.verse} />
-                </View>
-              ) : null}
-              <Text className="mt-2 text-body text-ink/80">{affirmation.text}</Text>
-            </View>
+      {affirmations.map((affirmation, index) => (
+        <View
+          key={affirmation.id}
+          accessible
+          accessibilityLabel={affirmationsCopy.rowLabel(
+            index + 1,
+            affirmations.length,
+            affirmation.headline,
+            affirmation.text,
+            affirmation.verse
+              ? copy.affirmationVerse.spoken(quoteVerse(flowVerse(affirmation.verse.text)), affirmation.verse.reference)
+              : null,
+          )}
+          className="flex-row items-start gap-3 rounded-xl border border-petal bg-linen/80 p-3"
+        >
+          <View className="size-8 items-center justify-center rounded-full border border-petal bg-blush">
+            {/* The mark at 18, as the Rhythm step's sample notification draws it: a GraceHush affirmation. */}
+            <Image source={images.logoMark} contentFit="contain" style={styles.mark} />
           </View>
-        );
-      })}
+          <View className="flex-1">
+            <Text className="text-section text-ink">{affirmation.headline}</Text>
+            {affirmation.verse ? (
+              <View className="mt-2">
+                <AffirmationVerseBlock verse={affirmation.verse} />
+              </View>
+            ) : null}
+            <Text className="mt-2 text-body text-ink/80">{affirmation.text}</Text>
+          </View>
+        </View>
+      ))}
+      {add ? <AddAffirmationRow add={add} /> : null}
+    </View>
+  );
+}
+
+// The ghost button under the last card, with how many more may be added beside its label, or the one line once the reflection has
+// them all. The error and offline lines are polite live regions, so a screen reader hears them without leaving the button.
+function AddAffirmationRow({ add }: { add: AddAffirmationFooter }) {
+  if (add.remaining <= 0) {
+    return <Text className="pt-1 text-center text-body-sm text-mauve">{affirmationsCopy.allAdded(MAX_AFFIRMATIONS)}</Text>;
+  }
+  return (
+    <View className="gap-2 pt-1">
+      <PrimaryButton
+        label={add.adding ? affirmationsCopy.adding : affirmationsCopy.add}
+        tone="ghost"
+        iconLeft={{ ios: "plus", android: "add" }}
+        loading={add.adding}
+        disabled={add.onAdd === null}
+        onPress={() => add.onAdd?.()}
+        accessibilityHint={affirmationsCopy.addLabel(add.remaining)}
+      />
+      {!add.adding && add.online && !add.failed ? (
+        <Text className="text-center text-body-sm text-mauve">{affirmationsCopy.remaining(add.remaining)}</Text>
+      ) : null}
+      {!add.online ? (
+        <Text accessibilityLiveRegion="polite" className="text-center text-body-sm text-mauve">
+          {affirmationsCopy.addOffline}
+        </Text>
+      ) : null}
+      {add.online && add.failed ? (
+        <Text accessibilityLiveRegion="polite" className="text-center text-body-sm text-rosewood">
+          {affirmationsCopy.addError}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -99,21 +128,15 @@ function AffirmationsPane({ affirmations, reminders, currentSlot }: Affirmations
 type ReflectionCarouselProps = {
   devotional: Devotional;
   affirmations: Affirmation[];
-  reminders: Record<TimeSlot, string>;
-  currentSlot: TimeSlot;
   initialTab?: ReflectionTab;
+  // The Affirmations pane's footer (2026-11-09); without it the pane ends with its last card.
+  add?: AddAffirmationFooter;
 };
 
 // Devotional, Affirmations and Prayer (the closing prayer) in one card. Only the selected pane is rendered, and it
 // fades in when the tab changes. An entry without a closing prayer has two tabs. It opens on `initialTab`
 // (a tapped affirmation notification, step 28), else on the devotional.
-export function ReflectionCarousel({
-  devotional,
-  affirmations,
-  reminders,
-  currentSlot,
-  initialTab,
-}: ReflectionCarouselProps) {
+export function ReflectionCarousel({ devotional, affirmations, initialTab, add }: ReflectionCarouselProps) {
   const [tab, setTab] = useState<ReflectionTab>(initialTab ?? "devotional");
   const closingPrayer = devotional.closingPrayer?.trim() ?? "";
 
@@ -129,13 +152,7 @@ export function ReflectionCarousel({
 
   let pane: ReactElement;
   if (selected === "affirmations") {
-    pane = (
-      <AffirmationsPane
-        affirmations={affirmations}
-        reminders={reminders}
-        currentSlot={currentSlot}
-      />
-    );
+    pane = <AffirmationsPane affirmations={affirmations} add={add} />;
   } else if (selected === "prayer") {
     pane = (
       <View className="rounded-xl border border-petal bg-blush/60 p-3">
@@ -158,3 +175,8 @@ export function ReflectionCarousel({
     </View>
   );
 }
+
+// expo-image takes a style, not a className (Style Exception Rules).
+const styles = StyleSheet.create({
+  mark: { width: 18, height: 18 },
+});

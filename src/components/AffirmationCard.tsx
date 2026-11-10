@@ -5,7 +5,7 @@ import { AffirmationVerseBlock } from "@/components/AffirmationVerseBlock";
 import { Icon } from "@/components/Icon";
 import { copy } from "@/constants/copy";
 import { colors, shadows } from "@/constants/theme";
-import type { Affirmation } from "@/types";
+import type { Affirmation, TimeSlot } from "@/types";
 
 // Android's symbols are outline only, so its saved heart is a different glyph (a heart with a check).
 const icons = {
@@ -15,7 +15,8 @@ const icons = {
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 type AffirmationCardProps = {
-  affirmation: Affirmation;
+  // One that carries a lock-screen slot (getAffirmationForSlot): the card names its time of day.
+  affirmation: Affirmation & { slot: TimeSlot };
   // "8:00 AM • Tied to yesterday's prayer", built by the screen.
   footer: string;
   // The heart was pressed. Journal Home's hook saves it (step 25): it shows the new state at once and puts the old one back

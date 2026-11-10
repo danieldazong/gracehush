@@ -76,6 +76,11 @@ export const PRAYER_CATEGORIES = [
 
 export const TIME_SLOTS = ["morning", "afternoon", "evening"] as const satisfies readonly TimeSlot[];
 
+// How many affirmations one reflection may hold (2026-11-09): the three it is made with and up to seven more, added one at a
+// time from its Affirmations tab (add-affirmation). The table's affirmation_position_range rule says the same. Mirrored in
+// src/constants/app.ts (MAX_AFFIRMATIONS).
+export const AFFIRMATION_LIMIT = 10;
+
 // What the model is allowed to write. Out of range counts as invalid (nothing is truncated). These are the hard bounds that
 // stop a runaway reply; the targets the instruction asks for are tighter (step 32: a devotional of 110 to 150 words, a title of
 // at most 40 characters), and the tone evaluation measures how close the model comes. A headline is a notification's text

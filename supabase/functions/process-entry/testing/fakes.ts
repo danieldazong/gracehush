@@ -150,6 +150,8 @@ const COLUMNS: Record<string, string[]> = {
     // gen-v2.5 (step 37).
     "verse_reference",
     "verse_text",
+    // 2026-11-09 (more affirmations).
+    "position",
   ],
   deleted_devotionals: ["entry_id", "user_id", "made_at", "deleted_at"],
 };
@@ -301,7 +303,8 @@ function check(table: string, row: Row, world: World): void {
     if (clash) fail("23505", "journal_entries_client_entry_key");
   }
   if (table === "daily_affirmations") {
-    if (!["morning", "afternoon", "evening"].includes(String(row.time_slot))) {
+    // The slot is optional since 2026-11-09 (an affirmation added beyond the first three has none); a named one is one of three.
+    if (row.time_slot !== null && !["morning", "afternoon", "evening"].includes(String(row.time_slot))) {
       fail("23514", "daily_affirmations_time_slot_check");
     }
     for (const column of ["headline", "affirmation_text", "user_id", "entry_id"]) {
@@ -309,10 +312,21 @@ function check(table: string, row: Row, world: World): void {
     }
     const entry = world.entries.find((candidate) => candidate.id === row.entry_id && candidate.user_id === row.user_id);
     if (!entry) fail("23503", "daily_affirmations_entry_user_fkey");
-    const clash = world.affirmations.some((other) =>
-      other.id !== row.id && other.entry_id === row.entry_id && other.time_slot === row.time_slot
-    );
+    // One affirmation per slot (a partial unique index since 2026-11-09: two without a slot are no clash).
+    const clash = row.time_slot !== null &&
+      world.affirmations.some((other) =>
+        other.id !== row.id && other.entry_id === row.entry_id && other.time_slot === row.time_slot
+      );
     if (clash) fail("23505", "daily_affirmations_entry_slot_key");
+    // The migration of 2026-11-09: a position from 1 to 10, unique in its entry.
+    const position = row.position;
+    if (typeof position !== "number" || !Number.isInteger(position) || position < 1 || position > 10) {
+      fail("23514", "affirmation_position_range");
+    }
+    const samePlace = world.affirmations.some((other) =>
+      other.id !== row.id && other.entry_id === row.entry_id && other.position === position
+    );
+    if (samePlace) fail("23505", "daily_affirmations_entry_position_key");
     // The step 37 migration's two rules: a verse is both its reference and its text, or neither, and both are short.
     const reference = row.verse_reference ?? null;
     const verse = row.verse_text ?? null;
@@ -377,12 +391,35 @@ function sortRows(rows: Row[], order: string): Row[] {
   });
   return [...rows].sort((a, b) => {
     for (const { column, sign } of keys) {
+      // Two numbers (an affirmation's position, 2026-11-09) compare as numbers, so 10 comes after 9.
+      if (typeof a[column] === "number" && typeof b[column] === "number" && a[column] !== b[column]) {
+        return (a[column] as number) < (b[column] as number) ? -sign : sign;
+      }
       const left = String(a[column] ?? "");
       const right = String(b[column] ?? "");
       if (left !== right) return left < right ? -sign : sign;
     }
     return 0;
   });
+}
+
+// The migration's feature_affirmation (2026-11-09), as PostgREST serves an RPC (supabase-js posts the arguments as the body):
+// the holder of the slot loses it and the affirmation named takes it, in one step; an unknown slot is 22023 and an affirmation
+// that is not the entry's is P0002, with nothing changed.
+function featureAffirmation(world: World, request: Recorded): Response {
+  if (request.method !== "POST") throw new PgError(405, "PGRST105", "method not allowed");
+  const args = (request.json ?? {}) as Row;
+  const entry = String(args.p_entry ?? "");
+  const target = String(args.p_affirmation ?? "");
+  const slot = args.p_slot;
+  if (!["morning", "afternoon", "evening"].includes(String(slot))) throw new PgError(400, "22023", "unknown time slot");
+  const named = world.affirmations.find((row) => row.id === target && row.entry_id === entry);
+  if (!named) throw new PgError(400, "P0002", "no such affirmation");
+  for (const row of world.affirmations) {
+    if (row.entry_id === entry && row.time_slot === slot && row.id !== target) row.time_slot = null;
+  }
+  named.time_slot = slot;
+  return new Response(null, { status: 204 });
 }
 
 function prefer(request: Recorded): Set<string> {
@@ -487,6 +524,13 @@ function rest(world: World, table: string, request: Recorded): Response {
           created_at: now,
           ...record,
         };
+        // The migration's trigger (2026-11-09): a row inserted with no position takes the next one of its entry, so the rows the
+        // tests seed and the three process-entry inserts need not name it.
+        if (row.position === undefined || row.position === null) {
+          const taken = world.affirmations.filter((other) => other.entry_id === row.entry_id)
+            .map((other) => Number(other.position ?? 0));
+          row.position = Math.max(0, ...taken) + 1;
+        }
       }
       if (table === "users_profile" && rows.some((other) => other.id === row.id)) {
         throw new PgError(409, "23505", "users_profile_pkey");
@@ -1057,6 +1101,7 @@ export function installWorld(): World {
     if (url.origin === SUPABASE_URL) {
       world.requests.push(recorded);
       try {
+        if (url.pathname === "/rest/v1/rpc/feature_affirmation") return featureAffirmation(world, recorded);
         if (url.pathname.startsWith("/rest/v1/")) return rest(world, url.pathname.slice("/rest/v1/".length), recorded);
         const removal = /^\/storage\/v1\/object\/(journal_media|exports)$/.exec(url.pathname);
         if (removal && request.method === "DELETE") return removeObjects(world, removal[1], recorded);

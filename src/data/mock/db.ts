@@ -1,4 +1,5 @@
-import { buildAffirmations } from "@/data/mock/affirmations";
+import { MAX_AFFIRMATIONS } from "@/constants/app";
+import { buildAffirmations, EXTRA_AFFIRMATIONS } from "@/data/mock/affirmations";
 import {
   ANXIOUS_ENTRY_ID,
   buildEntries,
@@ -93,4 +94,33 @@ export function removeMockEntry(id: string): void {
   const db = getMockDb();
   db.entries.splice(0, db.entries.length, ...db.entries.filter((row) => row.id !== id));
   db.affirmations.splice(0, db.affirmations.length, ...db.affirmations.filter((row) => row.entry_id !== id));
+}
+
+// The mock data's add-affirmation (data source "mock", 2026-11-09): one more row at the next position, with no lock-screen slot,
+// from EXTRA_AFFIRMATIONS in order. False once the entry has MAX_AFFIRMATIONS, or when there is no such entry.
+export function addMockAffirmation(entryId: string): boolean {
+  const db = getMockDb();
+  const entry = db.entries.find((row) => row.id === entryId);
+  if (entry === undefined) return false;
+  const existing = db.affirmations.filter((row) => row.entry_id === entryId);
+  if (existing.length >= MAX_AFFIRMATIONS) return false;
+  const position = Math.max(existing.length, ...existing.map((row) => row.position)) + 1;
+  const extra = EXTRA_AFFIRMATIONS[(position - 4 + EXTRA_AFFIRMATIONS.length) % EXTRA_AFFIRMATIONS.length];
+  if (extra === undefined) return false;
+  db.affirmations.push({
+    id: `affirmation-${entryId}-${position}`,
+    user_id: entry.user_id,
+    entry_id: entryId,
+    time_slot: null,
+    position,
+    headline: extra.headline,
+    affirmation_text: extra.text,
+    is_delivered: false,
+    created_at: new Date().toISOString(),
+    is_favorite: false,
+    scheduled_for: null,
+    verse_reference: extra.verse.reference,
+    verse_text: extra.verse.text,
+  });
+  return true;
 }

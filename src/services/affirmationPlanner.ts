@@ -67,6 +67,9 @@ export function planAffirmations(input: PlanInput): PlannedAffirmation[] {
   const headlines = new Map<TimeSlot, string>();
   const verses = new Map<TimeSlot, string>();
   for (const affirmation of source.affirmations) {
+    // Only the three that carry a slot reach the lock screen (2026-11-09): an added affirmation has none unless the model moved one
+    // onto it, and then the one it took it from has none.
+    if (affirmation.slot === null) continue;
     headlines.set(affirmation.slot, affirmation.headline.trim());
     const verse = affirmation.verse ?? null;
     if (verse && verse.text.trim() && verse.reference.trim()) {

@@ -546,11 +546,21 @@ export const copy = {
       prayer: "Prayer",
     },
     affirmations: {
-      eyebrow: (slotName: string, time: string) => `${slotName} • ${time}`,
-      // Step 37: `verse` is the spoken verse (copy.affirmationVerse.spoken), or null for an affirmation without one.
-      rowLabel: (slotName: string, time: string, isCurrent: boolean, headline: string, text: string, verse: string | null) =>
-        `${slotName}, ${time}${isCurrent ? ", current" : ""}. ${headline}. ${verse ? `${verse} ` : ""}${text}`,
+      // One card is one element for a screen reader: its place in the list, the headline, the verse (copy.affirmationVerse.spoken,
+      // or null for an affirmation without one) and the text. The slot and its time left the cards on 2026-11-09.
+      rowLabel: (index: number, count: number, headline: string, text: string, verse: string | null) =>
+        `Affirmation ${index} of ${count}. ${headline}. ${verse ? `${verse} ` : ""}${text}`,
       empty: "No affirmations were created for this reflection.",
+      // One more affirmation at a time (2026-11-09), up to MAX_AFFIRMATIONS: the button under the last card, how many a person may
+      // still add, the line that takes the button's place at the limit, and the two calm lines (no connection; it did not work).
+      add: "Add another affirmation",
+      addLabel: (remaining: number) =>
+        remaining === 1 ? "One more affirmation can be added" : `${remaining} more affirmations can be added`,
+      adding: "Adding an affirmation",
+      remaining: (remaining: number) => (remaining === 1 ? "1 more" : `${remaining} more`),
+      allAdded: (max: number) => `All ${max} affirmations are here for this reflection.`,
+      addError: "We couldn’t add an affirmation. Please try again.",
+      addOffline: "Connect to the internet to add an affirmation.",
     },
     words: {
       // Step 36: a person whose recording was misheard can see why in one tap.

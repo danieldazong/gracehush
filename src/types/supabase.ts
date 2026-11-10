@@ -48,8 +48,9 @@ export type Database = {
           id: string;
           is_delivered: boolean;
           is_favorite: boolean;
+          position: number;
           scheduled_for: string | null;
-          time_slot: string;
+          time_slot: string | null;
           user_id: string;
           verse_reference: string | null;
           verse_text: string | null;
@@ -62,8 +63,9 @@ export type Database = {
           id?: string;
           is_delivered?: boolean;
           is_favorite?: boolean;
+          position: number;
           scheduled_for?: string | null;
-          time_slot: string;
+          time_slot?: string | null;
           user_id: string;
           verse_reference?: string | null;
           verse_text?: string | null;
@@ -76,8 +78,9 @@ export type Database = {
           id?: string;
           is_delivered?: boolean;
           is_favorite?: boolean;
+          position?: number;
           scheduled_for?: string | null;
-          time_slot?: string;
+          time_slot?: string | null;
           user_id?: string;
           verse_reference?: string | null;
           verse_text?: string | null;

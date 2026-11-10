@@ -38,11 +38,15 @@ export function getCurrentSlot(now: Date, reminders: Record<TimeSlot, string>): 
   );
 }
 
+// The affirmation that carries a lock-screen slot, narrowed to one that has it: Journal Home's card names its time of day. An
+// added affirmation has no slot (2026-11-09) and is never the card.
 export function getAffirmationForSlot(
   affirmations: Affirmation[],
   slot: TimeSlot,
-): Affirmation | null {
-  return affirmations.find((affirmation) => affirmation.slot === slot) ?? null;
+): (Affirmation & { slot: TimeSlot }) | null {
+  return (
+    affirmations.find((affirmation): affirmation is Affirmation & { slot: TimeSlot } => affirmation.slot === slot) ?? null
+  );
 }
 
 // Consecutive local days with at least one finished reflection (one that has its devotional, a heavy moment's included),

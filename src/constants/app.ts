@@ -19,6 +19,9 @@ export const AFFIRMATION_CHANNEL_ID = "affirmations";
 export const AFFIRMATION_DAYS_AHEAD = 7;
 export const AFFIRMATION_MIN_LEAD_MS = 10_000;
 export const AFFIRMATION_RESCHEDULE_DEBOUNCE_MS = 500;
+// A reflection has at most this many affirmations (2026-11-09): the three made with it, and up to seven more the person adds one
+// at a time from Reflection. Keep in sync with AFFIRMATION_LIMIT in supabase/functions/process-entry/constants.ts.
+export const MAX_AFFIRMATIONS = 10;
 
 // Keep in sync with supabase/functions/process-entry/contracts.ts (step 19)
 export const MAX_RECORDING_MS = 300_000;
@@ -69,6 +72,9 @@ export const CONFIRM_SCRIPTURE_TIMEOUT_MS = 15_000;
 // delete-entry (step 29b) makes a few Storage and database calls from a region far from the database: up to about 10 seconds. A
 // request that times out may still have succeeded, and sending it again answers NOT_FOUND, which counts as deleted.
 export const DELETE_ENTRY_TIMEOUT_MS = 30_000;
+// add-affirmation (2026-11-09) makes one model call (two with a correction) and reads one verse from the Bible: about 5 to 15
+// seconds, and the function stops itself at 40. The person waits on the button, so the call gives up a little after the function.
+export const ADD_AFFIRMATION_TIMEOUT_MS = 45_000;
 // sync-subscription (step 30) reads RevenueCat (two attempts of 8 seconds at most) and writes one row. The app waits for it after
 // a purchase or a restore, so this caps how long "Welcome to Gracehush Pro" can take; a sync that times out changes nothing,
 // and the webhook and the next foreground catch up.

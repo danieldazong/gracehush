@@ -1,6 +1,7 @@
 import { getDb } from "@/db/database";
 import { decryptText, encryptText } from "@/db/fieldCrypto";
 import type { Affirmation, JournalEntry } from "@/types";
+import { affirmationPosition, byPosition } from "@/utils/affirmationOrder";
 import { readAffirmationVerse } from "@/utils/affirmationVerse";
 
 // The read cache (step 24): the entries and affirmations this phone has seen, so Journal and Reflection can open without a
@@ -43,8 +44,9 @@ function isAffirmation(value: unknown): value is Affirmation {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.entryId === "string" &&
-    typeof value.slot === "string" &&
-    SLOTS.includes(value.slot) &&
+    // 2026-11-09: an added affirmation has no slot, and a row cached before then has no position (read as its slot's place).
+    (value.slot === null || (typeof value.slot === "string" && SLOTS.includes(value.slot))) &&
+    (value.position === undefined || typeof value.position === "number") &&
     typeof value.headline === "string" &&
     typeof value.text === "string" &&
     typeof value.isFavorite === "boolean"
@@ -159,7 +161,7 @@ export async function pruneEntries(keepNewest: number = 200): Promise<number> {
   return gone.changes;
 }
 
-// Replaces what the cache holds for each affirmation in the list (by id). The list is one entry's three slots.
+// Replaces what the cache holds for each affirmation in the list (by id). The list is one entry's affirmations, three to ten.
 export async function upsertAffirmations(entryId: string, list: readonly Affirmation[]): Promise<void> {
   const db = getDb();
   for (const affirmation of list) {
@@ -173,7 +175,7 @@ export async function upsertAffirmations(entryId: string, list: readonly Affirma
   }
 }
 
-// Ordered morning, afternoon, evening.
+// In position order (2026-11-09): the three made with the reflection, then what was added.
 export async function listAffirmationsForEntry(entryId: string): Promise<Affirmation[]> {
   const rows = await getDb().getAllAsync<{ id: string; row_json: string }>(
     "SELECT id, row_json FROM affirmations_cache WHERE entry_id = ?",
@@ -186,12 +188,17 @@ export async function listAffirmationsForEntry(entryId: string): Promise<Affirma
       note("cache_row_invalid");
       await getDb().runAsync("DELETE FROM affirmations_cache WHERE id = ?", row.id);
     } else {
-      // Step 37: a row cached before verses existed has no verse; it is read as none.
+      // Step 37: a row cached before verses existed has no verse; it is read as none. A row cached before 2026-11-09 has no
+      // position: it is read as its slot's place.
       const affirmation = value as Affirmation;
-      list.push({ ...affirmation, verse: readAffirmationVerse(affirmation.verse) });
+      list.push({
+        ...affirmation,
+        position: affirmationPosition(affirmation.position, affirmation.slot),
+        verse: readAffirmationVerse(affirmation.verse),
+      });
     }
   }
-  return list.sort((a, b) => SLOTS.indexOf(a.slot) - SLOTS.indexOf(b.slot));
+  return list.sort(byPosition);
 }
 
 // Every entry and affirmation. (Sign-out deletes the whole file instead; this is for a reset inside a session.)

@@ -8,14 +8,23 @@ export const ENTRY_COLUMNS =
   "id, client_entry_id, input_type, transcript, dominant_emotion, processing_status, error_code, is_crisis, scripture_reference, scripture_text, scripture_verified, devotional_title, validation_line, devotional_script, closing_prayer, devotional_audio_path, devotional_duration_ms, is_active_prayer, is_answered, answered_at, answered_notes, prayer_title, prayer_category, prayer_summary, created_at, updated_at" as const;
 
 // Step 37: verse_reference and verse_text, the Bible verse under the affirmation (both or neither; null before step 37).
+// 2026-11-09: position, its place among the reflection's affirmations (1 to 10), and time_slot is null for an added one.
 export const AFFIRMATION_COLUMNS =
-  "id, entry_id, time_slot, headline, affirmation_text, is_favorite, verse_reference, verse_text" as const;
+  "id, entry_id, time_slot, position, headline, affirmation_text, is_favorite, verse_reference, verse_text" as const;
 
 // What toJournalEntry and toAffirmation (src/data/mappers.ts) read. A full row of either table is one of these too.
 export type EntryRow = Omit<JournalEntryRow, "audio_path" | "user_id">;
 export type AffirmationRow = Pick<
   DailyAffirmationRow,
-  "id" | "entry_id" | "time_slot" | "headline" | "affirmation_text" | "is_favorite" | "verse_reference" | "verse_text"
+  | "id"
+  | "entry_id"
+  | "time_slot"
+  | "position"
+  | "headline"
+  | "affirmation_text"
+  | "is_favorite"
+  | "verse_reference"
+  | "verse_text"
 >;
 
 // The prayer columns the app changes (step 29), and a change to them keyed by column. prayer_category is granted to the app

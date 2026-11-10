@@ -16,6 +16,7 @@ import type {
 } from "@/types";
 import type { AffirmationRow, EntryRow } from "@/data/columns";
 import type { UserProfileRow } from "@/types/database";
+import { affirmationPosition } from "@/utils/affirmationOrder";
 
 const TIME_SLOTS: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 const INPUT_TYPES: readonly InputType[] = ["text", "audio"];
@@ -86,10 +87,15 @@ export function toUserProfile(row: UserProfileRow): UserProfile {
 }
 
 export function toAffirmation(row: AffirmationRow): Affirmation {
+  // 2026-11-09: an affirmation added beyond the first three carries no lock-screen slot, and a slot the app does not know reads
+  // as none. Its position is the server's, or its slot's place for a row from before the column. The server's response.ts has
+  // the same rules.
+  const slot = pick(TIME_SLOTS, row.time_slot);
   return {
     id: row.id,
     entryId: row.entry_id,
-    slot: pick(TIME_SLOTS, row.time_slot) ?? "morning",
+    slot,
+    position: affirmationPosition(row.position, slot),
     headline: row.headline,
     text: row.affirmation_text,
     isFavorite: row.is_favorite === true,

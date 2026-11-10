@@ -15,14 +15,13 @@ import { getNewestReadyEntry, isListedEntry } from "@/data/selectors";
 import * as cache from "@/db/cache";
 import { isDatabaseOpen } from "@/db/database";
 import * as mutations from "@/db/mutations";
-import type { Affirmation, AffirmationSource, JournalEntry, RepoResult, TimeSlot } from "@/types";
+import type { Affirmation, AffirmationSource, JournalEntry, RepoResult } from "@/types";
+import { byPosition } from "@/utils/affirmationOrder";
 
 // The real source of the Journal's entries and affirmations (step 25), used by journalRepository.ts when the data source is
 // Supabase: what this phone already has comes first (the read cache of step 24), then the network, and everything read from the
 // network is written to the cache. The cache never breaks a screen: with the database closed, or a row that cannot be read, a
 // read gives "nothing cached" and a write is skipped.
-
-const SLOT_ORDER: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 
 // Every row read from the cache is decrypted, so a screen reads what it shows and a few rows more, not the whole cache: a failed
 // entry or a stale one is read and then left out. The affirmations of the newest finished entry look at the newest few.
@@ -40,10 +39,6 @@ async function safely<T>(task: () => Promise<T>, fallback: T): Promise<T> {
 
 // The default `keep` of fetchEntry and fetchAffirmations: the answer is always wanted.
 const always = () => true;
-
-function bySlot(a: Affirmation, b: Affirmation): number {
-  return SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot);
-}
 
 // Entries read from the server, with the prayer changes this phone has not sent yet on top (step 29), so a change that waits
 // never flickers back when the server's copy is read. Without the database there is nothing waiting to know of.
@@ -268,7 +263,7 @@ export async function forgetEntry(entryId: string): Promise<void> {
 export async function fetchAffirmations(entryId: string, keep: () => boolean = always): Promise<Affirmation[]> {
   const result = await selectAffirmations(entryId);
   if (result.ok) {
-    const list = result.data.map(toAffirmation).sort(bySlot);
+    const list = result.data.map(toAffirmation).sort(byPosition);
     if (keep()) await safely(() => cache.upsertAffirmations(entryId, list), undefined);
     return list;
   }
@@ -290,4 +285,10 @@ export async function saveFavorite(id: string, value: boolean): Promise<RepoResu
   const saved = toAffirmation(result.data);
   await safely(() => cache.upsertAffirmations(saved.entryId, [saved]), undefined);
   return { ok: true, data: saved };
+}
+
+// The whole list of an entry's affirmations as the server now has it (add-affirmation's answer, 2026-11-09): every row is written
+// to the cache by id, so a lock-screen slot that moved from one affirmation to another is right on both.
+export function replaceAffirmations(entryId: string, list: readonly Affirmation[]): Promise<void> {
+  return safely(() => cache.upsertAffirmations(entryId, list), undefined);
 }

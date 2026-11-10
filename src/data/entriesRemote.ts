@@ -110,7 +110,7 @@ export async function selectEntry(id: string): Promise<RepoResult<EntryRow | nul
   return { ok: true, data: data === null ? null : withCanonicalTimes(data) };
 }
 
-// The affirmations of one entry (three for a finished reflection, none for any other).
+// The affirmations of one entry (three to ten for a finished reflection, in position order; none for any other).
 export async function selectAffirmations(entryId: string): Promise<RepoResult<AffirmationRow[]>> {
   const supabase = getSupabase();
   const userId = getSupabaseUserId();
@@ -119,7 +119,8 @@ export async function selectAffirmations(entryId: string): Promise<RepoResult<Af
     .from("daily_affirmations")
     .select(AFFIRMATION_COLUMNS)
     .eq("entry_id", entryId)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .order("position", { ascending: true });
   if (error !== null) return fail("daily_affirmations", status, error, copy.journal.error.message);
   lastError = null;
   return { ok: true, data };

@@ -20,9 +20,10 @@ import { HelpLine } from "@/components/HelpLine";
 import { Icon } from "@/components/Icon";
 import { MiniPlayerCard } from "@/components/MiniPlayerCard";
 import { PrimaryButton } from "@/components/PrimaryButton";
-import { ReflectionCarousel } from "@/components/ReflectionCarousel";
+import { ReflectionCarousel, type AddAffirmationFooter } from "@/components/ReflectionCarousel";
 import { ScriptureCard } from "@/components/ScriptureCard";
 import { TranscriptRow } from "@/components/TranscriptRow";
+import { MAX_AFFIRMATIONS } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors, layout } from "@/constants/theme";
 import { getPlaybackTrack } from "@/data/selectors";
@@ -33,6 +34,7 @@ import type { RootStackScreenProps } from "@/navigation/types";
 import { track } from "@/services/analytics";
 import { haptics } from "@/services/haptics";
 import { useNoticeStore } from "@/store/noticeStore";
+import { selectIsOnline, useOfflineStore } from "@/store/offlineStore";
 import type {
   Affirmation,
   Devotional,
@@ -41,7 +43,6 @@ import type {
   ReflectionTab,
   RepoResult,
   Scripture,
-  TimeSlot,
   UserProfile,
 } from "@/types";
 import { formatEntryDate, getReflectionHeadline, quoteVerse } from "@/utils/format";
@@ -215,7 +216,6 @@ type ReadyViewProps = {
   devotional: Devotional;
   affirmations: Affirmation[];
   profile: UserProfile;
-  currentSlot: TimeSlot;
   initialTab: ReflectionTab | undefined;
   onOpenPlayer: () => void;
   onReturn: () => void;
@@ -223,6 +223,8 @@ type ReadyViewProps = {
   // Delete reflection (step 29b): asks before deleting. `deleteOffline` is true after a tap with no connection.
   onDelete: () => void;
   deleteOffline: boolean;
+  // One more affirmation (2026-11-09): what the carousel's Affirmations pane offers under its last card.
+  addAffirmation: AddAffirmationFooter;
 };
 
 // A finished entry with a devotional. The screen keys it by the entry and the tab it was opened on, so another
@@ -234,13 +236,13 @@ function ReadyView({
   devotional,
   affirmations,
   profile,
-  currentSlot,
   initialTab,
   onOpenPlayer,
   onReturn,
   onSetTracked,
   onDelete,
   deleteOffline,
+  addAffirmation,
 }: ReadyViewProps) {
   const { width } = useWindowDimensions();
   const { scripture } = entry;
@@ -295,9 +297,8 @@ function ReadyView({
         <ReflectionCarousel
           devotional={devotional}
           affirmations={affirmations}
-          reminders={profile.reminders}
-          currentSlot={currentSlot}
           initialTab={initialTab}
+          add={addAffirmation}
         />
       </FadeIn>
       {entry.isCrisis ? (
@@ -406,6 +407,25 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
   const [deleteOffline, setDeleteOffline] = useState(false);
   useAnnounce(deleteOffline ? deleteText.offline : null);
 
+  // One more affirmation (2026-11-09). The tap goes to the hook, which replaces the list; a failure shows a calm line until the
+  // next tap. With no connection nothing is asked: the line says so (null, before NetInfo has answered, counts as online). A heavy
+  // moment gets one like any reflection and sends no event (Analytics Rules).
+  const online = useOfflineStore(selectIsOnline) !== false;
+  const [addFailed, setAddFailed] = useState(false);
+  async function addOne() {
+    if (state.status !== "ready" || state.addAffirmation === null || !online) return;
+    setAddFailed(false);
+    const added = await state.addAffirmation();
+    if (added.ok) {
+      const position = added.data.length;
+      if (!state.entry.isCrisis && position >= 4 && position <= MAX_AFFIRMATIONS) {
+        track("affirmation_added", { position: position as 4 | 5 | 6 | 7 | 8 | 9 | 10 });
+      }
+    } else if (added.code !== "INVALID") {
+      setAddFailed(true);
+    }
+  }
+
   // The chevron goes back to where the user came from. With nothing to go back to (a notification can
   // open Reflection first, step 28) it lands on Journal, like "Return to Journal".
   function goBack() {
@@ -458,7 +478,6 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
         devotional={state.entry.devotional}
         affirmations={state.affirmations}
         profile={state.profile}
-        currentSlot={state.currentSlot}
         initialTab={route.params.tab}
         onOpenPlayer={() => navigation.navigate("NowPlaying", { entryId: state.entry.id })}
         onReturn={returnToJournal}
@@ -471,6 +490,13 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
           setDeleteOffline(!opened);
         }}
         deleteOffline={deleteOffline}
+        addAffirmation={{
+          onAdd: state.addAffirmation === null || !online ? null : () => void addOne(),
+          remaining: Math.max(0, MAX_AFFIRMATIONS - state.affirmations.length),
+          adding: state.adding,
+          online,
+          failed: addFailed,
+        }}
       />
     );
   }
