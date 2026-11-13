@@ -22,10 +22,22 @@ import { useReduceMotion } from "@/hooks/useReduceMotion";
 import type { MainTabParamList } from "@/navigation/types";
 import { haptics } from "@/services/haptics";
 
-// The two colored layers of a tab cross-fade when it is selected or deselected, and the selected one grows a little
-// inside the lens.
-const FADE_MS = 150;
-const ACTIVE_SCALE = 1.06;
+// An inactive tab is its outline icon over its label. The active tab is its filled icon alone, a little larger, in
+// the middle of the lens (2026-11-12). Each icon is drawn at its own size, so both are sharp at rest.
+const ICON_SIZE = 22;
+const ACTIVE_ICON_SIZE = 26;
+// The label's line box (its leading-[11px]), the gap above it and the cap on its text scaling. Together they say
+// how far above the middle of the tab the icon sits while its label shows.
+const LABEL_LINE = 11;
+const LABEL_GAP = 4;
+const LABEL_MAX_FONT_SCALE = 1.3;
+// On the way to active the label is gone in the first 40%, sinking 4 as it fades: that keeps it just ahead of the
+// icon, which comes down into its place and grows.
+const LABEL_GONE_AT = 0.4;
+const LABEL_SINK = 4;
+// The change runs on a spring with no overshoot (critical damping is 2 x the root of the stiffness, about 25.3): a
+// soft start and a long, soft landing, about half a second in all, so the icon settles as the lens does.
+const TAB_SPRING = { stiffness: 160, damping: 26, mass: 1 } as const;
 // The lens travels on a spring that settles in about 450 ms with a soft overshoot (a damping ratio of 0.61, so
 // about 9% past the target, one wobble). On the way it stretches sideways and flattens, like a drop that keeps its
 // mass, and the more the farther it goes: 1.08 wide and 0.95 tall for one tab over, 1.14 and 0.92 for two.
@@ -81,8 +93,10 @@ type TabItemProps = TabConfig & {
   onLongPress: () => void;
 };
 
-// Two layers share one box, so nothing shifts: the inactive one (mauve, Medium) and the active one
-// (plum, SemiBold). The Pressable is the only accessibility element; the layers are decorative.
+// One value runs the whole change, 0 for inactive and 1 for active. The label sinks and fades; the outline icon and
+// the filled one cross-fade while they come down to the middle of the tab and grow as one (the outline icon from
+// its own size up, the filled one from the outline icon's size up to its own). The Pressable is the only
+// accessibility element, and it names the tab whether the label shows or not; what is drawn is decoration.
 function TabItem({
   label,
   icon,
@@ -94,26 +108,45 @@ function TabItem({
   onLongPress,
 }: TabItemProps) {
   const reduceMotion = useReduceMotion();
+  const { fontScale } = useWindowDimensions();
   const [progress] = useState(() => new Animated.Value(focused ? 1 : 0));
-  const [scale] = useState(() => new Animated.Value(focused ? ACTIVE_SCALE : 1));
 
   useEffect(() => {
-    const toProgress = focused ? 1 : 0;
-    const toScale = focused ? ACTIVE_SCALE : 1;
+    const toValue = focused ? 1 : 0;
     if (reduceMotion) {
-      progress.setValue(toProgress);
-      scale.setValue(toScale);
+      progress.setValue(toValue);
       return undefined;
     }
-    const animation = Animated.parallel([
-      Animated.timing(progress, { toValue: toProgress, duration: FADE_MS, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: toScale, duration: FADE_MS, useNativeDriver: true }),
-    ]);
+    const animation = Animated.spring(progress, { toValue, ...TAB_SPRING, useNativeDriver: true });
     animation.start();
+    // A tab chosen mid-change stops this one where it is, and the next spring starts from there.
     return () => animation.stop();
-  }, [focused, reduceMotion, progress, scale]);
+  }, [focused, reduceMotion, progress]);
 
-  const inactiveOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  // From the icon's place over the label down to the middle of the tab: half of what the label takes under it.
+  const drop = (LABEL_GAP + LABEL_LINE * Math.min(fontScale, LABEL_MAX_FONT_SCALE)) / 2;
+  const grow = ACTIVE_ICON_SIZE / ICON_SIZE;
+  const range = { inputRange: [0, 1], extrapolate: "clamp" } as const;
+  const labelRange = { inputRange: [0, LABEL_GONE_AT], extrapolate: "clamp" } as const;
+
+  const outlineIconStyle = {
+    opacity: progress.interpolate({ ...range, outputRange: [1, 0] }),
+    transform: [
+      { translateY: progress.interpolate({ ...range, outputRange: [0, drop] }) },
+      { scale: progress.interpolate({ ...range, outputRange: [1, grow] }) },
+    ],
+  };
+  const labelStyle = {
+    opacity: progress.interpolate({ ...labelRange, outputRange: [1, 0] }),
+    transform: [{ translateY: progress.interpolate({ ...labelRange, outputRange: [0, LABEL_SINK] }) }],
+  };
+  const filledIconStyle = {
+    opacity: progress.interpolate({ ...range, outputRange: [0, 1] }),
+    transform: [
+      { translateY: progress.interpolate({ ...range, outputRange: [-drop, 0] }) },
+      { scale: progress.interpolate({ ...range, outputRange: [1 / grow, 1] }) },
+    ],
+  };
 
   return (
     <Pressable
@@ -124,30 +157,28 @@ function TabItem({
       onLongPress={onLongPress}
       style={({ pressed }) => [styles.item, { width }, pressed && styles.pressed]}
     >
-      <Animated.View
-        style={[styles.itemContent, { transform: [{ scale }] }]}
+      <View
+        style={styles.itemContent}
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
       >
-        <Animated.View style={[styles.layer, { opacity: inactiveOpacity }]}>
-          <Icon name={icon} size={22} color={colors.mauve} />
-          <Text
-            className="font-dm-medium text-[11px] leading-[11px] text-mauve"
-            maxFontSizeMultiplier={1.3}
-          >
-            {label}
-          </Text>
+        <View style={styles.stack}>
+          <Animated.View style={outlineIconStyle}>
+            <Icon name={icon} size={ICON_SIZE} color={colors.mauve} />
+          </Animated.View>
+          <Animated.View style={labelStyle}>
+            <Text
+              className="font-dm-medium text-[11px] leading-[11px] text-mauve"
+              maxFontSizeMultiplier={LABEL_MAX_FONT_SCALE}
+            >
+              {label}
+            </Text>
+          </Animated.View>
+        </View>
+        <Animated.View style={[styles.filledIcon, filledIconStyle]}>
+          <Icon name={activeIcon} size={ACTIVE_ICON_SIZE} color={colors.plum} />
         </Animated.View>
-        <Animated.View style={[styles.layer, StyleSheet.absoluteFill, { opacity: progress }]}>
-          <Icon name={activeIcon} size={22} color={colors.plum} />
-          <Text
-            className="font-dm-semibold text-[11px] leading-[11px] text-plum"
-            maxFontSizeMultiplier={1.3}
-          >
-            {label}
-          </Text>
-        </Animated.View>
-      </Animated.View>
+      </View>
     </Pressable>
   );
 }
@@ -310,7 +341,18 @@ const styles = StyleSheet.create({
   },
   item: { height: layout.tabBarHeight },
   itemContent: { flex: 1, alignItems: "center", justifyContent: "center" },
-  layer: { alignItems: "center", justifyContent: "center", gap: 4 },
+  // The inactive tab: the outline icon over its label, centered in the tab as one block.
+  stack: { alignItems: "center", gap: LABEL_GAP },
+  // The active tab: the filled icon in the middle of the tab, which is the middle of the lens.
+  filledIcon: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   // The tab under the finger dims and squashes a little, like the dock's buttons.
   pressed: { opacity: 0.6, transform: [{ scale: 0.96 }] },
 });
