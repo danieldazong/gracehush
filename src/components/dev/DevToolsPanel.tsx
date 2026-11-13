@@ -1,7 +1,7 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { useNavigation } from "@react-navigation/native";
-import { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { NativeModules, Pressable, Text, View } from "react-native";
 
 import { getLastFunctionCall, type FunctionCall } from "@/api/journalApi";
 import { ENTRIES_PAGE_SIZE } from "@/constants/app";
@@ -316,6 +316,13 @@ function DevButton({
     </Pressable>
   );
 }
+
+// Step 39's test run: the live voice test loads only in a development build that carries the WebRTC native modules.
+// Expo Go has none, and loading the voice packages there would crash the app, so they are not even imported there.
+const VoiceSpike =
+  __DEV__ && NativeModules.WebRTCModule != null && NativeModules.LivekitReactNativeModule != null
+    ? lazy(() => import("@/components/dev/VoiceSpike"))
+    : null;
 
 function DevToolsContent() {
   const { signOut } = useAuth();
@@ -746,6 +753,17 @@ function DevToolsContent() {
             {preparingNote !== null ? (
               <Text className="text-center text-body-sm text-mauve">{preparingNote}</Text>
             ) : null}
+          </View>
+          {/* Step 39's test run: one ElevenLabs talk with the test endpoint. Times and event kinds only. */}
+          <View className="items-center gap-2">
+            <Text className="text-center text-body-sm text-mauve">Live voice test (dev)</Text>
+            {VoiceSpike !== null ? (
+              <Suspense fallback={<Text className="text-center text-body-sm text-mauve">Loading the voice test…</Text>}>
+                <VoiceSpike />
+              </Suspense>
+            ) : (
+              <Text className="text-center text-body-sm text-mauve">Needs the development build.</Text>
+            )}
           </View>
           {/* Step 34: product analytics. Event names and property keys only. */}
           <View className="items-center gap-2">

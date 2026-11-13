@@ -42,3 +42,12 @@ verify_jwt = false
 [functions.scholar-speak]
 # Scholar (step 38): the same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
 verify_jwt = false
+
+[functions.scholar-voice-start]
+# Live voice (step 39): the same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false
+
+[functions.scholar-voice-llm]
+# Live voice (step 39): ElevenLabs calls it, never the phone, with the agent's custom LLM key (ELEVENLABS_LLM_SECRET), which
+# the function checks itself. There is no Supabase token to verify.
+verify_jwt = false

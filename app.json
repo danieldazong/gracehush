@@ -65,6 +65,14 @@
           "enableRemoteNotifications": false
         }
       ],
+      "@livekit/react-native-expo-plugin",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "GraceHush doesn’t use your camera.",
+          "microphonePermission": "GraceHush uses the microphone so you can pray out loud. Your recording is used only to create your reflection."
+        }
+      ],
       [
         "expo-dev-client",
         {
