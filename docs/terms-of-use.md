@@ -16,9 +16,9 @@ You must be at least 18 and able to enter a binding contract where you live. The
 
 ## 2. What GraceHush is, and is not
 
-GraceHush is a private audio prayer journal. You speak or write a prayer, and GraceHush creates a reflection for you: a Bible passage from the Berean Standard Bible, a short spoken devotional, a closing prayer and three affirmations, each with a Bible verse.
+GraceHush is a private audio prayer journal. You speak or write a prayer, and GraceHush creates a reflection for you: a Bible passage from the Berean Standard Bible, a short spoken devotional, a closing prayer and three affirmations, each with a Bible verse. GraceHush also includes Scholar, an AI Bible companion you can ask, by typing or speaking, about Scripture and your day.
 
-GraceHush is **not** pastoral counseling, therapy, medical advice or an emergency or crisis service, and it is not a substitute for a pastor, a counselor, a doctor or emergency services. If you are in danger or thinking about harming yourself, contact your local emergency number; in the US you can call or text 988.
+Scholar is a computer program, not a person, and it can be wrong. GraceHush, Scholar included, is **not** pastoral counseling, therapy, medical advice or an emergency or crisis service, and it is not a substitute for a pastor, a counselor, a doctor or emergency services. If you are in danger or thinking about harming yourself, contact your local emergency number; in the US you can call or text 988.
 
 ## 3. Your account
 
@@ -26,24 +26,25 @@ You sign in with Apple, Google or an emailed code. Keep your sign-in secure, giv
 
 ## 4. Your content
 
-- **Yours.** Your recordings, your typed entries and your notes (“Your Content”) belong to you.
-- **What you allow.** When you give your permission in the app, you give us a limited, non-exclusive, worldwide, royalty-free permission to host, store, process and transmit Your Content, including with the service providers named in our Privacy Policy, only to provide GraceHush to you: to create your reflections, keep your journal and sync it across your devices. This permission ends when you take it back in Profile, or delete the content or your account (subject to backups, as the Privacy Policy explains).
+- **Yours.** Your recordings, your typed entries, your messages to Scholar and your notes (“Your Content”) belong to you.
+- **What you allow.** When you give your permission in the app, you give us a limited, non-exclusive, worldwide, royalty-free permission to host, store, process and transmit Your Content, including with the service providers named in our Privacy Policy, only to provide GraceHush to you: to create your reflections and Scholar’s answers, and to keep your journal and your conversations and sync them across your devices. This permission ends when you take it back in Profile, or delete the content or your account (subject to backups, as the Privacy Policy explains).
 - **What we do not do.** We do not use Your Content for advertising, we do not use it to train AI models, and we do not publish it or share it with other users.
 - **Your reflections.** We create reflections for you from Your Content. As between you and us, you may use them for your own personal purposes, and we do not claim ownership of Your Content. Because artificial intelligence writes them, similar text may be produced for other people, and we cannot promise any legal rights in it.
 - **Your responsibility.** You are responsible for what you submit, including anything you say about other people.
 
 ## 5. AI-written content
 
-Your devotional, closing prayer and affirmations are written with the help of artificial intelligence. They can contain mistakes or miss what you meant. We check that each Bible passage and verse we show matches the text of the Berean Standard Bible, but everything written around it is an AI-written reflection, not the teaching of any church, and not professional advice. Use your own judgment and the counsel of people you trust.
+Your devotional, closing prayer and affirmations, and Scholar’s answers and prayers, are written with the help of artificial intelligence. They can contain mistakes or miss what you meant. We check that each Bible passage and verse we show matches the text of the Berean Standard Bible, but everything written around it is an AI-written reflection, not the teaching of any church, and not professional advice. Use your own judgment and the counsel of people you trust.
 
 ## 6. Using GraceHush fairly
 
-You agree not to: break the law; try to get into another person’s account or information; probe, scan, overload or disrupt GraceHush or its servers; copy, reverse engineer or take apart the app except where the law allows it; get around the free limit or any other technical limit; use bots, scraping or other automated means; resell or commercially exploit GraceHush; or use it to harass, threaten or harm anyone.
+You agree not to: break the law; try to get into another person’s account or information; probe, scan, overload or disrupt GraceHush or its servers; copy, reverse engineer or take apart the app except where the law allows it; get around the free limit or any other technical limit; use bots, scraping or other automated means; resell or commercially exploit GraceHush; use it to harass, threaten or harm anyone; or try to make Scholar act against its rules or help anyone cause harm.
 
 ## 7. Plans, free trials and billing
 
 - **Free plan.** The free plan includes a limited number of audio devotionals each week (currently three; the app shows your count). The count starts again each Monday.
-- **GraceHush Pro.** Pro includes unlimited audio devotionals. There is a monthly plan and a yearly plan. The price, in your currency and including any taxes that apply, is shown in the app before you buy, and the App Store charges it, not us.
+- **Scholar.** The free plan includes a limited number of messages to Scholar each day (currently five). The count starts again at midnight where you are, and the app shows how many are left when only a few remain. A message in a conversation about a hard moment is never counted.
+- **GraceHush Pro.** Pro includes unlimited audio devotionals, more messages to Scholar each day (currently 40), and Scholar reading its answers aloud (currently up to five answers a day). There is a monthly plan and a yearly plan. The price, in your currency and including any taxes that apply, is shown in the app before you buy, and the App Store charges it, not us.
 - **Free trial.** The yearly plan may include a free trial (currently 7 days), only if the App Store tells us you are eligible. If you do not cancel in time, the App Store charges the yearly price when the trial ends: cancel at least 24 hours before the trial ends in your App Store subscription settings.
 - **Renewal.** Plans renew automatically until you cancel. Cancel at least 24 hours before the current period ends, in your App Store subscription settings, which the app links to. Deleting the app or your GraceHush account does not cancel a subscription.
 - **Refunds.** Apple handles refunds under its own policies; we cannot issue refunds for purchases made through the App Store, so please ask Apple.
@@ -53,7 +54,7 @@ You agree not to: break the law; try to get into another person’s account or i
 
 ## 8. Changes to GraceHush
 
-We may add, change or remove features, and we may change the free limit. If a change reduces what a paid plan includes, we will tell you in the app before it takes effect.
+We may add, change or remove features, and we may change the free limits and Scholar’s daily limits. If a change reduces what a paid plan includes, we will tell you in the app before it takes effect.
 
 ## 9. Reminders and notifications
 

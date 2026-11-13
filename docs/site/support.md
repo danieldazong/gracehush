@@ -6,7 +6,7 @@ We’re glad to help. Email [{{SUPPORT_EMAIL}}](mailto:{{SUPPORT_EMAIL}}) and te
 
 ## If you are in danger
 
-GraceHush is not a crisis service. If you are in danger, call 911. In the US, you can call or text 988 (the 988 Suicide & Crisis Lifeline) at any time, day or night, or text HOME to 741741 (Crisis Text Line).
+GraceHush is not a crisis service. If you are in danger, call 911. In the US, you can call or text 988 (the 988 Suicide & Crisis Lifeline) at any time, day or night. If someone is hurting you, call the National Domestic Violence Hotline at 1-800-799-7233, or text START to 88788. Outside the US, call your local emergency number; you can find a help line in your country at findahelpline.com. [Scholar and hard moments](/scholar-safety/) explains what GraceHush does when a message shows you may be in danger.
 
 ## Common questions
 
@@ -18,7 +18,9 @@ GraceHush is not a crisis service. If you are in danger, call 911. In the US, yo
 
 **I changed phones. How do I get my plan back?** Sign in to GraceHush with the same account, open Profile and tap Restore purchases.
 
-**How do I stop my words going to Google’s AI?** Open Profile and turn off Share with Google’s AI. GraceHush can’t prepare new reflections while it is off.
+**How do I stop my words going to Google’s AI?** Open Profile and turn off Share with Google’s AI. GraceHush can’t prepare new reflections or answer messages to Scholar while it is off.
+
+**How do I delete a conversation with Scholar?** Open the conversation, tap ⋯ at the top and choose Delete conversation. Deleting a reflection also deletes any conversation with Scholar about it.
 
 **How do I turn off reminders?** Open Profile and turn off Daily Affirmations, or change the notifications for GraceHush in your iPhone’s Settings.
 

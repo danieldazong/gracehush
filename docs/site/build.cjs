@@ -2,11 +2,11 @@
 //
 //   node docs/site/build.cjs ["November 4, 2026"]      (the optional argument is the effective date, today's date if left out)
 //
-// - Sources: docs/privacy-policy.md, docs/terms-of-use.md and docs/site/{home,support,delete-account,not-found}.md.
+// - Sources: docs/privacy-policy.md, docs/terms-of-use.md and docs/site/{home,support,delete-account,scholar-safety,not-found}.md.
 // - {{COMPANY_NAME}} and {{COMPANY_ADDRESS}} come from docs/site/facts.json, which is git-ignored: the company's details are on the published
 //   pages and stay out of the public repository, and out of the site/ folder too, so uploading site/ publishes nothing but the pages.
 //   {{SUPPORT_EMAIL}} comes from src/constants/app.ts, so the app and the pages never disagree. {{SITE}}, {{DATE}} and {{YEAR}} are set here.
-// - Output: site/index.html, site/{privacy,terms,support,delete-account}/index.html, site/404.html and site/logo-mark.png. Every page is plain HTML with
+// - Output: site/index.html, site/{privacy,terms,support,delete-account,scholar-safety}/index.html, site/404.html and site/logo-mark.png. Every page is plain HTML with
 //   its style inline: no script, no cookie, no analytics and no request to another site. Upload the site/ folder to any static host.
 // - It writes nothing while a {{token}}, a TODO or an example.com address is left in a page.
 //
@@ -24,6 +24,7 @@ const PAGES = [
   { src: "docs/terms-of-use.md", out: "terms/index.html", title: "Terms of Use", description: "The terms for using GraceHush." },
   { src: "docs/site/support.md", out: "support/index.html", title: "Support", description: "Help with GraceHush: deleting your account, exporting your journal, subscriptions and more." },
   { src: "docs/site/delete-account.md", out: "delete-account/index.html", title: "Delete your account", description: "How to delete your GraceHush account, in the app or by email." },
+  { src: "docs/site/scholar-safety.md", out: "scholar-safety/index.html", title: "Scholar and hard moments", description: "What Scholar, GraceHush’s AI Bible companion, does when a message shows you may be in danger, and what it does not do." },
   { src: "docs/site/not-found.md", out: "404.html", title: "Page not found", description: "This page does not exist.", hidden: true },
 ];
 

@@ -58,6 +58,25 @@ As built (the Paywall, step 16): a yearly and a monthly plan. The prices on scre
 - The iPhone could use Apple's standard EULA in place of your own Terms of Use (an open item in `AGENTS.md`, step 16). Google has no equivalent, and Profile links to your Terms either way.
 - **TODO, the Terms themselves:** the legal entity (name, address, country), the minimum age, the service description, acceptable use, what the user owns (their own words) and the permission to process them with the providers above, that AI-written devotionals can be wrong and are not professional advice (scripture is checked against the Berean Standard Bible), that GraceHush is not a medical, therapy, pastoral or crisis service (with 988), changes to the service, termination, limitation of liability, governing law and venue, how the Terms change, and the contact address.
 
+## 6a. Scholar, the AI Bible companion (step 38, 2026-11-11)
+
+Facts, from the code (AGENTS.md has the rules):
+
+- **What it is.** A conversation with an AI about Scripture and the person's day, typed (up to 2,000 characters a message) or spoken (up to two minutes). Answers are written by Google's Gemini under GraceHush's rules, which a pastor and a licensed counselor read and approved (their names are kept outside the repository). Bible passages are shown in passage cards, read word for word from the Berean Standard Bible (an answer can repeat a passage's words, which are then the passage's exact words); a prayer is written only when asked for.
+- **What goes to Google.** Only after the same AI permission as the reflections. Each message, with up to six earlier messages for the safety check and up to twenty for the answer, and, for a conversation opened from a reflection, that reflection's words, title, feeling, passage reference, devotional and closing prayer. Listen sends the answer's text to Cloud Text-to-Speech; the audio is not stored on the server and stays on the phone only until the conversation closes. A spoken message's recording is uploaded, transcribed and then deleted.
+- **What is stored.** Conversations and messages in Supabase, kept until the person deletes them, the reflection they began from, or the account; a count of messages and listens per person per day; when Scholar was closed for an account; and, with each answer to a message that showed danger, the help line it showed, as one word. A daily table of anonymous counts (messages checked, how many needed extra care) holds no person, conversation or words.
+- **Disclosures.** "Scholar is AI and can be wrong. It isn’t a pastor or counselor." stays under the message field, and a reminder that Scholar is an AI opens every conversation and comes again before a message sent three hours or more after the last one. The public page [Scholar and hard moments](site/scholar-safety.md) states the protocol.
+- **Hard moments.** Every message is checked before any part of its answer is shown. A message that shows danger gets an answer written with extra care, the help line for the situation and the phone's region, and a help button for the rest of the conversation; harm already underway gets a written answer with the emergency number first. Such a conversation is never counted, never paywalled and sends no analytics. Nobody is contacted.
+- **Adults only.** A person who tells Scholar they are under 18 gets, in a hard moment, the same care and the help line, and otherwise a kind answer saying GraceHush is for adults; Scholar then closes for the account until the owner reopens it on a written request.
+- **Limits.** Free accounts 5 messages a day, Pro 40 and 5 answers read aloud, counted on the person's calendar day. Above a daily ceiling of free messages across the whole service, a free account's message is answered "Scholar is resting".
+
+**TODO for the lawyer:**
+
+1. Whether California's companion chatbot law (SB 243) and New York's AI companion law apply to Scholar, and whether the AI notice (at the start and every three hours), the published protocol and anything they require beyond that (reports, records) are met.
+2. Whether Texas' App Store age law, or any other state's age-assurance law, asks more of the adults-only closing than a person's own word.
+3. The adults-only answer's words (`ADULTS_ONLY_TEXT` on the server, and the app's notice).
+4. Whether the help line chosen by situation, saved with the answer as one word, needs more than the Privacy Policy says.
+
 ## 7. Store forms the owner fills in
 
 - **Apple:** the Privacy Policy URL, the App Privacy answers (contact info, user content, identifiers, purchases, usage data if analytics is on, and whether prayers count as sensitive info), and the review note for account deletion (Profile, Privacy & Data, Delete account).
@@ -96,5 +115,7 @@ The drafts describe the app as designed. These statements depend on a step that 
 | Deleting a reflection removes its text, recording, devotional audio and affirmations at once; one record (an opaque identifier, the owner and the time it was made) is kept to count the devotional in the free week, removed at the owner's next delete after 14 days and with the account | 29b |
 | Analytics are opt-in, anonymous, from a fixed event list, with no event about a heavy moment, IP location off and a new anonymous ID per account | 34 |
 | A heavy moment gets a whole reflection under extra-care rules, never counts toward the free limit, sends no analytics, and keeps its transcript | 13, 21, 34, 2026-11-08 |
+| Scholar's messages go to Google only after the AI permission; a spoken message's recording is deleted once transcribed; the audio of an answer read aloud is never stored on the server; conversations are deleted with the conversation, the reflection or the account, and are in the export | 38 |
+| Every Scholar message is checked before its answer is shown; a heavy conversation is never counted and sends no analytics; a person under 18 closes Scholar for the account | 38 |
 | The free limit (three a week, resetting Monday), the 7-day trial on the yearly plan and the prices are set in the stores | 30 (the store setup) |
 | No other SDK collects data (crash reporting, over-the-air updates, ads) | any step that adds one |
