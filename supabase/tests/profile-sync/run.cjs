@@ -475,6 +475,8 @@ const row = ({
       planWatchStopped: 0,
       revenueCatEnded: 0,
       analyticsReset: 0,
+      scholarCleared: 0,
+      scholarForgotten: 0,
     };
     const remote = { server, fetchFails: null, pushFails: [], onPush: null, onFetch: null };
     const session = { userId: "user_a" };
@@ -536,6 +538,10 @@ const row = ({
     fakes["@/services/realtime"] = { startRealtime: () => undefined, stopRealtime: async () => undefined };
     // Step 34: signOutCleanup ends with the analytics reset; the service imports PostHog and expo-constants.
     fakes["@/services/analytics"] = { resetAnalytics: async () => void calls.analyticsReset++, track: () => undefined };
+    // Step 38: signOutCleanup stops Scholar's voice, deletes the parts it read and forgets the session's turns (expo-audio and
+    // the storage client behind them cannot load in Node).
+    fakes["@/services/scholarPlayer"] = { clearScholarAudio: () => void calls.scholarCleared++, stopScholarAudio: () => undefined };
+    fakes["@/data/scholarRepository"] = { forgetScholarSession: () => void calls.scholarForgotten++ };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
     env.use("@/store/devStore").useDevStore.getState().setDataSource(source);
@@ -1008,6 +1014,8 @@ const row = ({
     assert.equal(ctx.calls.planWatchStopped, 1, "and stops the plan watch");
     assert.equal(ctx.calls.revenueCatEnded, 1, "and logs out of RevenueCat");
     assert.equal(ctx.calls.analyticsReset, 1, "and resets analytics");
+    assert.equal(ctx.calls.scholarCleared, 1, "and stops Scholar's voice and deletes the parts it read");
+    assert.equal(ctx.calls.scholarForgotten, 1, "and forgets Scholar's turns of this session");
     assert.equal(ob.getState().remindersDirty, false);
     assert.deepEqual(unsentOf(ctx), { ambientSound: "soft-rain" }, "sign out keeps the user's unsent setting");
     await sleep(1000);
@@ -1142,6 +1150,8 @@ const row = ({
         "@/services/syncEngine": { isSyncEngineStarted: () => false, startSyncEngine: () => undefined, stopSyncEngine: () => undefined },
         "@/services/realtime": { startRealtime: () => undefined, stopRealtime: async () => undefined },
         "@/services/analytics": { resetAnalytics: async () => undefined, track: () => undefined },
+        "@/services/scholarPlayer": { clearScholarAudio: () => undefined, stopScholarAudio: () => undefined },
+        "@/data/scholarRepository": { forgetScholarSession: () => undefined },
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();

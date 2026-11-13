@@ -23,9 +23,10 @@ import { PrimaryButton } from "@/components/PrimaryButton";
 import { ReflectionCarousel, type AddAffirmationFooter } from "@/components/ReflectionCarousel";
 import { ScriptureCard } from "@/components/ScriptureCard";
 import { TranscriptRow } from "@/components/TranscriptRow";
+import { SettingsRow } from "@/components/profile/SettingsRow";
 import { MAX_AFFIRMATIONS } from "@/constants/app";
 import { copy } from "@/constants/copy";
-import { colors, layout } from "@/constants/theme";
+import { colors, layout, shadows } from "@/constants/theme";
 import { getPlaybackTrack } from "@/data/selectors";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useDeleteReflection } from "@/hooks/useDeleteReflection";
@@ -69,6 +70,8 @@ const icons = {
   date: { android: "calendar_today", ios: "calendar" },
   prayer: { android: "volunteer_activism", ios: "hands.sparkles" },
   share: { android: "share", ios: "square.and.arrow.up" },
+  scholar: { android: "forum", ios: "bubble.left.and.bubble.right" },
+  chevron: { android: "chevron_right", ios: "chevron.right" },
 
 } satisfies Record<string, SymbolViewProps["name"]>;
 
@@ -228,6 +231,8 @@ type ReadyViewProps = {
   deleteOffline: boolean;
   // One more affirmation (2026-11-09): what the carousel's Affirmations pane offers under its last card.
   addAffirmation: AddAffirmationFooter;
+  // Talk it through with Scholar (step 38): this reflection's conversation, or a new one about it.
+  onOpenScholar: () => void;
 };
 
 // A finished entry with a devotional. The screen keys it by the entry and the tab it was opened on, so another
@@ -247,6 +252,7 @@ function ReadyView({
   onDelete,
   deleteOffline,
   addAffirmation,
+  onOpenScholar,
 }: ReadyViewProps) {
   const { width } = useWindowDimensions();
   const { scripture } = entry;
@@ -311,6 +317,23 @@ function ReadyView({
           <HelpLine kind={entry.helpLine} />
         </FadeIn>
       ) : null}
+      <FadeIn {...arrive(3)}>
+        {/* One white card with one row, like Profile's groups. The shadow and the clipping are on different views: with both on
+            one view, iOS clips the shadow. */}
+        <View className="rounded-card border border-petal bg-card" style={shadows.card}>
+          <View className="overflow-hidden rounded-card">
+            <SettingsRow
+              icon={icons.scholar}
+              title={copy.scholar.reflectionRow.title}
+              subtitle={copy.scholar.reflectionRow.subtitle}
+              trailing={<Icon name={icons.chevron} size={16} color={colors.mauve} />}
+              onPress={onOpenScholar}
+              accessibilityLabel={copy.scholar.reflectionRow.title}
+              accessibilityHint={copy.scholar.reflectionRow.subtitle}
+            />
+          </View>
+        </View>
+      </FadeIn>
       {transcript ? (
         <FadeIn {...arrive(4)}>
           <TranscriptRow
@@ -505,6 +528,7 @@ export function ReflectionScreen({ navigation, route }: RootStackScreenProps<"Re
         audioPending={state.audioPending}
         initialTab={route.params.tab}
         onOpenPlayer={() => navigation.navigate("NowPlaying", { entryId: state.entry.id })}
+        onOpenScholar={() => navigation.navigate("Conversation", { entryId: state.entry.id })}
         onReturn={returnToJournal}
         onSetTracked={state.setTracked}
         onDelete={() => {

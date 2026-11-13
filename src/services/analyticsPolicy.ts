@@ -27,18 +27,30 @@ export type AnalyticsEvent =
   | { name: "prayer_marked_answered"; props: { has_note: boolean } }
   | { name: "prayer_removed"; props: { was_answered: boolean } }
   | { name: "reflection_deleted"; props: { source: "reflection" | "prayers" } }
-  | { name: "paywall_viewed"; props: { source: "profile" | "limit" } }
+  | { name: "paywall_viewed"; props: { source: "profile" | "limit" | "scholar" } }
   | { name: "purchase_completed"; props: { plan: PackageKind; trial: boolean } }
   | { name: "purchase_failed"; props: { code: PurchaseErrorCode } }
   | { name: "restore_completed"; props: { found: boolean } }
-  | { name: "data_export_requested"; props: Record<string, never> };
+  | { name: "data_export_requested"; props: Record<string, never> }
+  // Scholar (step 38): with the first answered message of a conversation, and after each answer. Never in a heavy conversation.
+  | { name: "scholar_conversation_started"; props: { source: "tab" | "starter" | "reflection" } }
+  | { name: "scholar_message_sent"; props: { mode: "text" | "voice"; turn: "first" | "follow_up" } };
 
 export type AnalyticsEventName = AnalyticsEvent["name"];
 export type AnalyticsProps<N extends AnalyticsEventName> = Extract<AnalyticsEvent, { name: N }>["props"];
 
 // The screens a $screen event may name (route names, never params). Reflection is not one: the same route shows the crisis
-// view, and the navigator cannot tell them apart. Support Resources, Onboarding and Sign In are not either.
-export const TRACKED_SCREENS = ["Journal", "Prayers", "Profile", "NewEntry", "NowPlaying", "Paywall"] as const satisfies readonly (
+// view, and the navigator cannot tell them apart. Support Resources, Onboarding and Sign In are not either, and neither is a
+// Scholar conversation (step 38: it can be a heavy one); the Scholar tab is.
+export const TRACKED_SCREENS = [
+  "Journal",
+  "Scholar",
+  "Prayers",
+  "Profile",
+  "NewEntry",
+  "NowPlaying",
+  "Paywall",
+] as const satisfies readonly (
   | keyof RootStackParamList
   | keyof MainTabParamList
 )[];
@@ -105,11 +117,13 @@ const EVENT_PROPS: { [N in AnalyticsEventName]: { [K in keyof AnalyticsProps<N>]
   prayer_marked_answered: { has_note: bool },
   prayer_removed: { was_answered: bool },
   reflection_deleted: { source: oneOf(["reflection", "prayers"]) },
-  paywall_viewed: { source: oneOf(["profile", "limit"]) },
+  paywall_viewed: { source: oneOf(["profile", "limit", "scholar"]) },
   purchase_completed: { plan: oneOf(PLANS), trial: bool },
   purchase_failed: { code: oneOf(PURCHASE_CODES) },
   restore_completed: { found: bool },
   data_export_requested: {},
+  scholar_conversation_started: { source: oneOf(["tab", "starter", "reflection"]) },
+  scholar_message_sent: { mode: oneOf(["text", "voice"]), turn: oneOf(["first", "follow_up"]) },
 };
 
 const SYSTEM_PROPS: Record<(typeof SYSTEM_EVENTS)[number], Record<string, Check>> = {

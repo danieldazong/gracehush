@@ -6,6 +6,7 @@ import type {
   DataSource,
   MockPurchaseOutcome,
   MockScenario,
+  MockScholarOutcome,
   MockSubmitOutcome,
 } from "@/data/mock/scenario";
 import type { PermissionResult } from "@/types";
@@ -62,6 +63,9 @@ interface DevState {
   // How many entries one page of the Journal holds (getEntriesPageSize), so the second page can be reached with a few entries.
   pageSize: number;
   setPageSize: (size: number) => void;
+  // What the next Scholar message answers on the mock data (step 38). takeMockScholarOutcome puts it back to "ready".
+  nextScholarOutcome: MockScholarOutcome;
+  setNextScholarOutcome: (outcome: MockScholarOutcome) => void;
 }
 
 export const useDevStore = create<DevState>()((set) => ({
@@ -94,4 +98,6 @@ export const useDevStore = create<DevState>()((set) => ({
   setDataSource: (dataSource) => set({ dataSource }),
   pageSize: ENTRIES_PAGE_SIZE,
   setPageSize: (pageSize) => set({ pageSize }),
+  nextScholarOutcome: "ready",
+  setNextScholarOutcome: (nextScholarOutcome) => set({ nextScholarOutcome }),
 }));

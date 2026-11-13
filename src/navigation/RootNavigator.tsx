@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { colors } from "@/constants/theme";
 import { SignInScreen } from "@/screens/auth/SignInScreen";
+import { ConversationScreen } from "@/screens/scholar/ConversationScreen";
 import { NewEntryScreen } from "@/screens/journal/NewEntryScreen";
 import { NowPlayingScreen } from "@/screens/journal/NowPlayingScreen";
 import { ReflectionScreen } from "@/screens/journal/ReflectionScreen";
@@ -81,6 +82,7 @@ export function RootNavigator() {
             layout={modalLayout}
           />
           <Stack.Screen name="Reflection" component={ReflectionScreen} />
+          <Stack.Screen name="Conversation" component={ConversationScreen} />
           <Stack.Screen
             name="NowPlaying"
             component={NowPlayingScreen}

@@ -14,6 +14,9 @@ import { safeStorage } from "./safeStorage";
 // - `aiPermissionAt` is when this account allowed its words and recordings to go to Google's AI (Apple's guideline 5.1.2(i)), or
 //   null for not yet, or taken back. It lives only on this phone: a new phone, or a reinstall, asks again. It survives a sign-out
 //   like the rest of the entry, and account deletion forgets it.
+// - `aiWording` is which words of that permission the account allowed (step 38): AI_WORDING names Scholar beside the
+//   devotionals. Missing means the first words (2026-11-07), and an account that allowed under them sees a one-time note in its
+//   first Scholar conversation, which records the new words.
 // No journal text is kept here.
 export type Settings = Required<ProfilePatch>;
 
@@ -23,7 +26,15 @@ export type ServerSnapshot = Settings & {
   syncedAt: string; // ISO, when the server last said so
 };
 
-export type ProfileEntry = { unsent: ProfilePatch; snapshot: ServerSnapshot | null; aiPermissionAt: string | null };
+export type ProfileEntry = {
+  unsent: ProfilePatch;
+  snapshot: ServerSnapshot | null;
+  aiPermissionAt: string | null;
+  aiWording?: number;
+};
+
+// The permission's current words (step 38). The first words, which named only the devotionals, were 1.
+export const AI_WORDING = 2;
 
 interface ProfilePrefsState {
   byUser: Record<string, ProfileEntry>;
@@ -31,6 +42,7 @@ interface ProfilePrefsState {
   clearUnsent: (userId: string, sent: ProfilePatch) => void; // the server has these: drop each one not edited since
   saveSnapshot: (userId: string, snapshot: ServerSnapshot) => void;
   setAiPermission: (userId: string, at: string | null) => void;
+  markAiWording: (userId: string) => void; // the one-time note was shown
   forgetUser: (userId: string) => void; // account deletion
 }
 
@@ -120,7 +132,15 @@ export const useProfilePrefsStore = create<ProfilePrefsState>()(
       setAiPermission: (userId, at) =>
         set((state) => {
           const entry = state.byUser[userId] ?? emptyEntry();
-          return { byUser: { ...state.byUser, [userId]: { ...entry, aiPermissionAt: at } } };
+          // Allowing now is allowing the current words.
+          const wording = at === null ? {} : { aiWording: AI_WORDING };
+          return { byUser: { ...state.byUser, [userId]: { ...entry, aiPermissionAt: at, ...wording } } };
+        }),
+      markAiWording: (userId) =>
+        set((state) => {
+          const entry = state.byUser[userId];
+          if (entry === undefined || entry.aiWording === AI_WORDING) return state;
+          return { byUser: { ...state.byUser, [userId]: { ...entry, aiWording: AI_WORDING } } };
         }),
       forgetUser: (userId) =>
         set((state) => ({
@@ -157,6 +177,8 @@ export const useProfilePrefsStore = create<ProfilePrefsState>()(
                   snapshot: readSnapshot(entry.snapshot),
                   // A damaged value is no permission, and so is a save from before this field existed.
                   aiPermissionAt: isTimestamp(entry.aiPermissionAt) ? entry.aiPermissionAt : null,
+                  // Kept only when it is a whole number: a missing or damaged value reads as the first words.
+                  ...(Number.isInteger(entry.aiWording) ? { aiWording: entry.aiWording as number } : {}),
                 },
               ],
             ];

@@ -112,6 +112,7 @@ function PaywallLoading() {
 function PaywallReady({
   state,
   source,
+  reason,
   hasEntry,
   pinned,
   linkNotice,
@@ -120,7 +121,8 @@ function PaywallReady({
   onOpenPage,
 }: {
   state: ReadyState;
-  source: "profile" | "limit";
+  source: "profile" | "limit" | "scholar";
+  reason: "messages" | "listen" | undefined;
   hasEntry: boolean;
   pinned: boolean;
   linkNotice: LinkNotice | null;
@@ -167,6 +169,11 @@ function PaywallReady({
               {hasEntry ? <Text className="text-body-sm text-mauve">{paywall.limit.saved}</Text> : null}
             </View>
           ) : null}
+          {source === "scholar" ? (
+            <View className="card card--blush mb-4">
+              <Text className="text-label-lg text-ink">{paywall.scholar[reason ?? "messages"]}</Text>
+            </View>
+          ) : null}
 
           <View className="mb-6 items-center">
             <View
@@ -209,6 +216,22 @@ function PaywallReady({
                 </View>
               </View>
             ))}
+            {source === "scholar"
+              ? paywall.scholar.features.map((title) => (
+                <View key={title} className="flex-row items-start gap-3">
+                  <View
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                    className="mt-0.5 size-6 items-center justify-center rounded-full bg-sage/15"
+                  >
+                    <Icon name={icons.check} size={16} color={colors.sage} />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-body text-ink">{title}</Text>
+                  </View>
+                </View>
+              ))
+              : null}
           </View>
 
           <View
@@ -237,7 +260,7 @@ function PaywallReady({
           </View>
         </View>
         {pinned ? null : footer}
-        <PaywallLinks showLater={source === "limit"} onLater={onClose} onOpenPage={onOpenPage} />
+        <PaywallLinks showLater={source !== "profile"} onLater={onClose} onOpenPage={onOpenPage} />
       </ScrollView>
       {pinned ? (
         <View className="pb-2">
@@ -250,7 +273,7 @@ function PaywallReady({
 }
 
 export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywall">) {
-  const { source, entryId } = route.params;
+  const { source, entryId, reason } = route.params;
   const state = usePaywall(entryId);
   const { height, fontScale } = useWindowDimensions();
   const [linkNotice, setLinkNotice] = useState<LinkNotice | null>(null);
@@ -265,7 +288,8 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
   }, [state.status, source]);
 
   // The one way out: the X, "Maybe later", Continue and Close. The Paywall opened from the limit replaced New Entry,
-  // so it lands on Journal. popTo, never navigate("MainTabs"): that would push a second copy of the tabs.
+  // so it lands on Journal. popTo, never navigate("MainTabs"): that would push a second copy of the tabs. From Scholar it
+  // goes back to the conversation, where "Try again" sends the held message after a purchase.
   function close() {
     if (source === "limit") navigation.popTo("MainTabs", { screen: "Journal" });
     else navigation.goBack();
@@ -363,6 +387,7 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
         <PaywallReady
           state={state}
           source={source}
+          reason={reason}
           hasEntry={entryId !== undefined}
           pinned={pinned}
           linkNotice={linkNotice}

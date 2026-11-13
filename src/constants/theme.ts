@@ -90,6 +90,10 @@ export const layout = {
   dockOrb: 56,
   dockHeight: 120,
   dockClearance: 176,
+  // Scholar's ask bar (step 38), dockOffset above the capsule in place of the dock: askBarHeight tall, and the Scholar tab's
+  // content ends askBarClearance above the capsule (the offset, the bar and 36 of air).
+  askBarHeight: 56,
+  askBarClearance: 112,
 } as const;
 
 export const gradients = {

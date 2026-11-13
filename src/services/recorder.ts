@@ -17,6 +17,7 @@ import {
 } from "@/constants/audio";
 import { stopAmbient } from "@/services/ambientPlayer";
 import { setSessionMode } from "@/services/audioSession";
+import { stopScholarAudio } from "@/services/scholarPlayer";
 import { usePlayerStore } from "@/store/playerStore";
 import type { PermissionResult, RecorderStatus, RecordingResult } from "@/types";
 import { meterToLevel, smoothLevel } from "@/utils/audioLevels";
@@ -149,6 +150,8 @@ export async function startRecording(onStatus: (status: RecorderStatus) => void)
   // bed stops at once as well, with no fade, which would still be playing from the speaker when the microphone opens.
   usePlayerStore.getState().pause();
   stopAmbient();
+  // Scholar's voice stops too (step 38): the take must not hear it.
+  stopScholarAudio();
   let recorder: AudioRecorder | null = null;
   try {
     await setSessionMode("recording");

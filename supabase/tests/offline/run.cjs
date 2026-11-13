@@ -799,6 +799,9 @@ async function accountChecks() {
       "@/services/realtime": { __esModule: true, stopRealtime: async () => void order.push("realtime stopped") },
       // Step 34: analytics resets last, with nothing queued for the account that left (PostHog cannot load in plain Node).
       "@/services/analytics": { __esModule: true, resetAnalytics: async () => void order.push("analytics reset"), track: () => undefined },
+      // Step 38: Scholar's voice stops and its parts go, and the session's turns are forgotten (expo-audio cannot load here).
+      "@/services/scholarPlayer": { __esModule: true, clearScholarAudio: () => void order.push("scholar audio"), stopScholarAudio: () => undefined },
+      "@/data/scholarRepository": { __esModule: true, forgetScholarSession: () => void order.push("scholar session") },
     };
     const mod = makeWorld2(w, extra);
     const database = mod.use("@/db/database");
@@ -827,6 +830,10 @@ async function accountChecks() {
     assert.equal(w.recordings.files.size, 0);
     assert.ok(order.includes("player") && order.includes("reminders") && order.includes("cancel profile sync"));
     assert.ok(order.indexOf("player") < order.indexOf("devotional audio"), `the player stops before its files go: ${order.join(" > ")}`);
+    assert.ok(
+      order.includes("scholar audio") && order.includes("scholar session"),
+      `Scholar's voice, its parts and its session go too: ${order.join(" > ")}`,
+    );
     assert.equal(order.filter((step) => step === "affirmations").length, 1, "the affirmation notifications are cleared once");
     assert.ok(order.indexOf("plan watch") >= 0 && order.indexOf("plan watch") < order.indexOf("revenuecat"), `the plan watch stops before RevenueCat logs out: ${order.join(" > ")}`);
     assert.equal(order[order.length - 1], "analytics reset", `analytics resets last: ${order.join(" > ")}`);

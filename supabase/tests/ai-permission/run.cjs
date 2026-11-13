@@ -117,6 +117,44 @@ async function main() {
     assert.equal(processCalls(w).length, 0, "no request");
   });
 
+  // Step 38: Scholar sends what a person types or says to the same AI, so the same answer stands in front of it.
+  await test("scholar: with no permission a message to Scholar is never sent, typed or spoken", async (w) => {
+    const repo = w.use("@/data/scholarRepository");
+    const typed = await repo.sendTurn({
+      conversationId: "00000000-0000-4000-8000-0000000000c1",
+      messageId: "00000000-0000-4000-8000-0000000000d1",
+      input: { type: "text", text: WORDS },
+    });
+    assert.deepEqual(typed, { ok: false, code: "NO_PERMISSION", usage: null });
+    const spoken = await repo.sendTurn(
+      {
+        conversationId: "00000000-0000-4000-8000-0000000000c1",
+        messageId: "00000000-0000-4000-8000-0000000000d2",
+        input: { type: "audio", durationMs: 4000 },
+      },
+      { uri: "file:///recordings/chat-00000000-0000-4000-8000-0000000000d2.m4a" },
+    );
+    assert.equal(spoken.ok, false);
+    assert.equal(spoken.code, "NO_PERMISSION");
+    assert.equal(w.upload.calls.length, 0, "no recording is uploaded");
+    assert.equal(
+      w.server.state.requests.filter((r) => r.path.startsWith("/functions/v1/scholar")).length,
+      0,
+      "no request reaches Scholar",
+    );
+    // Nor is an answer read aloud.
+    const listen = await repo.speak("00000000-0000-4000-8000-0000000000d3", 0);
+    assert.deepEqual(listen, { ok: false, code: "NO_PERMISSION", usage: null });
+    assert.equal(
+      w.server.state.requests.filter((r) => r.path.startsWith("/functions/v1/scholar")).length,
+      0,
+      "no request reaches scholar-speak either",
+    );
+    // Allowed, the same words go.
+    allow(w);
+    assert.equal(service(w).hasAiPermission(), true);
+  });
+
   await test("engine: allowing it sends what was waiting, once, with the same id", async (w) => {
     await w.startEngine();
     await outbox(w).enqueue(text("c-held"));
@@ -224,7 +262,7 @@ async function main() {
       ...sheet.details.flatMap((row) => [row.label, row.body]),
     ].join(" ");
     // What Apple's reviewers look for: what is sent, who gets it, and the permission asked before anything goes.
-    for (const word of ["Google", "AI", "Gemini", "text-to-speech", "recording", "words", "devotional"]) {
+    for (const word of ["Google", "AI", "Gemini", "text-to-speech", "recording", "words"]) {
       assert.ok(face.includes(word), `the face of the sheet must say "${word}"`);
     }
     assert.ok(sheet.title.includes("Google") && sheet.title.includes("AI"), "the question itself names Google's AI");
@@ -239,7 +277,7 @@ async function main() {
       "and says what Google's terms say, in Google's words",
     );
     // One tap away, nothing hidden: what Google keeps, why it is asked, where to change it.
-    for (const word of ["extra care", "Profile", "misuse", "limited time"]) {
+    for (const word of ["extra care", "Profile", "misuse", "limited time", "devotionals", "Scholar"]) {
       assert.ok(all.includes(word), `the details must say "${word}"`);
     }
     assert.equal(sheet.details.length, 3);
@@ -304,6 +342,22 @@ async function main() {
   sourceCheck("the sheet's training answer is what the Privacy Policy and the Terms already say", () => {
     assert.match(read("docs/privacy-policy.md"), /we do not use them to train AI models\. Google\u2019s paid terms say it does not use them to improve its products/);
     assert.match(read("docs/terms-of-use.md"), /we do not use it to train AI models/);
+  });
+
+  sourceCheck("scholar: the gate comes first in every send and every read aloud, before the mock data and the network", () => {
+    const repo = read("src/data/scholarRepository.ts");
+    // The gate must be there (indexOf -1 would read as "first") and before the mock data.
+    const gateFirst = (body) => {
+      const gate = body.indexOf("if (!hasAiPermission()) return");
+      return gate >= 0 && gate < body.indexOf("isMock()");
+    };
+    const turn = repo.slice(repo.indexOf("async function runTurn("));
+    assert.ok(gateFirst(turn), "no Scholar turn is sent, not even to the mock data, before the permission");
+    const speak = repo.slice(repo.indexOf("export async function speak("));
+    assert.ok(gateFirst(speak), "nor is an answer read aloud");
+    const screen = read("src/screens/scholar/ConversationScreen.tsx");
+    assert.match(screen, /\{allowed \? null : \(\s*<AiPermissionSheet/, "the sheet covers a conversation until the person has answered");
+    assert.match(screen, /accessibilityElementsHidden=\{!allowed\}/, "and screen readers cannot reach the conversation behind it");
   });
 
   sourceCheck("the engine: the gate is on the outbox, in the run and in the timer, and not on prayer changes", () => {

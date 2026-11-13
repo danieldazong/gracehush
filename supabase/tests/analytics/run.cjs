@@ -409,18 +409,37 @@ async function policyChecks() {
     assert.equal("partial" in out.properties, false);
   });
 
-  await test("policy: $screen keeps only a tracked name, and is dropped for Reflection, Support Resources, Onboarding, Sign In, the tabs and no name", async () => {
+  await test("policy: $screen keeps only a tracked name, and is dropped for Reflection, a Scholar conversation, Support Resources, Onboarding, Sign In, the tabs and no name", async () => {
     const { sanitizeEvent, TRACKED_SCREENS } = world().policy();
-    assert.deepEqual([...TRACKED_SCREENS], ["Journal", "Prayers", "Profile", "NewEntry", "NowPlaying", "Paywall"]);
+    assert.deepEqual([...TRACKED_SCREENS], ["Journal", "Scholar", "Prayers", "Profile", "NewEntry", "NowPlaying", "Paywall"]);
     for (const name of TRACKED_SCREENS) {
       const out = sanitizeEvent(message("$screen", { $screen_name: name, entryId: "x" }));
       assert.notEqual(out, null, name);
       assert.equal(out.properties.$screen_name, name);
       assert.equal("entryId" in out.properties, false);
     }
-    for (const name of ["Reflection", "CrisisResources", "Onboarding", "SignIn", "MainTabs", "", undefined]) {
+    for (const name of ["Reflection", "Conversation", "CrisisResources", "Onboarding", "SignIn", "MainTabs", "", undefined]) {
       assert.equal(sanitizeEvent(message("$screen", name === undefined ? {} : { $screen_name: name })), null, String(name));
     }
+  });
+
+  await test("policy: Scholar's two events keep only their fixed values, and the Paywall may say it came from Scholar", async () => {
+    const { sanitizeEvent } = world().policy();
+    const started = sanitizeEvent(message("scholar_conversation_started", { source: "reflection", conversationId: "c-1", text: "hello" }));
+    assert.notEqual(started, null);
+    assert.equal(started.properties.source, "reflection");
+    assert.equal("conversationId" in started.properties, false, "never an id");
+    assert.equal("text" in started.properties, false, "never a word of the conversation");
+    assert.equal(sanitizeEvent(message("scholar_conversation_started", { source: "chat" })), null, "a source outside the list is dropped");
+    const sent = sanitizeEvent(message("scholar_message_sent", { mode: "voice", turn: "follow_up", heavy: true }));
+    assert.notEqual(sent, null);
+    assert.deepEqual([sent.properties.mode, sent.properties.turn], ["voice", "follow_up"]);
+    assert.equal("heavy" in sent.properties, false, "nothing about a heavy moment rides along");
+    assert.equal(sanitizeEvent(message("scholar_message_sent", { mode: "text" })), null, "both properties are required");
+    assert.equal(sanitizeEvent(message("scholar_message_sent", { mode: "video", turn: "first" })), null);
+    assert.equal(sanitizeEvent(message("scholar_message_sent", { mode: "text", turn: "third" })), null, "a turn outside its list");
+    assert.notEqual(sanitizeEvent(message("paywall_viewed", { source: "scholar" })), null);
+    assert.equal(sanitizeEvent(message("paywall_viewed", { source: "chat" })), null);
   });
 
   await test("policy: the session's $screen_name rides along on other events only when it is a tracked screen", async () => {
@@ -970,7 +989,7 @@ async function contractChecks() {
     }
     const policy = read("src/services/analyticsPolicy.ts");
     const names = [...policy.matchAll(/name: "([a-z_]+)"/g)].map((match) => match[1]);
-    assert.equal(names.length, 18, names.join(","));
+    assert.equal(names.length, 20, names.join(","));
     for (const name of names) assert.ok(!/crisis|support|sign/.test(name), name);
   });
 }

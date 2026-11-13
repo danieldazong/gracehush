@@ -1,4 +1,4 @@
-import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
+import { FunctionRegion, FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
 
 import {
   ADD_AFFIRMATION_TIMEOUT_MS,
@@ -7,6 +7,9 @@ import {
   DELETE_ENTRY_TIMEOUT_MS,
   EXPORT_DATA_TIMEOUT_MS,
   PROCESS_ENTRY_TIMEOUT_MS,
+  SCHOLAR_SPEAK_TIMEOUT_MS,
+  SCHOLAR_SPOKEN_TURN_TIMEOUT_MS,
+  SCHOLAR_TURN_TIMEOUT_MS,
   SYNC_SUBSCRIPTION_TIMEOUT_MS,
 } from "@/constants/app";
 import { getSupabase } from "@/services/supabaseClient";
@@ -26,6 +29,14 @@ import type {
   Prayer,
   ProcessEntryRequest,
   ProcessEntryResponse,
+  ScholarBlock,
+  ScholarConversation,
+  ScholarMessage,
+  ScholarSpeakRequest,
+  ScholarSpeakResponse,
+  ScholarTurnRequest,
+  ScholarTurnResponse,
+  ScholarUsage,
   Scripture,
   SyncSubscriptionResponse,
 } from "@/types";
@@ -34,7 +45,7 @@ import { readAffirmationVerse } from "@/utils/affirmationVerse";
 import { NO_SESSION_ERROR_NAME } from "@/utils/supabaseErrors";
 
 // The only code that calls the Edge Functions (step 25, delete-entry since step 29b, sync-subscription since step 30, export-data
-// and delete-account since step 31, and add-affirmation since 2026-11-09). supabase-js sends the Clerk session token as the bearer
+// and delete-account since step 31, add-affirmation since 2026-11-09, and Scholar's scholar-turn and scholar-speak since step 38). supabase-js sends the Clerk session token as the bearer
 // token by itself (the accessToken option of src/services/supabaseClient.ts), so nothing here builds an Authorization
 // header or asks Clerk for a token. Every call answers with data or with a failure that carries the HTTP status and a
 // code; it never throws.
@@ -50,7 +61,9 @@ export type FunctionName =
   | "sync-subscription"
   | "export-data"
   | "delete-account"
-  | "add-affirmation";
+  | "add-affirmation"
+  | "scholar-turn"
+  | "scholar-speak";
 
 export type FunctionResult<T> =
   | { ok: true; data: T }
@@ -208,6 +221,81 @@ function isDeleteAccountResponse(value: unknown): value is DeleteAccountResponse
   return isRecord(value) && value.deleted === true;
 }
 
+// ---- Scholar (step 38) ----
+const HELP_KINDS: readonly string[] = ["crisis", "abuse", "harm_others", "emergency"];
+const MESSAGE_STATUSES: readonly string[] = ["pending", "ready", "failed"];
+const USAGE_KINDS: readonly string[] = ["free_day", "pro_day", "listen_day", "listen_plan"];
+
+function isScholarBlock(value: unknown): value is ScholarBlock {
+  if (!isRecord(value)) return false;
+  if (value.type === "text" || value.type === "prayer") return isString(value.text);
+  return value.type === "passage" && isScripture(value.scripture);
+}
+
+function isScholarMessage(value: unknown): value is ScholarMessage {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isString(value.conversationId) &&
+    (value.role === "user" || value.role === "scholar") &&
+    isNullableString(value.replyTo) &&
+    (value.inputType === null || value.inputType === "text" || value.inputType === "audio") &&
+    isString(value.status) &&
+    MESSAGE_STATUSES.includes(value.status) &&
+    isNullableString(value.errorCode) &&
+    Array.isArray(value.blocks) &&
+    value.blocks.every(isScholarBlock) &&
+    typeof value.isHeavy === "boolean" &&
+    (value.helpLine === null || (isString(value.helpLine) && HELP_KINDS.includes(value.helpLine))) &&
+    isString(value.createdAt)
+  );
+}
+
+function isScholarConversation(value: unknown): value is ScholarConversation {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    isNullableString(value.entryId) &&
+    isNullableString(value.title) &&
+    typeof value.isHeavy === "boolean" &&
+    isString(value.lastMessageAt) &&
+    isString(value.createdAt)
+  );
+}
+
+function isScholarUsage(value: unknown): value is ScholarUsage {
+  return (
+    isRecord(value) &&
+    isString(value.kind) &&
+    USAGE_KINDS.includes(value.kind) &&
+    typeof value.used === "number" &&
+    typeof value.limit === "number" &&
+    typeof value.remaining === "number" &&
+    isNullableString(value.resetsAt)
+  );
+}
+
+function isScholarTurnResponse(value: unknown): value is ScholarTurnResponse {
+  return (
+    isRecord(value) &&
+    isScholarConversation(value.conversation) &&
+    isScholarMessage(value.message) &&
+    isScholarMessage(value.answer) &&
+    (value.usage === null || isScholarUsage(value.usage))
+  );
+}
+
+function isScholarSpeakResponse(value: unknown): value is ScholarSpeakResponse {
+  return (
+    isRecord(value) &&
+    typeof value.part === "number" &&
+    typeof value.parts === "number" &&
+    isString(value.audioBase64) &&
+    value.audioBase64 !== "" &&
+    typeof value.durationMs === "number"
+  );
+}
+
 // ---- failures ------------------------------------------------------------------------------------------------------
 // For an answer that has none of our codes in it: the platform's own 4xx and 5xx (a function that is not deployed, a
 // worker that ran out of memory, a request that took too long).
@@ -249,9 +337,13 @@ async function callFunction<T>(
     | DeleteEntryRequest
     | DeleteAccountRequest
     | AddAffirmationRequest
+    | ScholarTurnRequest
+    | ScholarSpeakRequest
     | Record<string, never>,
   timeout: number,
   isValid: (value: unknown) => value is T,
+  // Scholar's two functions run beside the database (us-east-1), so their many database calls do not cross an ocean.
+  region?: FunctionRegion,
 ): Promise<FunctionResult<T>> {
   const started = Date.now();
   const supabase = getSupabase();
@@ -259,7 +351,10 @@ async function callFunction<T>(
   if (supabase === null) return record(name, started, { ok: false, status: 0, code: "UNAUTHORIZED", body: null });
   try {
     // `timeout` aborts the request itself, which comes back as a FunctionsFetchError: no answer, so NETWORK.
-    const { data, error } = await supabase.functions.invoke<unknown>(name, { body, timeout });
+    const { data, error } = await supabase.functions.invoke<unknown>(
+      name,
+      region === undefined ? { body, timeout } : { body, timeout, region },
+    );
     if (error !== null) return record(name, started, { ok: false, ...(await readFailure(error)) });
     if (isValid(data)) return record(name, started, { ok: true, data });
     // The function answered 200 with something that is not what it promises.
@@ -316,6 +411,23 @@ export function deleteAccount(appleAuthorizationCode: string | null): Promise<Fu
   const body: DeleteAccountRequest =
     appleAuthorizationCode === null ? { confirm: "DELETE" } : { confirm: "DELETE", appleAuthorizationCode };
   return callFunction("delete-account", body, DELETE_ACCOUNT_TIMEOUT_MS, isDeleteAccountResponse);
+}
+
+// scholar-turn (step 38): one message of a Scholar conversation and its answer, screened before any of it is shown. A spoken
+// message waits longer (its recording is transcribed first). LIMIT_REACHED (402) carries the day's numbers (readScholarUsage).
+export function scholarTurn(request: ScholarTurnRequest): Promise<FunctionResult<ScholarTurnResponse>> {
+  const timeout = request.input.type === "audio" ? SCHOLAR_SPOKEN_TURN_TIMEOUT_MS : SCHOLAR_TURN_TIMEOUT_MS;
+  return callFunction("scholar-turn", request, timeout, isScholarTurnResponse, FunctionRegion.UsEast1);
+}
+
+// scholar-speak (step 38): one part of a saved answer read aloud, as a base64 WAV that is stored nowhere.
+export function scholarSpeak(request: ScholarSpeakRequest): Promise<FunctionResult<ScholarSpeakResponse>> {
+  return callFunction("scholar-speak", request, SCHOLAR_SPEAK_TIMEOUT_MS, isScholarSpeakResponse, FunctionRegion.UsEast1);
+}
+
+// The day's numbers a Scholar 402 carries beside its error, or null for any other body.
+export function readScholarUsage(body: unknown): ScholarUsage | null {
+  return isRecord(body) && isScholarUsage(body.usage) ? body.usage : null;
 }
 
 // The 402 body (step 22): the entry the server saved and when the free week ends. Null for any other body.

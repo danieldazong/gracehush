@@ -5,6 +5,7 @@ import { colors } from "@/constants/theme";
 import { JournalFeedScreen } from "@/screens/journal/JournalFeedScreen";
 import { PrayersScreen } from "@/screens/prayers/PrayersScreen";
 import { ProfileScreen } from "@/screens/profile/ProfileScreen";
+import { ScholarScreen } from "@/screens/scholar/ScholarScreen";
 
 import type { MainTabParamList } from "./types";
 
@@ -22,6 +23,7 @@ export function MainTabs() {
       }}
     >
       <Tab.Screen name="Journal" component={JournalFeedScreen} />
+      <Tab.Screen name="Scholar" component={ScholarScreen} />
       <Tab.Screen name="Prayers" component={PrayersScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>

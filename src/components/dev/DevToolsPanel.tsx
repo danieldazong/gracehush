@@ -32,6 +32,7 @@ import type {
   DataSource,
   MockPurchaseOutcome,
   MockScenario,
+  MockScholarOutcome,
   MockSubmitOutcome,
 } from "@/data/mock/scenario";
 import {
@@ -79,6 +80,8 @@ import {
 
 const SCENARIOS: MockScenario[] = ["default", "empty", "offline"];
 const SUBMIT_OUTCOMES: MockSubmitOutcome[] = ["ready", "crisis", "failed", "limit", "too_short"];
+// What the next Scholar message answers on the mock data (step 38).
+const SCHOLAR_OUTCOMES: MockScholarOutcome[] = ["ready", "heavy", "failed", "limit", "resting"];
 const OUTBOX_STATES: OutboxStatus[] = ["queued", "sending", "needs_action", "limit_reached", "paused_auth"];
 const PLANS: SubscriptionTier[] = ["free", "trial", "pro"];
 const DATA_SOURCES: DataSource[] = ["supabase", "mock"];
@@ -325,6 +328,8 @@ function DevToolsContent() {
   const setNextHomeLoadFails = useDevStore((state) => state.setNextHomeLoadFails);
   const nextSubmitOutcome = useDevStore((state) => state.nextSubmitOutcome);
   const setNextSubmitOutcome = useDevStore((state) => state.setNextSubmitOutcome);
+  const nextScholarOutcome = useDevStore((state) => state.nextScholarOutcome);
+  const setNextScholarOutcome = useDevStore((state) => state.setNextScholarOutcome);
   const nextReflectionLoadFails = useDevStore((state) => state.nextReflectionLoadFails);
   const setNextReflectionLoadFails = useDevStore((state) => state.setNextReflectionLoadFails);
   const nextPrayerMutationFails = useDevStore((state) => state.nextPrayerMutationFails);
@@ -521,6 +526,10 @@ function DevToolsContent() {
     if (entryId) navigation.navigate("NowPlaying", { entryId });
   }
 
+  function openConversation(entryId: string | null) {
+    navigation.navigate("Conversation", entryId ? { entryId } : {});
+  }
+
   function openPaywall(params: RootStackParamList["Paywall"]) {
     navigation.navigate("Paywall", params);
   }
@@ -579,6 +588,43 @@ function DevToolsContent() {
               onPress={() => setNextSubmitOutcome(name)}
             />
           ))}
+        </View>
+      </View>
+      <View className="gap-2">
+        <Text className="text-center text-body-sm text-mauve">
+          Next Scholar answer (mock data only; back to ready after each one)
+        </Text>
+        <View className="flex-row flex-wrap justify-center gap-2">
+          {SCHOLAR_OUTCOMES.map((name) => (
+            <DevButton
+              key={name}
+              label={name}
+              accessibilityLabel={`Next Scholar answer ${name} (dev)`}
+              selected={name === nextScholarOutcome}
+              onPress={() => setNextScholarOutcome(name)}
+            />
+          ))}
+        </View>
+      </View>
+      <View className="gap-2">
+        <Text className="text-center text-body-sm text-mauve">Open conversation (dev)</Text>
+        <View className="flex-row flex-wrap justify-center gap-2">
+          <DevButton
+            label="New"
+            accessibilityLabel="Open a new conversation (dev)"
+            onPress={() => openConversation(null)}
+          />
+          {targets
+            .filter((target) => target.label === "Ready" || target.label === "Heavy")
+            .map((target) => (
+              <DevButton
+                key={target.label}
+                label={target.label}
+                accessibilityLabel={`Open conversation ${target.label} (dev)`}
+                disabled={target.entryId === null}
+                onPress={() => openConversation(target.entryId)}
+              />
+            ))}
         </View>
       </View>
       <View className="gap-2">

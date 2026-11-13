@@ -25,6 +25,18 @@ export function getEntriesPageSize(): number {
 // a refusal that only the person can fix.
 export type MockSubmitOutcome = "ready" | "crisis" | "failed" | "limit" | "too_short";
 
+// What the next Scholar message answers on the mock data (step 38): an answer, one written with extra care, a failure, the free
+// limit, or Scholar resting. One-shot, like the submit outcome.
+export type MockScholarOutcome = "ready" | "heavy" | "failed" | "limit" | "resting";
+
+export function takeMockScholarOutcome(): MockScholarOutcome {
+  if (!__DEV__) return "ready";
+  const dev = useDevStore.getState();
+  const outcome = dev.nextScholarOutcome;
+  dev.setNextScholarOutcome("ready");
+  return outcome;
+}
+
 // Production builds always use "default" until real data replaces the mocks.
 export function getMockScenario(): MockScenario {
   return __DEV__ ? useDevStore.getState().scenario : "default";

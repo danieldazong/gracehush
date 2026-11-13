@@ -2,6 +2,7 @@ import { deleteAccount as deleteAccountOnServer, exportData } from "@/api/journa
 import { copy } from "@/constants/copy";
 import { simulateWrite } from "@/data/journalRepository";
 import { getDataSource, takeMockPrayerMutationFailure } from "@/data/mock/scenario";
+import { forgetScholarSession } from "@/data/scholarRepository";
 import { deleteUserDatabase } from "@/db/database";
 import { clearAffirmations } from "@/services/affirmationScheduler";
 import { resetAnalytics } from "@/services/analytics";
@@ -11,6 +12,7 @@ import { cancelProfileSync, pauseProfileSync, resumeProfileSync } from "@/servic
 import { startRealtime, stopRealtime } from "@/services/realtime";
 import { deleteAllRecordings } from "@/services/recordingFiles";
 import { endRevenueCatSession } from "@/services/revenuecat";
+import { clearScholarAudio } from "@/services/scholarPlayer";
 import { startPlanWatch, stopPlanWatch } from "@/services/subscriptionSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { isSyncEngineStarted, startSyncEngine, stopSyncEngine } from "@/services/syncEngine";
@@ -122,6 +124,10 @@ export async function signOutCleanup(): Promise<void> {
   // session either.
   usePlayerStore.getState().stop();
   await deleteAllDevotionalAudio();
+  // Scholar (step 38): its voice stops and the parts it read are deleted, and the turn in flight and the uploads this session
+  // remembers go with the session. Conversations themselves live on the server and nothing of them is kept on the phone.
+  clearScholarAudio();
+  forgetScholarSession();
   // The affirmation notifications this account scheduled, and the ones still in the notification center (step 28): an
   // affirmation must not reach the phone, or open, after its account has gone.
   await clearAffirmations();

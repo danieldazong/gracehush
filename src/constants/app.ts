@@ -128,3 +128,21 @@ export const SUPPORT_EMAIL = "support@nouvrix.com";
 // The web page where someone can ask for their account and its data to be deleted without the app (Google Play's Data safety
 // form asks for it; step 31). It is not shown in the app.
 export const ACCOUNT_DELETION_URL = "https://gracehush.com/delete-account/";
+
+// Scholar (step 38). The day's limits are the server's and reach the app in each answer's `usage`: none is written here.
+export const SCHOLAR_MAX_MESSAGE_LENGTH = 2_000; // the server's SCHOLAR_REQUEST.maxTextChars
+export const SCHOLAR_MIN_SPOKEN_MS = 1_000; // a take under a second is discarded
+export const SCHOLAR_MAX_SPOKEN_MS = 120_000; // a take stops at two minutes (the server takes up to 125 s)
+export const SCHOLAR_SPOKEN_WARNING_MS = 105_000;
+export const SCHOLAR_TURN_TIMEOUT_MS = 45_000; // above the server's 40 s for a typed message
+export const SCHOLAR_SPOKEN_TURN_TIMEOUT_MS = 60_000; // above its 50 s for a spoken one
+export const SCHOLAR_SPEAK_TIMEOUT_MS = 20_000;
+export const SCHOLAR_RECENTS_LIMIT = 30; // conversations listed on the Scholar tab
+export const SCHOLAR_MESSAGES_LIMIT = 200; // messages read when a conversation opens
+export const SCHOLAR_PENDING_MS = 60_000; // an unanswered message younger than this is still being answered
+export const SCHOLAR_PENDING_POLL_MS = 3_000;
+export const SCHOLAR_LOW_REMAINING = 2; // a free account sees how many messages are left from this many
+export const SCHOLAR_BREAK_NUDGE_TURNS = 20; // the break note, once a visit
+// The AI reminder (2026-11-11, the public page and New York's companion law): at the start of a conversation, and again before a
+// message sent this long after the last reminder.
+export const SCHOLAR_AI_REMINDER_MS = 3 * 60 * 60 * 1000;

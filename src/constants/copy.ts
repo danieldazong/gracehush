@@ -24,8 +24,10 @@ export const copy = {
   // behind "Learn more". Google's paid Gemini terms and its Cloud Text-to-Speech page were read on 2026-11-03: read them again before
   // changing the sentence about them or "What Google keeps".
   aiPermission: {
-    title: "Allow Google’s AI to write your devotional?",
-    body: "Your recording or words go to Google’s Gemini AI, and your devotional to Google’s text-to-speech.",
+    // The words name Scholar beside the devotionals since step 38 (AI_WORDING 2 in profilePrefsStore). Drafted for the owner's
+    // approval; a lawyer confirms them before launch.
+    title: "Allow Google’s AI to write for you?",
+    body: "Your recordings and words go to Google’s Gemini AI, and what it writes for you to Google’s text-to-speech.",
     trust: "We don’t train AI on them, and Google’s paid terms say it doesn’t use them to improve its products.",
     caption: "Nothing is sent until you tap Allow.",
     allow: "Allow",
@@ -36,12 +38,12 @@ export const copy = {
     details: [
       {
         label: "Why we ask",
-        body: "To write your devotional and read it aloud, with extra care when your words carry something very heavy.",
+        body: "To write your devotionals and Scholar’s answers and read them aloud, with extra care when your words carry something very heavy.",
       },
       { label: "What Google keeps", body: "Google can keep your words for a limited time to check for misuse." },
       {
         label: "Your choice",
-        body: "You can change this anytime in Profile. Without it, GraceHush can’t prepare a reflection.",
+        body: "You can change this anytime in Profile. Without it, GraceHush can’t prepare a reflection or answer in Scholar.",
       },
     ],
   },
@@ -127,6 +129,7 @@ export const copy = {
   },
   tabs: {
     journal: "Journal",
+    scholar: "Scholar",
     prayers: "Prayers",
     profile: "Profile",
     // iOS only: with the new architecture React Native speaks no role for a tab, so the label says it.
@@ -943,8 +946,8 @@ export const copy = {
     // The AI permission's switch (2026-11-03): New Entry asks first, and this is where it is changed afterwards.
     aiPermission: {
       title: "Share with Google’s AI",
-      on: "On. Your words and recordings go to Google to prepare your reflections.",
-      off: "Off. GraceHush can’t prepare new reflections.",
+      on: "On. Your words and recordings go to Google so GraceHush can write for you.",
+      off: "Off. GraceHush can’t prepare reflections or answer in Scholar.",
     },
     analytics: {
       title: "Share Usage Data",
@@ -1074,6 +1077,13 @@ export const copy = {
       resets: (resetDay: string) => `They reset ${resetDay}.`,
       saved: "Your reflection is saved.",
     },
+    // From Scholar (step 38): the banner says what sent the person here, and two rows say what Pro adds there. Both are real
+    // gates on the server (Subscription Rules): more messages a day than the free plan's, and answers read aloud.
+    scholar: {
+      messages: "You’ve used today’s free messages with Scholar.",
+      listen: "Hearing Scholar’s answers is part of GraceHush Pro.",
+      features: ["Longer conversations with Scholar", "Scholar reads its answers aloud"],
+    },
     plan: {
       groupLabel: "Plans",
       title: { annual: "Yearly Access", monthly: "Monthly Access" },
@@ -1143,5 +1153,114 @@ export const copy = {
       restoreError: "We couldn’t restore your purchases. Please try again.",
     },
     days: daysLabel,
+  },
+  // Scholar (step 38, Part two): the tab, the Conversation screen and the Reflection row. The day's numbers come from the
+  // server's `usage`, so no limit is written here, and a help line under an answer is copy.reflection.help's (HelpLine).
+  scholar: {
+    title: "Ask Scholar",
+    caption: "An AI Bible companion for your questions and your hard days.",
+    groups: { starters: "Try asking", recent: "Recent conversations" },
+    // As rows on the tab and as chips in a new conversation; each is sent as it is written.
+    starters: {
+      verse: "Explain John 3:16 simply",
+      anxious: "A verse for when I’m anxious",
+      pray: "Help me pray about today",
+    },
+    untitled: "A conversation with Scholar",
+    askBar: "Ask Scholar…",
+    input: "Message Scholar…",
+    header: "Scholar",
+    eyebrow: "Scholar",
+    // Under the composer, always on screen, and the AI reminder in the list: at the start of every conversation and again three
+    // hours or more after the last one (2026-11-11, the public page and New York's companion law).
+    aiLine: "Scholar is AI and can be wrong. It isn’t a pastor or counselor.",
+    chips: {
+      after: ["Explain it more simply", "Help me pray about this", "Show me a passage"],
+      reflection: ["Why this passage?", "Help me pray about this", "What can I do today?"],
+    },
+    contextEyebrow: "From your reflection",
+    amen: "Amen.",
+    speak: {
+      tap: "Tap to speak",
+      listening: "Listening…",
+      paused: "Paused",
+      ready: "Ready to send",
+      warning: "15 seconds left",
+      transcribed: "Transcribed from your voice",
+      voiceMessage: "Voice message",
+      micOff: "Microphone access is off. Turn it on in Settings, or type your message.",
+      openSettings: "Open Settings",
+      tooShort: "That was too short to hear.",
+      noWords: "We couldn’t hear any words. Try again, or type your message.",
+      uploadFailed: "We couldn’t send your recording. Try again.",
+      startFailed: "We couldn’t start recording. Please try again.",
+    },
+    listen: {
+      listen: "Listen",
+      stop: "Stop",
+      preparing: "Preparing audio…",
+      failed: "We couldn’t play that. Try again.",
+    },
+    waiting: "Scholar is writing…",
+    failed: "Scholar couldn’t answer just now.",
+    tryAgain: "Try again",
+    notices: {
+      offline: "Scholar needs a connection.",
+      resting: "Scholar is resting right now. Please try again later.",
+      rateLimited: "You’re sending messages quickly. Please wait a moment.",
+      freeLimit: "You’ve used today’s free messages with Scholar. They return tomorrow. Your message is saved.",
+      seePlans: "See plans",
+      proLimit: "You’ve reached today’s limit with Scholar. It resets tomorrow.",
+      listenLimit: "Scholar has read aloud as much as it can today. You can keep reading its answers.",
+      // The server's own words for SCHOLAR_ADULTS_ONLY (_shared/errors.ts), with the app's support address.
+      adultsOnly: (email: string) =>
+        `Scholar is for adults, so it isn’t available on this account. If you think this is a mistake, write to ${email}.`,
+      breakNote: "You’ve been here a while. It’s okay to pause and come back. Scholar will be here.",
+      permissionNote: "Scholar uses the same Google AI as your devotionals. You can change this in Profile.",
+    },
+    remaining: (count: number) => (count === 1 ? "1 free message left today" : `${count} free messages left today`),
+    // The readers' request (2026-11-11): in a heavy conversation a small help button stays within reach.
+    help: {
+      button: "Get help",
+      hint: "Shows ways to reach someone now",
+      close: "Close",
+    },
+    delete: {
+      menu: "Delete conversation…",
+      // Under an answer about harm at home (the readers' request): someone may watch the phone.
+      link: "Delete this conversation",
+      title: "Delete this conversation?",
+      body: "This permanently deletes the conversation and Scholar’s answers. This can’t be undone.",
+      confirm: "Delete forever",
+      cancel: "Keep",
+      failed: "We couldn’t delete this conversation. Please try again.",
+      offline: "Connect to the internet to delete a conversation.",
+    },
+    errors: {
+      load: "We couldn’t load your conversations.",
+      conversation: "We couldn’t load this conversation.",
+      missing: "This conversation is no longer available.",
+      retry: "Try again",
+      back: "Go back",
+    },
+    reflectionRow: { title: "Talk it through with Scholar", subtitle: "Ask about this passage or your day" },
+    a11y: {
+      message: "Message to Scholar",
+      send: "Send message",
+      speak: "Speak a message",
+      type: "Type a message",
+      sendRecording: (seconds: number) => `Send recording, ${seconds} ${seconds === 1 ? "second" : "seconds"}`,
+      discardRecording: "Discard recording",
+      options: "Conversation options",
+      writing: "Scholar is writing",
+      answered: "Scholar answered",
+      back: "Back",
+      conversation: (title: string, day: string) => `${title}, ${day}`,
+      askBar: "Ask Scholar",
+      askBarSpeak: "Speak to Scholar",
+      listen: "Listen to this answer",
+      stop: "Stop listening",
+      recording: (time: string) => `Recording, ${time}`,
+    },
   },
 };

@@ -6,6 +6,7 @@ import type { ReflectionTab } from "@/types";
 
 export type MainTabParamList = {
   Journal: undefined;
+  Scholar: undefined;
   Prayers: undefined;
   Profile: undefined;
 };
@@ -20,9 +21,19 @@ export type RootStackParamList = {
   // `tab` opens the carousel on that tab: a tapped affirmation notification passes "affirmations" (step 28).
   Reflection: { entryId: string; tab?: ReflectionTab };
   NowPlaying: { entryId: string };
+  // Scholar (step 38). An existing conversation by its id, or a new one: from a reflection (`entryId`, which first looks for
+  // that reflection's conversation), from a starter (sent once the AI permission is given), or from the ask bar (`compose`:
+  // the keyboard up, or Speak mode with nothing recorded until the mic is tapped).
+  Conversation: {
+    conversationId?: string;
+    entryId?: string;
+    starter?: "verse" | "anxious" | "pray";
+    compose?: "type" | "speak";
+  };
   // `entryId` is the reflection the free limit stopped. When it is a heavy moment the Paywall replaces itself
   // with Reflection: a heavy moment is never paywalled.
-  Paywall: { source: "profile" | "limit"; entryId?: string };
+  // `source: "scholar"` (step 38) comes from a Scholar limit: `reason` says which, today's messages or hearing an answer.
+  Paywall: { source: "profile" | "limit" | "scholar"; entryId?: string; reason?: "messages" | "listen" };
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> = NativeStackScreenProps<

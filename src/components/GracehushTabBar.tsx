@@ -50,6 +50,11 @@ const tabs: Record<keyof MainTabParamList, TabConfig> = {
     icon: { android: "menu_book", ios: "book" },
     activeIcon: { android: "menu_book", ios: "book.fill" },
   },
+  Scholar: {
+    label: copy.tabs.scholar,
+    icon: { android: "forum", ios: "bubble.left.and.bubble.right" },
+    activeIcon: { android: "forum", ios: "bubble.left.and.bubble.right.fill" },
+  },
   Prayers: {
     label: copy.tabs.prayers,
     icon: { android: "volunteer_activism", ios: "hands.sparkles" },
@@ -286,7 +291,8 @@ export function GracehushTabBar({ state, navigation, insets }: BottomTabBarProps
           })}
         </View>
       </View>
-      <FloatingInputDock />
+      {/* The Scholar tab has its own ask bar in place of the dock (step 38). */}
+      {state.routes[state.index]?.name === "Scholar" ? null : <FloatingInputDock />}
     </View>
   );
 }
