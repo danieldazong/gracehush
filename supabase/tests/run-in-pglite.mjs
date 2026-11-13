@@ -42,6 +42,8 @@ const VALIDATION = migrations.find((name) => name.includes("validation_line"));
 const HEAVY = migrations.find((name) => name.includes("heavy_moments"));
 const VERSES = migrations.find((name) => name.includes("affirmation_verses"));
 const MORE = migrations.find((name) => name.includes("more_affirmations"));
+const SCHOLAR = migrations.find((name) => name.includes("scholar_conversations"));
+const HELP = migrations.find((name) => name.includes("help_lines"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -220,7 +222,11 @@ for (const model of MODELS) {
             (select count(*) from public.daily_affirmations)::int as affirmations,
             (select count(*) from public.deleted_devotionals)::int as deleted_devotionals,
             (select count(*) from storage.objects)::int as objects,
-            (select count(*) from realtime.messages)::int as messages`,
+            (select count(*) from realtime.messages)::int as messages,
+            (select count(*) from public.scholar_conversations)::int as scholar_conversations,
+            (select count(*) from public.scholar_messages)::int as scholar_messages,
+            (select count(*) from public.scholar_usage)::int as scholar_usage,
+            (select count(*) from public.scholar_safety_daily)::int as scholar_safety_daily`,
   );
   console.log("rows left behind by the tests:", JSON.stringify(left.rows[0]));
   if (Object.values(left.rows[0]).some((count) => count !== 0)) failures += 1;
@@ -333,6 +339,25 @@ if (process.argv.includes("--negative")) {
     ["two affirmations may share a position", "off", dropLine(/alter table public\.daily_affirmations add constraint daily_affirmations_entry_position_key unique \(entry_id, position\);/), [70], MORE],
     ["the slot column stays required (no affirmation without a slot)", "off", dropLine("alter table public.daily_affirmations alter column time_slot drop not null;"), [29, 70, 71], MORE],
     ["the app may move a slot", "off", (sql) => sql + "\ngrant execute on function public.feature_affirmation(uuid, uuid, text) to authenticated;", [72], MORE],
+    // Scholar conversations (step 38, its own migration).
+    ["row level security off on Scholar conversations", "off", (sql) => sql + "\nalter table public.scholar_conversations disable row level security;", [74, 75], SCHOLAR],
+    ["row level security off on Scholar messages", "off", (sql) => sql + "\nalter table public.scholar_messages disable row level security;", [74, 75], SCHOLAR],
+    ["a select policy for everyone on Scholar messages", "off", (sql) => sql + "\ncreate policy scholar_messages_select_any on public.scholar_messages for select to authenticated using (true);", [75], SCHOLAR],
+    ["the app may insert a Scholar message", "off", (sql) => sql + "\ngrant insert on public.scholar_messages to authenticated;\ncreate policy scholar_messages_insert_any on public.scholar_messages for insert to authenticated with check (true);", [76], SCHOLAR],
+    ["the app may update a Scholar conversation", "off", (sql) => sql + "\ngrant update on public.scholar_conversations to authenticated;\ncreate policy scholar_conversations_update_own on public.scholar_conversations for update to authenticated using (user_id = (select public.requesting_user_id()));", [76], SCHOLAR],
+    ["the delete policy covers anyone's Scholar conversation", "off", (sql) => sql.replace(/(create policy scholar_conversations_delete_own on public\.scholar_conversations\s+for delete to authenticated\s+)using \(user_id = \(select public\.requesting_user_id\(\)\)\);/, "$1using (true);"), [77], SCHOLAR],
+    ["no unique Scholar conversation per reflection", "off", (sql) => sql.replace(/create unique index if not exists scholar_conversations_user_entry_key\s+on public\.scholar_conversations \(user_id, entry_id\)\s+where entry_id is not null;/, ""), [78], SCHOLAR],
+    ["a Scholar question may have two answers (reply_to not unique)", "off", (sql) => sql.replace(/create unique index if not exists scholar_messages_reply_to_key\s+on public\.scholar_messages \(reply_to\)\s+where reply_to is not null;/, ""), [79], SCHOLAR],
+    ["no cascade from the reflection to its Scholar conversation", "off", (sql) => sql.replace("references public.journal_entries (id, user_id) on delete cascade", "references public.journal_entries (id, user_id)"), [81], SCHOLAR],
+    ["no cascade from the profile to Scholar usage", "off", (sql) => sql.replace("user_id  text    not null references public.users_profile (id) on delete cascade,", "user_id  text    not null references public.users_profile (id),"), [82], SCHOLAR],
+    ["the app may read Scholar usage", "off", (sql) => sql + "\ngrant select on public.scholar_usage to authenticated;\ncreate policy scholar_usage_select_any on public.scholar_usage for select to authenticated using (true);", [83], SCHOLAR],
+    ["the app may run a Scholar counter", "off", (sql) => sql + "\ngrant execute on function public.bump_scholar_usage(text, date, integer, integer) to authenticated;", [85], SCHOLAR],
+    // Help lines and Scholar's closing time (2026-11-11, its own migration).
+    ["a help line of any word", "off", (sql) => sql.replace("help_line in ('crisis', 'abuse', 'harm_others', 'emergency')", "true"), [86], HELP],
+    ["a help line on an entry that is not a heavy moment", "off", dropLine(/alter table public\.journal_entries add constraint help_line_crisis\s+check \(help_line is null or is_crisis\);/), [86, 88], HELP],
+    ["the app may write a help line", "off", (sql) => sql + "\ngrant update (help_line) on public.journal_entries to authenticated;", [87], HELP],
+    ["the app may reopen Scholar (write its closing time)", "off", (sql) => sql + "\ngrant update (scholar_closed_at) on public.users_profile to authenticated;", [87], HELP],
+    ["Scholar's closing time is required", "off", (sql) => sql.replace("add column if not exists scholar_closed_at timestamptz;", "add column if not exists scholar_closed_at timestamptz not null default now();"), [88], HELP],
     // Not a broken migration: the hosted project before the day's first Realtime connection. Nothing may fail, the checks that need
     // a message table say skipped, and a change is still saved (59).
     ["no message table today (nobody has connected yet)", "off", null, { skipped: [60, 61, 62], passed: [59, 63, 64] }, REALTIME, { stub: NO_MESSAGE_TABLE_TODAY }],

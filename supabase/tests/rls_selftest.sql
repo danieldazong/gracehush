@@ -22,6 +22,12 @@
 -- 2026-11-09 (more affirmations, supabase/migrations/20261109120000_more_affirmations.sql): check 29 also proves that an
 -- affirmation without a slot is accepted, and checks 70 to 73 prove the position column, the slot move and who may call it. Run it
 -- after that migration.
+--
+-- 2026-11-11 (step 38, supabase/migrations/20261111120000_scholar_conversations.sql): checks 74 to 85 prove Scholar's four tables,
+-- their policies and grants, their cascades and the server's two counters. Run it after that migration.
+--
+-- 2026-11-11 (supabase/migrations/20261111130000_help_lines.sql): checks 86 to 88 prove a heavy moment's help line and the column
+-- that closes Scholar for an account under 18. Run it after that migration.
 
 drop table if exists pg_temp.rls_results;
 create temp table rls_results (position integer, check_name text, passed boolean);
@@ -1017,7 +1023,281 @@ begin
     and (select is_nullable from information_schema.columns
           where table_schema = 'public' and table_name = 'daily_affirmations' and column_name = 'time_slot') = 'YES');
 
-  -- Leave nothing behind: the fixtures go, and with them (cascade) their entries and affirmations.
+
+  -- ===== Scholar conversations (step 38) =====
+  -- Fixtures, made as the table owner: selftest_a has a conversation about its reflection (a question and its answer), and
+  -- selftest_b one of its own. They go with their profiles at the end (cascade).
+  insert into public.scholar_conversations (id, user_id, entry_id, title)
+  values
+    ('a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'a0000000-0000-4000-8000-000000000001', 'A Quiet Question'),
+    ('b0000000-0000-4000-8000-0000000005c1', 'selftest_b', null, null);
+  insert into public.scholar_messages (id, conversation_id, user_id, role, reply_to, input_type, status, content)
+  values
+    ('a0000000-0000-4000-8000-0000000005d1', 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'user', null, 'text',
+     'ready', '{"blocks": [{"type": "text", "text": "a question"}]}'),
+    ('a0000000-0000-4000-8000-0000000005d2', 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'scholar',
+     'a0000000-0000-4000-8000-0000000005d1', null, 'ready', '{"blocks": [{"type": "text", "text": "an answer"}]}'),
+    ('b0000000-0000-4000-8000-0000000005d1', 'b0000000-0000-4000-8000-0000000005c1', 'selftest_b', 'user', null, 'text',
+     'ready', '{"blocks": [{"type": "text", "text": "b question"}]}'),
+    ('b0000000-0000-4000-8000-0000000005d2', 'b0000000-0000-4000-8000-0000000005c1', 'selftest_b', 'scholar',
+     'b0000000-0000-4000-8000-0000000005d1', null, 'ready', '{"blocks": [{"type": "text", "text": "b answer"}]}');
+
+  -- The four tables, each with row level security on, and none a visitor can read or write.
+  insert into rls_results values (74, 'the four Scholar tables exist with row level security on, and a visitor touches none',
+    (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
+        and c.relname in ('scholar_conversations', 'scholar_messages', 'scholar_usage', 'scholar_safety_daily')) = 4
+    and pg_temp.try_as('anon', no_claims, null, 'select * from public.scholar_conversations') = '42501'
+    and pg_temp.try_as('anon', no_claims, null, 'select * from public.scholar_messages') = '42501'
+    and pg_temp.try_as('anon', no_claims, null, 'select * from public.scholar_usage') = '42501'
+    and pg_temp.try_as('anon', no_claims, null, 'select * from public.scholar_safety_daily') = '42501'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$insert into public.scholar_conversations (id, user_id) values (gen_random_uuid(), 'selftest_a')$q$) = '42501'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$delete from public.scholar_conversations where id = 'a0000000-0000-4000-8000-0000000005c1'$q$) = '42501');
+
+  -- A person reads their own conversations and messages, and never another person's.
+  insert into rls_results values (75, 'a person reads their own Scholar conversations and messages and nobody else''s',
+    pg_temp.try_as('authenticated', claims_a, null, 'select * from public.scholar_conversations') = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a, null, 'select * from public.scholar_messages') = 'ok:2'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$select * from public.scholar_conversations where id = 'b0000000-0000-4000-8000-0000000005c1'$q$) = 'ok:0'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$select * from public.scholar_messages where conversation_id = 'b0000000-0000-4000-8000-0000000005c1'$q$) = 'ok:0');
+
+  -- The title, the heavy mark and every message are the server's: the app inserts and updates nothing.
+  insert into rls_results values (76, 'the app cannot insert or update a Scholar conversation or message',
+    pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into public.scholar_conversations (id, user_id) values (gen_random_uuid(), 'selftest_a')$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, content)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'user', null)$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.scholar_conversations set title = 'Mine' where id = 'a0000000-0000-4000-8000-0000000005c1'$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.scholar_conversations set is_heavy = false
+         where id = 'a0000000-0000-4000-8000-0000000005c1'$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.scholar_messages set content = null where id = 'a0000000-0000-4000-8000-0000000005d2'$q$) = '42501'
+    and not exists (select 1 from information_schema.column_privileges
+                     where table_schema = 'public' and table_name in ('scholar_conversations', 'scholar_messages')
+                       and grantee in ('authenticated', 'anon') and privilege_type in ('INSERT', 'UPDATE')));
+
+  -- The app deletes its own conversation, and the messages go with it; another person's stays, and a message cannot be deleted
+  -- on its own. A delete with no filter shows what the delete policy alone allows (with a filter, the select policy hides another
+  -- person's row anyway).
+  insert into rls_results values (77, 'the app deletes its own Scholar conversation with its messages, and never another''s',
+    pg_temp.try_as('authenticated', claims_a, null,
+      $q$delete from public.scholar_conversations where id = 'b0000000-0000-4000-8000-0000000005c1'$q$) = 'ok:0'
+    and pg_temp.try_as('authenticated', claims_a, null, 'delete from public.scholar_conversations') = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$delete from public.scholar_messages where id = 'a0000000-0000-4000-8000-0000000005d2'$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$do $d$
+         begin
+           delete from public.scholar_conversations where id = 'a0000000-0000-4000-8000-0000000005c1';
+           if not found then
+             raise exception 'the conversation was not deleted' using errcode = 'P0002';
+           end if;
+           if exists (select 1 from public.scholar_messages
+                       where conversation_id = 'a0000000-0000-4000-8000-0000000005c1') then
+             raise exception 'the messages stayed' using errcode = 'P0002';
+           end if;
+         end $d$ $q$) = 'ok:0');
+
+  -- One conversation per reflection per person; any number with no reflection.
+  insert into rls_results values (78, 'one Scholar conversation per reflection per person (a second is refused)',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_conversations (id, user_id, entry_id)
+         values (gen_random_uuid(), 'selftest_a', 'a0000000-0000-4000-8000-000000000001')$q$) = '23505'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_conversations (id, user_id, entry_id)
+         values (gen_random_uuid(), 'selftest_a', null), (gen_random_uuid(), 'selftest_a', null)$q$) = 'ok:2'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_conversations (id, user_id, entry_id)
+         values (gen_random_uuid(), 'selftest_b', 'a0000000-0000-4000-8000-000000000001')$q$) = '23503');
+
+  -- An answer points at a question, a question points at nothing, and a question has one answer.
+  insert into rls_results values (79, 'a Scholar answer points at a question, a question at nothing, and one answer each',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, reply_to)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'scholar', null)$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, reply_to)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'user',
+                 'a0000000-0000-4000-8000-0000000005d1')$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, reply_to)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'scholar',
+                 'a0000000-0000-4000-8000-0000000005d1')$q$) = '23505'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, reply_to)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'scholar', gen_random_uuid())$q$)
+      = '23503'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role)
+         values (gen_random_uuid(), 'b0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'user')$q$) = '23503');
+
+  -- A message's role, status and input type come from their lists, and its content is at most 16 KB.
+  insert into rls_results values (80, 'a Scholar message''s role, status and input type are from their lists, content at most 16 KB',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'admin')$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, status)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'user', 'done')$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, input_type)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'user', 'voice')$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, content)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'user',
+                 jsonb_build_object('blocks', jsonb_build_array(
+                   jsonb_build_object('type', 'text', 'text', repeat('x', 20000)))))$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_messages (id, conversation_id, user_id, role, input_type, status, content)
+         values (gen_random_uuid(), 'a0000000-0000-4000-8000-0000000005c1', 'selftest_a', 'user', 'audio', 'pending', null)$q$)
+      = 'ok:1');
+
+  -- Deleting a reflection deletes its conversation and messages (delete-entry deletes the reflection as the server).
+  insert into rls_results values (81, 'deleting a reflection removes its Scholar conversation and messages',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$do $d$
+         begin
+           delete from public.journal_entries where id = 'a0000000-0000-4000-8000-000000000001';
+           if exists (select 1 from public.scholar_conversations where id = 'a0000000-0000-4000-8000-0000000005c1')
+              or exists (select 1 from public.scholar_messages
+                          where conversation_id = 'a0000000-0000-4000-8000-0000000005c1') then
+             raise exception 'the conversation stayed' using errcode = 'P0002';
+           end if;
+         end $d$ $q$) = 'ok:0');
+
+  -- Deleting the profile removes its conversations, messages and usage (account deletion deletes the profile).
+  insert into rls_results values (82, 'deleting the profile removes its Scholar conversations, messages and usage',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$do $d$
+         begin
+           insert into public.users_profile (id) values ('selftest_e');
+           insert into public.scholar_conversations (id, user_id)
+             values ('e0000000-0000-4000-8000-0000000005c1', 'selftest_e');
+           insert into public.scholar_messages (id, conversation_id, user_id, role)
+             values ('e0000000-0000-4000-8000-0000000005d1', 'e0000000-0000-4000-8000-0000000005c1', 'selftest_e', 'user');
+           insert into public.scholar_usage (user_id, day, messages) values ('selftest_e', current_date, 1);
+           delete from public.users_profile where id = 'selftest_e';
+           if exists (select 1 from public.scholar_conversations where user_id = 'selftest_e')
+              or exists (select 1 from public.scholar_messages where user_id = 'selftest_e')
+              or exists (select 1 from public.scholar_usage where user_id = 'selftest_e') then
+             raise exception 'rows stayed' using errcode = 'P0002';
+           end if;
+         end $d$ $q$) = 'ok:0');
+
+  -- The usage table is the server's alone, and its counter adds to a day's row (making it the first time).
+  insert into rls_results values (83, 'the Scholar usage table is invisible to the app, and bump_scholar_usage adds to a day',
+    pg_temp.try_as('authenticated', claims_a, null, 'select * from public.scholar_usage') = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into public.scholar_usage (user_id, day, messages) values ('selftest_a', current_date, 0)$q$) = '42501'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$do $d$
+         begin
+           perform public.bump_scholar_usage('selftest_a', date '2000-01-01', 1, 0);
+           perform public.bump_scholar_usage('selftest_a', date '2000-01-01', 2, 1);
+           if (select messages from public.scholar_usage where user_id = 'selftest_a' and day = date '2000-01-01') <> 3
+              or (select listens from public.scholar_usage where user_id = 'selftest_a' and day = date '2000-01-01') <> 1 then
+             raise exception 'the counts did not add up' using errcode = 'P0002';
+           end if;
+         end $d$ $q$) = 'ok:0'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.bump_scholar_usage('selftest_a', date '2000-01-01', -1, 0)$q$) = '22023');
+
+  -- The safety table is the server's alone, holds no person, and its counter takes only its nine names.
+  insert into rls_results values (84, 'the Scholar safety table is invisible to the app, and its counter takes nine names only',
+    pg_temp.try_as('authenticated', claims_a, null, 'select * from public.scholar_safety_daily') = '42501'
+    and not exists (select 1 from information_schema.columns
+                     where table_schema = 'public' and table_name = 'scholar_safety_daily'
+                       and column_name in ('user_id', 'conversation_id', 'message_id'))
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$do $d$
+         begin
+           perform public.bump_scholar_safety(date '2000-01-01', 'screened');
+           perform public.bump_scholar_safety(date '2000-01-01', 'screened');
+           perform public.bump_scholar_safety(date '2000-01-01', 'free_answered');
+           if (select screened from public.scholar_safety_daily where day = date '2000-01-01') <> 2
+              or (select free_answered from public.scholar_safety_daily where day = date '2000-01-01') <> 1
+              or (select flagged_phrase from public.scholar_safety_daily where day = date '2000-01-01') <> 0 then
+             raise exception 'the counts are wrong' using errcode = 'P0002';
+           end if;
+         end $d$ $q$) = 'ok:0'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.bump_scholar_safety(date '2000-01-01', 'day')$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.bump_scholar_safety(date '2000-01-01', 'screened = 99, free_answered')$q$) = '22023');
+
+  -- Only the server may run the two counters.
+  insert into rls_results values (85, 'the two Scholar counters can be run by the server only',
+    pg_temp.try_as('authenticated', claims_a, null,
+      $q$select public.bump_scholar_usage('selftest_a', current_date, 1, 0)$q$) = '42501'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$select public.bump_scholar_safety(current_date, 'screened')$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$select public.bump_scholar_safety(current_date, 'screened')$q$) = '42501'
+    and not has_function_privilege('authenticated', 'public.bump_scholar_usage(text, date, integer, integer)', 'execute')
+    and not has_function_privilege('anon', 'public.bump_scholar_usage(text, date, integer, integer)', 'execute')
+    and not has_function_privilege('authenticated', 'public.bump_scholar_safety(date, text)', 'execute')
+    and not has_function_privilege('anon', 'public.bump_scholar_safety(date, text)', 'execute')
+    and has_function_privilege('service_role', 'public.bump_scholar_usage(text, date, integer, integer)', 'execute')
+    and has_function_privilege('service_role', 'public.bump_scholar_safety(date, text)', 'execute'));
+
+  -- ===== Help lines (supabase/migrations/20261111130000_help_lines.sql) =====
+  -- The server saves a heavy moment's help line, one of four words, and no other entry may hold one.
+  insert into rls_results values (86, 'a heavy moment holds one of four help lines, and no other entry holds one',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.journal_entries (user_id, input_type, is_crisis, help_line)
+         values ('selftest_a', 'text', true, 'abuse')$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.journal_entries (user_id, input_type, is_crisis, help_line)
+         values ('selftest_a', 'text', true, 'emergency')$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.journal_entries (user_id, input_type, is_crisis, help_line)
+         values ('selftest_a', 'text', true, null)$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.journal_entries (user_id, input_type, is_crisis, help_line)
+         values ('selftest_a', 'text', true, 'shelter')$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.journal_entries (user_id, input_type, is_crisis, help_line)
+         values ('selftest_a', 'text', false, 'crisis')$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.journal_entries set help_line = 'crisis'
+         where id = 'a0000000-0000-4000-8000-000000000001' and not is_crisis$q$) = '23514');
+
+  -- The app reads its own entries' help line and its own closing time, and writes neither; the server writes the closing time.
+  insert into rls_results values (87, 'the app reads a help line and Scholar''s closing time, and only the server writes them',
+    pg_temp.try_as('authenticated', claims_a, null,
+      $q$select help_line from public.journal_entries where id = 'a0000000-0000-4000-8000-000000000001'$q$) = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$select scholar_closed_at from public.users_profile where id = 'selftest_a'$q$) = 'ok:1'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.journal_entries set help_line = null
+         where id = 'a0000000-0000-4000-8000-000000000001'$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.users_profile set scholar_closed_at = now() where id = 'selftest_a'$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.users_profile set scholar_closed_at = null where id = 'selftest_a'$q$) = '42501'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$update public.users_profile set scholar_closed_at = now() where id = 'selftest_a'$q$) = 'ok:1'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$select scholar_closed_at from public.users_profile$q$) = '42501');
+
+  -- What the migration made, as it made it: two optional columns and the two rules.
+  insert into rls_results values (88, 'the help line and Scholar''s closing time are optional columns with their two rules',
+    (select data_type || ':' || is_nullable from information_schema.columns
+      where table_schema = 'public' and table_name = 'journal_entries' and column_name = 'help_line') = 'text:YES'
+    and (select data_type || ':' || is_nullable from information_schema.columns
+          where table_schema = 'public' and table_name = 'users_profile' and column_name = 'scholar_closed_at')
+        = 'timestamp with time zone:YES'
+    and (select count(*) from pg_constraint
+          where conrelid = 'public.journal_entries'::regclass and conname in ('help_line_kind', 'help_line_crisis')) = 2);
+
+  -- Leave nothing behind: the fixtures go, and with them (cascade) their entries, affirmations and Scholar's rows.
   delete from public.users_profile where id like 'selftest\_%';
   -- The fixtures fired the broadcast triggers (step 33). Their messages went to self-test topics that no account can join; they go
   -- too where this role may delete them (a hosted project's editor may not: they stay until Supabase drops the day's table).

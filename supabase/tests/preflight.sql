@@ -124,6 +124,34 @@ from (
                                       and t.tgrelid = to_regclass('public.daily_affirmations')::oid) then 'exists' else 'absent' end
                || '; feature_affirmation: '
                || case when to_regprocedure('public.feature_affirmation(uuid, uuid, text)') is null then 'absent' else 'exists' end
+        end),
+    (20, 'Scholar conversations (step 38)',
+        case
+          when to_regclass('public.scholar_conversations') is null then 'absent'
+          else 'exists; tables: '
+               || ((to_regclass('public.scholar_conversations') is not null)::int
+                   + (to_regclass('public.scholar_messages') is not null)::int
+                   + (to_regclass('public.scholar_usage') is not null)::int
+                   + (to_regclass('public.scholar_safety_daily') is not null)::int)::text
+               || ' of 4; counters: '
+               || case when to_regprocedure('public.bump_scholar_usage(text, date, integer, integer)') is not null
+                        and to_regprocedure('public.bump_scholar_safety(date, text)') is not null
+                       then 'exist' else 'MISSING' end
+        end),
+    (21, 'help lines and Scholar''s closing time (2026-11-11)',
+        case
+          when not exists (select 1 from information_schema.columns
+                            where table_schema = 'public' and table_name = 'journal_entries'
+                              and column_name = 'help_line') then 'absent'
+          else 'exists; checks: '
+               || coalesce(nullif((select string_agg(c.conname::text, ', ' order by c.conname)
+                                   from pg_constraint c
+                                   where c.conrelid = to_regclass('public.journal_entries')
+                                     and c.conname in ('help_line_kind', 'help_line_crisis')), ''), 'none')
+               || '; scholar_closed_at: '
+               || case when exists (select 1 from information_schema.columns
+                                    where table_schema = 'public' and table_name = 'users_profile'
+                                      and column_name = 'scholar_closed_at') then 'exists' else 'absent' end
         end)
 ) as checks (position, item, found)
 order by position;
