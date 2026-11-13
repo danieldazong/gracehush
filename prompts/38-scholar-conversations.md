@@ -471,6 +471,19 @@ Made-up text only, run by hand with the real key, never in CI. Outputs go to `sc
 
 Done when: every bar is met, or the run stops and reports which bar failed and by how much.
 
+### Part two, reconciled with scholar-v2 (2026-11-11)
+
+Steps 8 to 13 were written before the readers' review. The server they build against is scholar-v2 (AGENTS.md, Crisis Safety Rules, "Scholar's heavy moments"), and the readers approved it with four requests for the app. Where this section and the steps below differ, this section wins.
+
+1. **The contract.** The app's copy also carries the answer's `helpLine` (`HelpKind | null`), `region` on both requests (the phone's region code, `deviceRegionCode()` of `src/utils/region.ts`, sent with every call; the server reads it with the same rule) and `SCHOLAR_ADULTS_ONLY` among the turn's codes. `contractParity.ts` compares every Scholar type.
+2. **The help line under an answer** is `HelpLine` with the answer's `helpLine`, its buttons chosen by the phone's region, under every answer whose `helpLine` is not null (an answer to a flagged message, every written answer). A later answer in a heavy conversation has none.
+3. **Help stays within reach (the readers).** In a heavy conversation a small "Get help" button stays in the header for the rest of the conversation. It opens a sheet with `HelpLine` for the conversation's newest help line (the newest answer's, else the 988 line).
+4. **A way to delete (the readers).** Under an answer whose help line is the domestic violence line, a plain "Delete this conversation" link opens the same dialog as the ⋯ menu.
+5. **The lock screen (the readers).** Scholar sends no notification and no email, and Listen never touches the lock screen (`scholarPlayer` never calls `setActiveForLockScreen`). The phone walk-through reads the lock screen and Control Center while a heavy answer is read aloud.
+6. **The AI reminder (the public page, and New York's companion law).** "Scholar is AI and can be wrong. It isn’t a pastor or counselor." is the first row of every conversation, and again before a message sent three hours or more after the last reminder. It is worked out from the messages' times, so it shows in the history too. The line under the composer stays.
+7. **Adults only.** `SCHOLAR_ADULTS_ONLY` shows "Scholar is for adults, so it isn’t available on this account. If you think this is a mistake, write to support@nouvrix.com." as a notice, and that message has no "Try again". The composer stays: a heavy message is still answered.
+8. **The counts.** The baseline is the tree of 2026-11-11: profile-sync 93, recording 68, offline 44 of 44, journal-data 104, playback 135, ambient 64, notifications 51, prayers 34, deletion 36, billing 24, account 23, realtime 27, analytics 35, ai-permission 14, affirmations 13, parity 8 of 8; Deno fmt 189 files, lint 162, main run 828, export-data 27.
+
 ### 8. The app's data layer
 
 Red first: `supabase/tests/scholar/run.cjs` (new, on the journal-data world) fails with modules that cannot be resolved.
