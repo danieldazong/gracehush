@@ -29,3 +29,26 @@ Deno.test("an error built the old way still has no details, and a reason of its 
   const error = new AppError("TOO_SHORT");
   assertEquals([error.details, error.reason, error.status], [null, "too_short", 422]);
 });
+
+Deno.test("SCHOLAR_UNAVAILABLE (step 38) is a calm 503 with no details", async () => {
+  const response = errorResponse(new AppError("SCHOLAR_UNAVAILABLE", "scholar:off"), "req-3");
+  assertEquals(response.status, 503);
+  assertEquals(await response.json(), {
+    error: {
+      code: "SCHOLAR_UNAVAILABLE",
+      message: "Scholar is resting right now. Please try again later.",
+      requestId: "req-3",
+    },
+  });
+});
+
+Deno.test("SCHOLAR_ADULTS_ONLY (2026-11-11) is a calm 403 with no details, and it never names a reason", async () => {
+  const response = errorResponse(new AppError("SCHOLAR_ADULTS_ONLY", "scholar:adults_only"), "req-4");
+  assertEquals(response.status, 403);
+  const body = await response.json();
+  assertEquals(Object.keys(body), ["error"]);
+  assertEquals(body.error.code, "SCHOLAR_ADULTS_ONLY");
+  assertEquals(body.error.message, MESSAGE_BY_CODE.SCHOLAR_ADULTS_ONLY);
+  assert(!JSON.stringify(body).includes("adults_only"));
+  assert(!/under 18|age/i.test(body.error.message), "the shared message names no age");
+});

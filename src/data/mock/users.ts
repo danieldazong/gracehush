@@ -14,6 +14,7 @@ export function buildProfile(now: Date): UserProfileRow {
     subscription_tier: "free",
     subscription_expires_at: null,
     subscription_synced_at: null,
+    scholar_closed_at: null,
     reminder_morning: "08:00:00",
     reminder_afternoon: "13:00:00",
     reminder_evening: "20:00:00",

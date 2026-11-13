@@ -34,3 +34,11 @@ verify_jwt = false
 [functions.add-affirmation]
 # The same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
 verify_jwt = false
+
+[functions.scholar-turn]
+# Scholar (step 38): the same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false
+
+[functions.scholar-speak]
+# Scholar (step 38): the same Clerk session token, checked the same way (_shared/auth.ts), so the same setting.
+verify_jwt = false

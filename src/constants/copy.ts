@@ -588,15 +588,51 @@ export const copy = {
       returnToJournal: "Return to Journal",
       share: "Share scripture",
     },
-    // The one quiet line under a heavy moment's devotional (2026-11-08, when Support Resources was removed). The numbers come from
-    // constants/crisisResources.ts. Availability only: never a claim about cost, confidentiality or what a service will do.
+    // The one quiet line under a heavy moment's devotional (2026-11-08, when Support Resources was removed), chosen since
+    // 2026-11-11 by the help line saved with the reflection and the phone's region (utils/helpLine.ts): the 988 line, the
+    // National Domestic Violence Hotline, 988 with 911, or 911 first; outside the US a directory of help lines and the local
+    // emergency number, never a US number. The numbers come from constants/crisisResources.ts. Scholar's spoken help line
+    // (supabase/functions/_shared/scholar/heavyChat.ts) is these lines with the numbers spelled out, and a test keeps them equal.
+    // Availability only: never a claim about cost, confidentiality or what a service will do.
     help: {
-      line: (helpline: string, emergency: string) =>
+      crisis: (helpline: string, emergency: string) =>
         `You don’t have to carry this alone. Call or text ${helpline} any time, or ${emergency} if you’re in danger.`,
-      call: (helpline: string) => `Call ${helpline}`,
-      callLabel: (helpline: string) => `Call ${helpline}, the Suicide and Crisis Lifeline`,
-      callHint: "Opens your phone app",
-      failed: (helpline: string) => `Your phone couldn’t open this. Dial ${helpline} from your phone app.`,
+      harmOthers: (helpline: string, emergency: string) =>
+        `You don’t have to carry this alone. Call or text ${helpline} any time, or ${emergency} if anyone is in danger.`,
+      abuse: (hotline: string, textBody: string, textNumber: string, emergency: string) =>
+        `You don’t have to carry this alone. The National Domestic Violence Hotline helps day and night: call ${hotline} or text ${textBody} to ${textNumber}. If you’re in danger right now, call ${emergency}.`,
+      emergency: (emergency: string) => `If you or someone near you is in danger right now, call ${emergency}.`,
+      elsewhere:
+        "You don’t have to carry this alone. If you’re in danger, call your local emergency number. You can find a help line in your country at findahelpline.com.",
+      emergencyElsewhere: "If you or someone near you is in danger right now, call your local emergency number.",
+      // The buttons under the line, each with its spoken label and hint.
+      call: (number: string) => `Call ${number}`,
+      callHotline: "Call the hotline",
+      text: (number: string) => `Text ${number}`,
+      textBody: (body: string) => `Text ${body}`,
+      find: "Find a help line",
+      a11y: {
+        callLifeline: (number: string) => `Call ${number}, the Suicide and Crisis Lifeline`,
+        textLifeline: (number: string) => `Text ${number}, the Suicide and Crisis Lifeline`,
+        callHotline: (number: string) => `Call the National Domestic Violence Hotline, ${number}`,
+        textHotline: (body: string, number: string) =>
+          `Text ${body} to ${number}, the National Domestic Violence Hotline`,
+        callEmergency: (number: string) => `Call ${number}, emergency services`,
+        find: "Find a help line in your country",
+      },
+      hints: {
+        call: "Opens your phone app",
+        text: "Opens your messages app",
+        web: "Opens a web page",
+      },
+      failed: {
+        call: (number: string) => `Your phone couldn’t open this. Dial ${number} from your phone app.`,
+        text: (number: string, body: string | null) =>
+          body === null
+            ? `Your phone couldn’t open this. Text ${number} from your messages app.`
+            : `Your phone couldn’t open this. Text ${body} to ${number} from your messages app.`,
+        web: "Your phone couldn’t open this. Visit findahelpline.com in your browser.",
+      },
     },
     // A heavy moment saved before 2026-11-08, which kept only the person's words: no devotional was written for it.
     wordsOnly: {
@@ -807,9 +843,10 @@ export const copy = {
   // when there is no connection (a delete is online only), `link` the quiet button at the end of a reflection.
   deleteReflection: {
     title: "Delete this reflection forever?",
-    body: "This permanently deletes the reflection, its devotional audio, its affirmations and any recording. This can’t be undone.",
+    // A reflection's Scholar conversation goes with it (step 38: the database deletes it with the reflection).
+    body: "This permanently deletes the reflection, its devotional audio, its affirmations, any recording and any Scholar conversation about it. This can’t be undone.",
     bodyAnswered:
-      "This permanently deletes the reflection, its devotional audio, its affirmations, any recording and your gratitude note. This can’t be undone.",
+      "This permanently deletes the reflection, its devotional audio, its affirmations, any recording, your gratitude note and any Scholar conversation about it. This can’t be undone.",
     // A heavy moment saved before 2026-11-08 holds nothing but the person's words. One saved since is a whole reflection and
     // gets `body` like any other.
     bodyCrisis: "This permanently deletes what you shared. This can’t be undone.",

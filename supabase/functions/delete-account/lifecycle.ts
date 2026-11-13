@@ -8,8 +8,16 @@ import { AppError } from "../_shared/errors.ts";
 // person's own folder ({userId}/) of a bucket.
 
 const BUCKETS = ["journal_media", "exports"] as const;
-// Deleted one by one when the profile's cascade left rows behind. The affirmations go before their entries.
-const TABLES = ["daily_affirmations", "journal_entries", "deleted_devotionals"] as const;
+// Deleted one by one when the profile's cascade left rows behind. A Scholar message goes before its conversation (step 38), and
+// an affirmation before its entry.
+const TABLES = [
+  "scholar_messages",
+  "scholar_conversations",
+  "scholar_usage",
+  "daily_affirmations",
+  "journal_entries",
+  "deleted_devotionals",
+] as const;
 
 // Every file of the person in both buckets: recordings, devotional audio and exports. Answers how many went.
 export async function removeUserFiles(admin: SupabaseClient, userId: string): Promise<number> {
@@ -21,8 +29,8 @@ export async function removeUserFiles(admin: SupabaseClient, userId: string): Pr
   return removed;
 }
 
-// The profile row, and with it (each table's user_id foreign key, on delete cascade) every entry, affirmation and record of a
-// deleted devotional. Then each table is counted for this user, and anything left is deleted by hand: a cascade that did not
+// The profile row, and with it (each table's user_id foreign key, on delete cascade) every entry, affirmation, record of a
+// deleted devotional, and Scholar conversation, message and day of usage. Then each table is counted for this user, and anything left is deleted by hand: a cascade that did not
 // happen is reported (`leftover`), never hidden. `profiles` is how many profile rows went: 1 the first time, 0 after.
 export async function deleteUserRows(
   admin: SupabaseClient,

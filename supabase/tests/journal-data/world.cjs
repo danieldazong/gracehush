@@ -297,7 +297,17 @@ function makeServer() {
       "sync-subscription": [],
       "export-data": [],
       "delete-account": [],
+      "scholar-turn": [],
+      "scholar-speak": [],
     },
+    // Step 38: Scholar's two tables, in database shape (supabase/migrations/20261111120000_scholar_conversations.sql), the
+    // uploads the app made (the world links its upload calls here, so a spoken message's recording can be found), and the day's
+    // limits the fake applies (the server's numbers: the app holds none).
+    scholarConversations: [],
+    scholarMessages: [],
+    uploads: [],
+    scholarFreeLimit: 5,
+    scholarProLimit: 40,
     functionCalls: [],
     // The ids delete-entry deleted (step 29b), in order.
     deletedEntries: [],
@@ -314,7 +324,7 @@ function makeServer() {
     revenueCatPlans: {},
     serverPlans: {},
     // Answers for the REST tables: the next request of that table is answered with this instead (a Response, or a function).
-    rest: { journal_entries: [], daily_affirmations: [] },
+    rest: { journal_entries: [], daily_affirmations: [], scholar_conversations: [], scholar_messages: [] },
     // What a process-entry call with no scripted answer makes of the entry.
     makeEntry: readyResult,
     // The prayer updates the server took (step 29): the body and the rows it changed.
@@ -380,15 +390,24 @@ function makeServer() {
     return rows.map((row) => Object.fromEntries(columns.map((c) => [c, row[c]])));
   }
 
+  const TABLE_STATE = {
+    journal_entries: "entries",
+    daily_affirmations: "affirmations",
+    scholar_conversations: "scholarConversations",
+    scholar_messages: "scholarMessages",
+  };
+
   async function rest(table, method, url, headers, body, sub) {
     const params = [...url.searchParams.entries()];
     if (!params.some(([k, v]) => k === "user_id" && v === `eq.${sub}`)) state.violations.push(`no user filter on ${table}`);
-    const visible = state[table === "journal_entries" ? "entries" : "affirmations"].filter((row) => row.user_id === sub);
+    const visible = state[TABLE_STATE[table]].filter((row) => row.user_id === sub);
     const matched = applyFilters(visible, params);
     if (method === "GET") {
       const rows = [...matched];
-      if (url.searchParams.get("order") === "created_at.desc") {
-        rows.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : a.id < b.id ? 1 : -1));
+      const order = url.searchParams.get("order");
+      if (order === "created_at.desc" || order === "last_message_at.desc") {
+        const column = order.slice(0, -".desc".length);
+        rows.sort((a, b) => (a[column] < b[column] ? 1 : a[column] > b[column] ? -1 : a.id < b.id ? 1 : -1));
       }
       const total = rows.length;
       const limit = url.searchParams.get("limit");
@@ -439,9 +458,207 @@ function makeServer() {
       }
       return new Response(null, { status: 204 });
     }
+    if (method === "DELETE" && table === "scholar_conversations") {
+      // The app's one write on Scholar's tables (its delete policy): the conversation, and its messages on delete cascade.
+      const ids = new Set(matched.map((row) => row.id));
+      state.scholarConversations = state.scholarConversations.filter((row) => !ids.has(row.id));
+      state.scholarMessages = state.scholarMessages.filter((row) => !ids.has(row.conversation_id));
+      if ((headers.prefer ?? "").includes("return=representation")) {
+        return json(200, project(matched, url.searchParams.get("select"), table));
+      }
+      return new Response(null, { status: 204 });
+    }
     state.violations.push(`${method} ${table}`);
     return json(405, { message: "the fake server does not answer this" });
   }
+
+  // ---- Scholar (step 38): the two functions as the real ones answer, without a model. An answer is fixed text after a verified
+  // passage; a message that holds the test word HEAVY is a heavy moment (ABUSE: one whose help line is the domestic violence
+  // line), answered whatever the count, never counted, with no usage; the day's limit counts the answered messages of
+  // conversations that are not heavy. A spoken message needs its recording uploaded (chat-{messageId}), and its words are fixed.
+  const SCHOLAR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const SCHOLAR_KEYS = ["conversationId", "messageId", "input", "entryId", "region"];
+  const SPOKEN_WORDS = "These are the words the recording held";
+  const SCHOLAR_PASSAGE = {
+    type: "passage",
+    reference: "Philippians 4:6\u20137",
+    text: "Be anxious for nothing, but in everything, by prayer and petition, with thanksgiving, present your requests to God.",
+  };
+
+  function scholarConversationModel(row) {
+    return {
+      id: row.id,
+      entryId: row.entry_id,
+      title: row.title,
+      isHeavy: row.is_heavy,
+      lastMessageAt: row.last_message_at,
+      createdAt: row.created_at,
+    };
+  }
+
+  function scholarMessageModel(row) {
+    const blocks = row.content.blocks.map((block) =>
+      block.type === "passage"
+        ? { type: "passage", scripture: { reference: block.reference, text: block.text, translation: "BSB", verified: true } }
+        : { type: block.type, text: block.text }
+    );
+    return {
+      id: row.id,
+      conversationId: row.conversation_id,
+      role: row.role,
+      replyTo: row.reply_to,
+      inputType: row.input_type,
+      status: row.status,
+      errorCode: row.error_code,
+      blocks,
+      isHeavy: row.is_heavy,
+      helpLine: row.role === "scholar" && row.is_heavy ? (row.content.help ?? "crisis") : null,
+      createdAt: row.created_at,
+    };
+  }
+
+  function scholarUsage(sub) {
+    const paid = state.serverPlans[sub] === "pro" || state.serverPlans[sub] === "trial";
+    const limit = paid ? state.scholarProLimit : state.scholarFreeLimit;
+    const heavy = new Set(state.scholarConversations.filter((row) => row.is_heavy).map((row) => row.id));
+    const used = state.scholarMessages.filter(
+      (row) => row.user_id === sub && row.role === "scholar" && row.status === "ready" && !heavy.has(row.conversation_id),
+    ).length;
+    return {
+      kind: paid ? "pro_day" : "free_day",
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      resetsAt: new RealDate(clock.now + 86_400_000).toISOString(),
+    };
+  }
+
+  function scholarTurn(body, sub) {
+    const object = body !== null && typeof body === "object" && !Array.isArray(body);
+    if (!object || Object.keys(body).some((key) => !SCHOLAR_KEYS.includes(key))) return fnError(400, "INVALID_REQUEST");
+    const { conversationId, messageId, input, entryId } = body;
+    if (!SCHOLAR_UUID.test(conversationId ?? "") || !SCHOLAR_UUID.test(messageId ?? "")) return fnError(400, "INVALID_REQUEST");
+    const text = input?.type === "text" && typeof input.text === "string" ? input.text.trim() : null;
+    const spoken = input?.type === "audio" && Number.isFinite(input.durationMs) && input.durationMs >= 1000 && input.durationMs <= 125_000;
+    if (!spoken && (text === null || text.length === 0 || text.length > 2000)) return fnError(400, "INVALID_REQUEST");
+    // A replay: the person's message already has its answer.
+    const answered = state.scholarMessages.find((row) => row.reply_to === messageId && row.user_id === sub);
+    if (answered !== undefined) {
+      const conversation = state.scholarConversations.find((row) => row.id === answered.conversation_id);
+      const message = state.scholarMessages.find((row) => row.id === messageId);
+      return json(200, {
+        conversation: scholarConversationModel(conversation),
+        message: scholarMessageModel(message),
+        answer: scholarMessageModel(answered),
+        usage: conversation.is_heavy ? null : scholarUsage(sub),
+      });
+    }
+    let conversation = state.scholarConversations.find((row) => row.id === conversationId);
+    if (conversation !== undefined && conversation.user_id !== sub) return fnError(404, "NOT_FOUND");
+    if (conversation === undefined && typeof entryId === "string") {
+      if (!state.entries.some((row) => row.id === entryId && row.user_id === sub)) return fnError(404, "NOT_FOUND");
+      conversation = state.scholarConversations.find((row) => row.entry_id === entryId && row.user_id === sub);
+    }
+    const at = stamp(clock.now);
+    if (conversation === undefined) {
+      const fromEntry = typeof entryId === "string" ? state.entries.find((row) => row.id === entryId) : undefined;
+      conversation = {
+        id: conversationId,
+        user_id: sub,
+        entry_id: fromEntry?.id ?? null,
+        title: null,
+        is_heavy: fromEntry?.is_crisis === true,
+        last_message_at: at,
+        created_at: at,
+      };
+      state.scholarConversations.push(conversation);
+    }
+    let words = text;
+    if (spoken) {
+      const saved = state.scholarMessages.find((row) => row.id === messageId);
+      const savedWords = saved?.content.blocks.find((block) => block.type === "text")?.text ?? null;
+      if (savedWords !== null) words = savedWords;
+      else if (!state.uploads.some((call) => call.id === `chat-${messageId}`)) return fnError(404, "AUDIO_NOT_FOUND");
+      else words = SPOKEN_WORDS;
+    }
+    const heavyNow = /HEAVY|ABUSE/.test(words);
+    const help = /ABUSE/.test(words) ? "abuse" : "crisis";
+    const personRow = {
+      id: messageId,
+      conversation_id: conversation.id,
+      user_id: sub,
+      role: "user",
+      reply_to: null,
+      input_type: spoken ? "audio" : "text",
+      status: "pending",
+      error_code: null,
+      content: { blocks: [{ type: "text", text: words }] },
+      is_heavy: heavyNow,
+      claimed_at: at,
+      created_at: at,
+    };
+    state.scholarMessages = state.scholarMessages.filter((row) => row.id !== messageId);
+    state.scholarMessages.push(personRow);
+    if (heavyNow) conversation.is_heavy = true;
+    if (!conversation.is_heavy) {
+      const usage = scholarUsage(sub);
+      if (usage.remaining <= 0) {
+        personRow.status = "failed";
+        personRow.error_code = "LIMIT_REACHED";
+        return json(402, { error: { code: "LIMIT_REACHED", message: "A fixed message", requestId: "req-1" }, usage });
+      }
+    }
+    const answer = {
+      id: `${messageId.slice(0, 24)}${pad(state.scholarMessages.length)}`,
+      conversation_id: conversation.id,
+      user_id: sub,
+      role: "scholar",
+      reply_to: messageId,
+      input_type: null,
+      status: "ready",
+      error_code: null,
+      content: heavyNow
+        ? { blocks: [{ type: "text", text: "You do not carry this by yourself." }], help }
+        : { blocks: [SCHOLAR_PASSAGE, { type: "text", text: "Paul wrote this from prison.\n\nGod stands guard over your heart." }] },
+      is_heavy: heavyNow,
+      claimed_at: null,
+      created_at: stamp(clock.now + 1),
+    };
+    personRow.status = "ready";
+    personRow.claimed_at = null;
+    state.scholarMessages.push(answer);
+    conversation.last_message_at = answer.created_at;
+    if (!conversation.is_heavy && conversation.title === null && conversation.entry_id === null) conversation.title = "A question about peace";
+    if (conversation.is_heavy) conversation.title = null;
+    return json(200, {
+      conversation: scholarConversationModel(conversation),
+      message: scholarMessageModel(personRow),
+      answer: scholarMessageModel(answer),
+      usage: conversation.is_heavy ? null : scholarUsage(sub),
+    });
+  }
+
+  // One part of a saved answer read aloud: two parts per answer. A free account hears nothing outside a heavy conversation.
+  function scholarSpeak(body, sub) {
+    const object = body !== null && typeof body === "object" && !Array.isArray(body);
+    if (!object || Object.keys(body).some((key) => !["messageId", "part", "region"].includes(key))) return fnError(400, "INVALID_REQUEST");
+    const answer = state.scholarMessages.find((row) => row.id === body.messageId && row.user_id === sub && row.role === "scholar");
+    if (answer === undefined || answer.status !== "ready") return fnError(404, "NOT_FOUND");
+    if (!Number.isInteger(body.part) || body.part < 0 || body.part > 1) return fnError(400, "INVALID_REQUEST");
+    const conversation = state.scholarConversations.find((row) => row.id === answer.conversation_id);
+    const paid = state.serverPlans[sub] === "pro" || state.serverPlans[sub] === "trial";
+    if (!conversation.is_heavy && !paid) {
+      return json(402, {
+        error: { code: "LIMIT_REACHED", message: "A fixed message", requestId: "req-1" },
+        usage: { kind: "listen_plan", used: 0, limit: 0, remaining: 0, resetsAt: null },
+      });
+    }
+    const audio = Buffer.from(`RIFF-part-${body.part}`).toString("base64");
+    return json(200, { part: body.part, parts: 2, audioBase64: audio, durationMs: 1500 });
+  }
+
+  // A check can hold a Scholar call and then answer it as the fake would (a scripted function that calls these).
+  state.scholarRoutes = { turn: scholarTurn, speak: scholarSpeak };
 
   async function fake(input, init = {}) {
     const url = new URL(typeof input === "string" ? input : input.url);
@@ -510,6 +727,8 @@ function makeServer() {
         const list = state.affirmations.filter((row) => row.entry_id === entry.id).sort((a, b) => a.position - b.position);
         return json(200, { affirmations: list.map(affirmationModel) });
       }
+      if (name === "scholar-turn") return scholarTurn(body, sub);
+      if (name === "scholar-speak") return scholarSpeak(body, sub);
       if (name === "export-data") {
         // Step 31: a link to the caller's ZIP, valid for an hour, as the real function signs it.
         const expiresAt = new RealDate(clock.now + 3600_000).toISOString();
@@ -540,7 +759,7 @@ function makeServer() {
       if (typeof body?.tz !== "string") return json(400, { code: "PGRST202", message: "no such function", details: null, hint: null });
       return json(200, streakOf(sub, body.tz));
     }
-    for (const table of ["journal_entries", "daily_affirmations"]) {
+    for (const table of ["journal_entries", "daily_affirmations", "scholar_conversations", "scholar_messages"]) {
       if (url.pathname === `/rest/v1/${table}`) {
         const scripted = state.rest[table].shift();
         if (scripted !== undefined) return withAbort(init.signal, Promise.resolve(typeof scripted === "function" ? scripted() : scripted));
@@ -588,7 +807,15 @@ function makeRealtimeFake() {
 
 // ------------------------------------------------------------------ one world per check
 // `realtime: "real"` loads the real Realtime service (supabase/tests/realtime fakes the channel on the real client instead).
-function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes: extraFakes = {}, realtime = "fake", aiPermission = "fake" } = {}) {
+function makeLiveWorld({
+  userId = "user_a",
+  token = "tokA",
+  tier = "free",
+  fakes: extraFakes = {},
+  realtime = "fake",
+  aiPermission = "fake",
+  scholarPlayer = "fake",
+} = {}) {
   const sqlite = offline.makeSqlite();
   const secure = offline.makeSecureStore();
   const net = offline.makeNetInfo();
@@ -597,6 +824,8 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
   recordings.module.recordingUri = (clientEntryId) => `file:///recordings/${clientEntryId}.m4a`;
   const server = makeServer();
   const upload = makeUpload();
+  // Scholar's fake finds a spoken message's recording among the uploads the app made (step 38).
+  server.state.uploads = upload.calls;
   // How many rows of the read cache were opened (decrypted): a screen must not open the whole cache to show one page.
   const counts = { decrypts: 0 };
   const crypto = offline.makeCrypto();
@@ -647,6 +876,19 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
   };
   const realtimeFake = makeRealtimeFake();
   if (realtime === "fake") fakes["@/services/realtime"] = realtimeFake.module;
+  // Step 38: Scholar's voice needs expo-audio, which plain Node cannot load. A stand-in counts the stops and the clears
+  // (supabase/tests/scholar runs the real player with scholarPlayer: "real" and fakes of its own).
+  const scholarAudio = { stops: 0, clears: 0 };
+  if (scholarPlayer === "fake") {
+    fakes["@/services/scholarPlayer"] = {
+      __esModule: true,
+      stopScholarAudio: () => void (scholarAudio.stops += 1),
+      clearScholarAudio: () => void (scholarAudio.clears += 1),
+      playScholarAnswer: async () => undefined,
+      getScholarListenState: () => ({ phase: "idle" }),
+      subscribeScholarListen: () => () => undefined,
+    };
+  }
   // The account has allowed Google's AI in every suite but supabase/tests/ai-permission, which checks the real answer.
   if (aiPermission === "fake") fakes["@/services/aiPermission"] = { __esModule: true, hasAiPermission: () => true };
   // A suite can fake more modules that plain Node cannot load (step 29b: the player store and the devotional files).
@@ -669,6 +911,7 @@ function makeLiveWorld({ userId = "user_a", token = "tokA", tier = "free", fakes
     realtimeCalls: realtimeFake.calls,
     analyticsCalls,
     hapticsCalls,
+    scholarAudio,
     affirmationRequests: () => affirmationRequests,
     renderHook,
     logs,

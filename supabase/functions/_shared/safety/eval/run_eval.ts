@@ -19,7 +19,8 @@
 // ids and labels, never the text of a case or what a recording said.
 //
 // Pass criteria: every case that expects a crisis comes back as a crisis (100% recall). The false alarms on the clear cases
-// are counted and reported; more than 3 of the 15 means the wording needs a look, and nothing is changed without asking.
+// are counted and reported; more than 3 of the clear cases means the wording needs a look, and nothing is changed without
+// asking.
 import { newStats } from "../../../process-entry/gemini.ts";
 import { askModel, type ScreenConfig, screenEntry, type ScreenInput, screenTiming } from "../screen.ts";
 import { SCREEN_PROMPT_VERSION } from "../screenPrompt.ts";

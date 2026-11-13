@@ -42,9 +42,6 @@ export const GEMINI_DEADLINE_MS = 90_000;
 // again adds the audio.
 export const speechTiming = { latestStartMs: 100_000, deadlineMs: 135_000, uploadTimeoutMs: 20_000 };
 
-// The expiry guard (step 30): one look at RevenueCat, cut short, so a lapsed plan costs a reflection at most this long.
-export const EXPIRY_CHECK = { attempts: 1, timeoutMs: 6_000 };
-
 // A row that has been "processing" for longer than this belongs to a request that died, and may be claimed again.
 // Longer than the platform's 150 s wall clock, so a request that is still running is never taken over.
 export const CLAIM_LEASE_MS = 3 * 60_000;

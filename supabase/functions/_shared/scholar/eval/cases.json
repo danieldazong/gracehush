@@ -1,0 +1,194 @@
+[
+  {
+    "id": "e-john316",
+    "topic": "verse",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "Explain John 3:16 simply."
+  },
+  {
+    "id": "e-wait",
+    "topic": "verse",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "What does it mean to wait on the Lord?"
+  },
+  {
+    "id": "e-simpler",
+    "topic": "follow_up",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [
+      { "role": "user", "text": "Explain John 3:16 simply." },
+      {
+        "role": "scholar",
+        "text": "John 3:16 says that God loved the world so much that he gave his Son, so that anyone who trusts in him will have life that never ends. It shows that God's love moves first, before we do anything to earn it."
+      }
+    ],
+    "message": "Explain it more simply."
+  },
+  {
+    "id": "e-exam-prayer",
+    "topic": "prayer",
+    "asksPrayer": true,
+    "reflection": null,
+    "context": [],
+    "message": "I have my nursing board exam on Friday and I freeze up every time I sit down to study. Will you pray for me?"
+  },
+  {
+    "id": "e-dog",
+    "topic": "grief",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "My dog of fourteen years died this morning. Is it silly to grieve this much? Does God care about animals?"
+  },
+  {
+    "id": "e-baptism",
+    "topic": "dividing",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "Do I need to be baptized to be saved? My church and my sister's church say different things."
+  },
+  {
+    "id": "e-psalm137",
+    "topic": "hard_passage",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "Psalm 137 ends with a line about babies and rocks. How can something like that be in the Bible?"
+  },
+  {
+    "id": "e-forgive-father",
+    "topic": "feeling",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "My father never apologized for how he treated us growing up. Does forgiving him mean I have to let him back into my life?"
+  },
+  {
+    "id": "e-rent-prayer",
+    "topic": "prayer",
+    "asksPrayer": true,
+    "reflection": null,
+    "context": [],
+    "message": "Rent is due next week and I am two hundred dollars short. I feel ashamed to even pray about money. Can you pray with me?"
+  },
+  {
+    "id": "e-reflection-why",
+    "topic": "reflection",
+    "asksPrayer": false,
+    "reflection": {
+      "words": "I failed my driving test again today. Everyone my age already has a license and I feel so behind.",
+      "title": "Grace for the Second Try",
+      "feeling": "weary",
+      "passage": "Galatians 6:9",
+      "devotional": "You rode home in the passenger seat again, the test sheet folded in your lap. Failing twice stings, and comparing yourself with everyone your age makes it heavier. That disappointment is real. God does not measure you by a license or a timeline. He sees the effort you keep bringing, and he is patient with every second try. Tonight, set the sheet down and let him remind you that a slow road is still a road he walks with you.",
+      "closingPrayer": "Father, you see how behind I feel tonight. Give me calm hands and a steady mind for the next try, and grace when I compare myself with others. Help me practice without shame. You are patient with me, and I trust you with my pace."
+    },
+    "context": [],
+    "message": "Why this passage?"
+  },
+  {
+    "id": "e-reflection-more",
+    "topic": "reflection",
+    "asksPrayer": false,
+    "reflection": {
+      "words": "My sister moved across the country this week. The house feels so empty and I miss our Sunday walks.",
+      "title": "Held When the House Is Quiet",
+      "feeling": "grieving",
+      "passage": "Psalm 139:9–10",
+      "devotional": "The Sunday walk came and went this week with no one beside you. Missing your sister is a real ache, and an empty house can make it louder. God is not limited by miles. The same hand that holds you here holds her there, and his care stretches across every state between you. Let the quiet become a place to tell him what you miss.",
+      "closingPrayer": "Lord, you know how much I miss my sister. Fill the quiet in this house with your nearness, and keep her safe in her new home. Help me find new rhythms for Sundays. You are close to both of us, and I trust you with the distance."
+    },
+    "context": [
+      { "role": "user", "text": "Why this passage?" },
+      {
+        "role": "scholar",
+        "text": "You shared how far away your sister feels now. Psalm 139:9–10 speaks of the farthest places a person could go and says God's hand is there too. It fits because no distance reaches past him."
+      }
+    ],
+    "message": "Can you say more about how God stays close when people leave?"
+  },
+  {
+    "id": "e-genesis",
+    "topic": "study",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "Who wrote the book of Genesis, and how do we know?"
+  },
+  {
+    "id": "e-trinity",
+    "topic": "doctrine",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "How can God be three and one at the same time? Explain it like I am new to church."
+  },
+  {
+    "id": "e-doubt-prayer",
+    "topic": "prayer",
+    "asksPrayer": true,
+    "reflection": null,
+    "context": [],
+    "message": "I do not even know if I believe anymore. Can you pray for me, even if I am not sure anyone is listening?"
+  },
+  {
+    "id": "e-thanks",
+    "topic": "short_reply",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [
+      { "role": "user", "text": "What does Philippians 4:6 mean?" },
+      {
+        "role": "scholar",
+        "text": "Paul tells the church to bring every need to God in prayer, with thanks, instead of carrying worry alone. It is not a command to stop feeling worried. It is an invitation to hand each worry to God as it comes."
+      }
+    ],
+    "message": "Thank you, that helped."
+  },
+  {
+    "id": "e-marriage",
+    "topic": "relationships",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "My husband and I keep arguing about money. What does the Bible say about handling conflict in marriage?"
+  },
+  {
+    "id": "e-pidgin",
+    "topic": "pidgin",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "Abeg, wetin Bible talk about worry? My mind no dey rest since my oga sack me for work."
+  },
+  {
+    "id": "e-rapture",
+    "topic": "dividing",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "Is the rapture going to happen before the tribulation? Thinking about the end times scares me."
+  },
+  {
+    "id": "e-sunday-work",
+    "topic": "dividing",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "Is it a sin to work on Sunday? I am a nurse and I am scheduled most weekends."
+  },
+  {
+    "id": "e-mercies",
+    "topic": "verse",
+    "asksPrayer": false,
+    "reflection": null,
+    "context": [],
+    "message": "What does it mean that God's mercies are new every morning?"
+  }
+]

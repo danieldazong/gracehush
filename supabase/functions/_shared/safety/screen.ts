@@ -4,7 +4,9 @@ import { OutputInvalid } from "../../process-entry/output.ts";
 import { wrapEntry } from "../../process-entry/prompt.ts";
 import { AppError } from "../errors.ts";
 import type { CrisisSource } from "../log.ts";
-import { matchCrisisPhrase } from "./phrases.ts";
+import type { HelpKind } from "../../process-entry/contracts.ts";
+import { HELP_KINDS, helpFromCategories, helpFromPhraseGroup, isHelpKind } from "./helpKind.ts";
+import { matchCrisisGroup } from "./phrases.ts";
 import { SCREEN_AUDIO_TURN, SCREEN_SYSTEM_INSTRUCTION } from "./screenPrompt.ts";
 
 // Crisis screening, layers 1 and 2 (step 21). It runs before anything is written for the person: no devotional, passage,
@@ -22,8 +24,10 @@ export type ScreenInput = { kind: "text"; text: string } | { kind: "audio"; byte
 export type ScreenResult =
   // The words the rest of the request works from: the person's own text, or what was heard in the recording.
   | { status: "clear"; transcript: string }
-  // `transcript` is null for a recording whose words were never read (the request was blocked).
-  | { status: "crisis"; transcript: string | null; source: CrisisSource }
+  // `transcript` is null for a recording whose words were never read (the request was blocked). `help` is the help line the
+  // heavy moment shows (helpKind.ts): the one the model named in help_line (screen-v4), else the one its kinds of concern point
+  // to, or the group of the phrase that matched.
+  | { status: "crisis"; transcript: string | null; source: CrisisSource; help: HelpKind }
   | { status: "no_speech" }
   // No answer could be had (the service is down, slow, or answered in a shape that could not be used). Nothing is made.
   // `reason` is a log-safe category from the call (such as gemini_http_503), never the model's or Google's words.
@@ -63,10 +67,13 @@ export const SCREEN_SAFETY_SETTINGS: SafetySetting[] = [
 const RISKS = ["none", "uncertain", "crisis"] as const;
 type Risk = (typeof RISKS)[number];
 
-// What kinds of concern the model may name. They are only checked: they are never stored, logged or acted on.
+// What kinds of concern the model may name. Since 2026-11-11 they choose the help line a heavy moment shows when the model names
+// none in help_line (helpKind.ts), and nothing else: they are never stored, logged or shown.
 const CATEGORIES = ["self_harm", "suicide", "harm_to_others", "abuse_or_danger_now", "medical_emergency"] as const;
+type Category = (typeof CATEGORIES)[number];
 
-// Property order is the order the model writes them in: a recording is transcribed before it is judged.
+// Property order is the order the model writes them in: a recording is transcribed before it is judged, and the help line is named
+// after the kinds of concern.
 export function buildScreenSchema(): Record<string, unknown> {
   return {
     type: "object",
@@ -80,12 +87,24 @@ export function buildScreenSchema(): Record<string, unknown> {
         description: "The kinds of concern in the entry. Empty when risk is none.",
         items: { type: "string", enum: [...CATEGORIES] },
       },
+      help_line: {
+        type: "string",
+        enum: ["none", ...HELP_KINDS],
+        description: "The one help line that fits the person best. none when risk is none.",
+      },
     },
-    required: ["no_speech", "transcript", "risk", "categories"],
+    required: ["no_speech", "transcript", "risk", "categories", "help_line"],
   };
 }
 
-export type Verdict = { noSpeech: boolean; transcript: string; risk: Risk };
+// `help` is the help line the model named, or null when it named none or a word that is not one of the four (screen-v4).
+export type Verdict = {
+  noSpeech: boolean;
+  transcript: string;
+  risk: Risk;
+  categories: Category[];
+  help: HelpKind | null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -97,7 +116,8 @@ function invalid(reason: string): never {
 
 // Checks the model's JSON again (the schema asks, this makes sure). A reply that cannot be used is OutputInvalid, which
 // `generate` answers with one more attempt. For a recording that is judged "none", the speech must agree with itself:
-// no speech means no words, and speech means words. A reply that flags a risk is accepted whatever else it says.
+// no speech means no words, and speech means words. A reply that flags a risk is accepted whatever else it says, so the help
+// line is read leniently: a missing or unknown one is null, and the kinds of concern choose the line instead (interpret).
 export function parseScreening(text: string, kind: "text" | "audio"): Verdict {
   let data: unknown;
   try {
@@ -106,7 +126,7 @@ export function parseScreening(text: string, kind: "text" | "audio"): Verdict {
     return invalid("json");
   }
   if (!isRecord(data)) return invalid("shape");
-  const { no_speech, transcript, risk, categories } = data;
+  const { no_speech, transcript, risk, categories, help_line } = data;
   if (typeof no_speech !== "boolean") return invalid("no_speech");
   if (typeof transcript !== "string") return invalid("transcript");
   const level = RISKS.find((item) => item === risk);
@@ -121,7 +141,13 @@ export function parseScreening(text: string, kind: "text" | "audio"): Verdict {
   if (kind === "audio" && level === "none" && no_speech === (words !== "")) {
     return invalid(no_speech ? "no_speech_with_words" : "transcript_empty");
   }
-  return { noSpeech: no_speech, transcript: words, risk: level };
+  return {
+    noSpeech: no_speech,
+    transcript: words,
+    risk: level,
+    categories: categories as Category[],
+    help: isHelpKind(help_line) ? help_line : null,
+  };
 }
 
 export type Asked =
@@ -163,25 +189,37 @@ export function interpret(input: ScreenInput, asked: Asked): ScreenResult {
   if (asked.kind === "failed") return { status: "failed", reason: asked.reason };
   // A written entry is its own transcript, whatever the model wrote in that field. A blocked recording was never read.
   const written = input.kind === "text" ? input.text : null;
-  if (asked.kind === "blocked") return { status: "crisis", transcript: written, source: "blocked" };
+  if (asked.kind === "blocked") return { status: "crisis", transcript: written, source: "blocked", help: "crisis" };
 
   const { verdict } = asked;
   const words = written ?? (verdict.transcript === "" ? null : verdict.transcript);
-  if (verdict.risk === "crisis") return { status: "crisis", transcript: words, source: "model" };
-  if (verdict.risk === "uncertain") return { status: "crisis", transcript: words, source: "uncertain" };
+  // The line the model named (screen-v4, by the readers' table) wins; without one, the kinds of concern choose it.
+  const help = verdict.help ?? helpFromCategories(verdict.categories);
+  if (verdict.risk === "crisis") return { status: "crisis", transcript: words, source: "model", help };
+  if (verdict.risk === "uncertain") return { status: "crisis", transcript: words, source: "uncertain", help };
 
   if (input.kind === "audio" && verdict.noSpeech) return { status: "no_speech" };
   // parseScreening guarantees words for a recording judged "none" that has speech, so this is only a safety net.
   if (words === null) return { status: "failed", reason: "no_words" };
-  if (matchCrisisPhrase(words)) return { status: "crisis", transcript: words, source: "phrase" };
+  const group = matchCrisisGroup(words);
+  if (group !== null) {
+    return { status: "crisis", transcript: words, source: "phrase", help: helpFromPhraseGroup(group) };
+  }
   return { status: "clear", transcript: words };
 }
 
+// The phrase backstop's answer for a written text, or null: a match is decided without the model, so it cannot be argued out
+// of it and it works while the model is down.
+export function phraseVerdict(text: string): ScreenResult | null {
+  const group = matchCrisisGroup(text);
+  return group === null
+    ? null
+    : { status: "crisis", transcript: text, source: "phrase", help: helpFromPhraseGroup(group) };
+}
+
 export async function screenEntry(input: ScreenInput, config: ScreenConfig): Promise<ScreenResult> {
-  // The backstop comes first for a written entry: a match is decided without the model, so it cannot be argued out of it
-  // and it works while the model is down.
-  if (input.kind === "text" && matchCrisisPhrase(input.text)) {
-    return { status: "crisis", transcript: input.text, source: "phrase" };
-  }
+  // The backstop comes first for a written entry.
+  const matched = input.kind === "text" ? phraseVerdict(input.text) : null;
+  if (matched !== null) return matched;
   return interpret(input, await askModel(input, config));
 }

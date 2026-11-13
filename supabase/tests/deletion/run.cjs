@@ -843,7 +843,7 @@ async function menuChecks() {
     const wordsOnly = screen.slice(screen.indexOf("function WordsOnlyView"), screen.indexOf("export function ReflectionScreen"));
     assert.ok(wordsOnly.indexOf("onPress={onReturn}") < wordsOnly.indexOf("<DeleteReflectionLink "), "under the way back, last of all");
     assert.ok(wordsOnly.includes("<HelpLine />"), "the words-only view has the help line");
-    assert.ok(/\{entry\.isCrisis \? \(\s*<FadeIn \{\.\.\.arrive\(3\)\}>\s*<HelpLine \/>/.test(screen), "a heavy moment's ready view has the help line under its devotional");
+    assert.ok(/\{entry\.isCrisis \? \(\s*<FadeIn \{\.\.\.arrive\(3\)\}>\s*<HelpLine kind=\{entry\.helpLine\} \/>/.test(screen), "a heavy moment's ready view has the help line saved with it under its devotional");
     assert.ok(/deletion\.ask\(\{ entryId: state\.entry\.id, answered: false, crisis: true \}\)/.test(screen), "the words-only branch asks with crisis set");
     assert.ok(/if \(!isCrisisEntry\) track\("reflection_deleted"/.test(screen), "no event for a heavy moment");
     assert.equal(screen.split('track("reflection_deleted"').length - 1, 1, "one call site, guarded");
@@ -853,7 +853,47 @@ async function menuChecks() {
       assert.ok(!/haptics|console\.|track\(/.test(source), "no haptic, no log line and no event");
     }
     assert.ok(help.includes("HELPLINE_NUMBER") && help.includes("EMERGENCY_NUMBER") && help.includes("openPhoneCall"), "the numbers come from constants/crisisResources.ts, and the tap calls");
+    // Since 2026-11-11 the line fits the situation and the region: the buttons come from utils/helpLine.ts, and a text opens
+    // the messages app.
+    assert.ok(help.includes("helpActions(") && help.includes("openTextMessage") && help.includes("deviceRegion()"), "the help line follows the situation and the region");
   });
+  await test("help line: the buttons and the words fit the situation and the phone's region, as the readers' table says (2026-11-11)", async (w) => {
+    const { helpActions } = w.use("@/utils/helpLine");
+    const { regionCode, regionOf } = w.use("@/utils/region");
+    const { copy } = w.use("@/constants/copy");
+    const numbers = w.use("@/constants/crisisResources");
+    const shape = (kind, region) =>
+      helpActions(kind, region).map((a) => [a.kind, a.service, a.number ?? a.url, a.body ?? null].filter((part) => part !== null).join(":"));
+    assert.deepEqual(shape("crisis", "us"), ["call:lifeline:988", "text:lifeline:988"]);
+    assert.deepEqual(shape("harm_others", "us"), ["call:lifeline:988", "text:lifeline:988"]);
+    assert.deepEqual(shape("abuse", "us"), ["call:hotline:18007997233", "text:hotline:88788:START"]);
+    assert.deepEqual(shape("emergency", "us"), ["call:emergency:911"]);
+    // Outside the US no US number is offered: the directory, for every kind.
+    for (const kind of ["crisis", "harm_others", "abuse", "emergency"]) {
+      assert.deepEqual(shape(kind, "other"), ["web:directory:https://findahelpline.com"], kind);
+    }
+    assert.equal(numbers.DV_HOTLINE_DIAL, numbers.DV_HOTLINE_NUMBER.replace(/-/g, ""), "the digits dialed are the number shown");
+    assert.equal(numbers.HELPLINE_LAST_VERIFIED, "2026-11-11");
+    // The phone's region: the US and its territories are the US, and a region that cannot be read is the US.
+    for (const [locale, code] of [["en-US", "US"], ["es-PR", "PR"], ["en_GB", "GB"], ["en-NG", "NG"], ["zh-Hant-TW", "TW"], ["en", null], ["", null], [null, null], ["es-419", null]]) {
+      assert.equal(regionCode(locale), code, String(locale));
+    }
+    assert.deepEqual(["US", "PR", "GU", "VI", "AS", "MP", "UM"].map(regionOf), Array(7).fill("us"));
+    assert.deepEqual([regionOf("NG"), regionOf("GB"), regionOf(null)], ["other", "other", "us"]);
+    // The words: the 988 line is unchanged, each line names only its own service's numbers, and the line outside the US no number.
+    const help = copy.reflection.help;
+    assert.equal(help.crisis("988", "911"), "You don’t have to carry this alone. Call or text 988 any time, or 911 if you’re in danger.");
+    assert.ok(help.abuse("1-800-799-7233", "START", "88788", "911").includes("call 1-800-799-7233 or text START to 88788"));
+    assert.ok(help.harmOthers("988", "911").endsWith("or 911 if anyone is in danger."));
+    assert.equal(help.emergency("911"), "If you or someone near you is in danger right now, call 911.");
+    for (const line of [help.elsewhere, help.emergencyElsewhere]) {
+      assert.ok(!/\d/.test(line.replace("findahelpline.com", "")), line);
+      assert.ok(line.includes("your local emergency number"), line);
+    }
+    for (const value of Object.values(help).filter((item) => typeof item === "string")) {
+      assert.ok(!value.includes("'"), `a straight apostrophe in ${value}`);
+    }
+  }, { signIn: false });
   await test("menu: Active offers Remove then Delete; Answered offers Edit, Move back, Remove then Delete; the delete is last and the only destructive one", async (w) => {
     const { getPrayerMenu } = w.use("@/utils/prayerMenu");
     const { copy } = w.use("@/constants/copy");
@@ -901,6 +941,9 @@ async function menuChecks() {
     assert.ok(/forever/i.test(text.title));
     assert.ok(/can’t be undone/.test(text.body) && /can’t be undone/.test(text.bodyAnswered));
     assert.ok(/gratitude note/.test(text.bodyAnswered) && !/gratitude note/.test(text.body), "only the answered prayer's dialog mentions the note");
+    // Step 38: a reflection’s Scholar conversation goes with it (the database deletes it with the reflection), and both bodies say so.
+    assert.ok(/any Scholar conversation about it/.test(text.body) && /any Scholar conversation about it/.test(text.bodyAnswered), "both bodies name the Scholar conversation");
+    assert.ok(!/Scholar/.test(text.bodyCrisis), "a heavy moment saved before 2026-11-08 has no conversation to name");
     assert.ok(/internet/i.test(text.offline), "the offline line says what is needed");
     assert.ok(copy.prayers.menu.deleteReflection.endsWith("…"), "the delete row opens a dialog, so it ends in an ellipsis");
     assert.ok(!/delete|forever/i.test(copy.prayers.menu.removeFromPrayers), "Remove from Prayers does not sound like a delete");

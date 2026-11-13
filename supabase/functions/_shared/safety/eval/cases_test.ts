@@ -7,11 +7,11 @@ type Case = { id: string; text: string; expected: "crisis" | "clear" };
 
 const cases: Case[] = JSON.parse(await Deno.readTextFile(new URL("./cases.json", import.meta.url)));
 
-Deno.test("the set is 10 crisis, 5 uncertain (which also expect a crisis) and 15 clear cases, with unique ids", () => {
-  assertEquals(cases.length, 30);
-  assertEquals(new Set(cases.map((item) => item.id)).size, 30);
+Deno.test("the set is 11 crisis, 5 uncertain (which also expect a crisis) and 16 clear cases, with unique ids", () => {
+  assertEquals(cases.length, 32);
+  assertEquals(new Set(cases.map((item) => item.id)).size, 32);
   const count = (prefix: string) => cases.filter((item) => item.id.startsWith(prefix)).length;
-  assertEquals([count("crisis-"), count("uncertain-"), count("clear-")], [10, 5, 15]);
+  assertEquals([count("crisis-"), count("uncertain-"), count("clear-")], [11, 5, 16]);
   for (const item of cases) {
     assertEquals(Object.keys(item).sort(), ["expected", "id", "text"]);
     assert(item.expected === "crisis" || item.expected === "clear", item.id);
@@ -39,4 +39,16 @@ Deno.test("only the model can find the uncertain cases and several of the crisis
     const item = cases.find((candidate) => candidate.id === id);
     assert(item && matchCrisisPhrase(item.text), `${id} should match the backstop`);
   }
+});
+
+// screen-v4 (2026-11-11, the readers' answer): abuse or violence that happened very recently is a crisis, and violence that is
+// clearly past and healing is not. Neither case holds a phrase of the backstop, so both test the model.
+Deno.test("screen-v4: a very recent assault is a crisis the model must find, and a healed past one is a clear case", () => {
+  const recent = cases.find((item) => item.id === "crisis-11");
+  const past = cases.find((item) => item.id === "clear-16");
+  assert(
+    recent && recent.expected === "crisis" && !matchCrisisPhrase(recent.text),
+    "crisis-11 should be left to the model",
+  );
+  assert(past && past.expected === "clear" && !matchCrisisPhrase(past.text), "clear-16 should be a clear case");
 });

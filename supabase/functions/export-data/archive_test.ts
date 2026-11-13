@@ -1,6 +1,6 @@
 import { deflateSync, unzipSync } from "fflate";
 
-import type { UserData, UserEntry } from "../_shared/account/userData.ts";
+import type { UserConversation, UserData, UserEntry } from "../_shared/account/userData.ts";
 import { assert, assertEquals } from "../process-entry/testing/assert.ts";
 import {
   audioCandidates,
@@ -146,6 +146,7 @@ Deno.test("json: every column but user_id, the audio paths replaced by the files
     audio_path: `${USER}/raw/c.m4a`,
   });
   const data: UserData = {
+    conversations: [],
     profile: profile("Africa/Lagos"),
     entries: [
       entry({
@@ -157,8 +158,8 @@ Deno.test("json: every column but user_id, the audio paths replaced by the files
   };
   const included = new Map([[`${USER}/devotionals/${ID_1}.wav`, `audio/devotionals/2026-10-29-${ID_1}.wav`]]);
   const json = JSON.parse(buildJson(data, { exportedAt: EXPORTED, zone: "Africa/Lagos", included }));
-  assertEquals(Object.keys(json), ["exportedAt", "schemaVersion", "timeZone", "profile", "entries"]);
-  assertEquals([json.exportedAt, json.schemaVersion, json.timeZone], [EXPORTED, 1, "Africa/Lagos"]);
+  assertEquals(Object.keys(json), ["exportedAt", "schemaVersion", "timeZone", "profile", "entries", "conversations"]);
+  assertEquals([json.exportedAt, json.schemaVersion, json.timeZone], [EXPORTED, 2, "Africa/Lagos"]);
   assertEquals(json.profile, profile("Africa/Lagos"));
   assertEquals(json.entries.map((row: { id: string }) => row.id), [ID_1, ID_2], "oldest first, as read");
   const [first, second] = json.entries;
@@ -188,6 +189,7 @@ Deno.test("json: every column but user_id, the audio paths replaced by the files
 
 Deno.test("markdown: newest first, the day in the profile's zone, a finished reflection whole", () => {
   const data: UserData = {
+    conversations: [],
     profile: profile("Africa/Lagos"),
     entries: [
       entry({
@@ -228,6 +230,7 @@ Deno.test("markdown: newest first, the day in the profile's zone, a finished ref
 Deno.test("markdown and json: the validation line (step 36) sits under the title; a reflection from before it has none", () => {
   const line = "Work has kept you anxious all week, and rest still won’t come.";
   const data: UserData = {
+    conversations: [],
     profile: profile("UTC"),
     entries: [
       entry({ id: ID_2, created_at: "2026-10-28T08:00:00.000Z", devotional_title: "Older", validation_line: null }),
@@ -245,6 +248,7 @@ Deno.test("markdown and json: the validation line (step 36) sits under the title
 
 Deno.test("markdown: an unverified passage shows its reference and never a text; no passage, no line", () => {
   const data: UserData = {
+    conversations: [],
     profile: profile("UTC"),
     entries: [
       entry({ scripture_verified: false, scripture_text: null }),
@@ -260,6 +264,7 @@ Deno.test("markdown: an answered prayer shows the stored calendar day in every z
   // Stored as 12:00 UTC on the day (AGENTS.md, Prayer Rules): local reading would give October 29 in Kiritimati.
   for (const zone of ["Pacific/Kiritimati", "Pacific/Honolulu", "Africa/Lagos"]) {
     const data: UserData = {
+      conversations: [],
       profile: profile(zone),
       entries: [entry({
         is_active_prayer: true,
@@ -286,22 +291,31 @@ Deno.test("markdown: a heavy moment saved before 2026-11-08 is its day and the p
     devotional_script: null,
     closing_prayer: null,
   });
-  const md = buildMarkdown({ profile: profile("UTC"), entries: [crisis] }, { exportedAt: EXPORTED, zone: "UTC" });
+  const md = buildMarkdown({ profile: profile("UTC"), entries: [crisis], conversations: [] }, {
+    exportedAt: EXPORTED,
+    zone: "UTC",
+  });
   assert(md.endsWith("## Thursday, October 29, 2026, 8:46 AM\n\nWords that were heavy to write.\n"), md);
   for (const word of ["crisis", "Crisis", "heavy moment", "support", "Support", "988", "What you shared", "###"]) {
     assert(!md.includes(word), `the crisis section says "${word}"`);
   }
   // An entry that never finished looks the same: the day, and the words when there are any.
   const failed = entry({ processing_status: "failed", devotional_title: null, transcript: null });
-  const failedMd = buildMarkdown({ profile: null, entries: [failed] }, { exportedAt: EXPORTED, zone: "UTC" });
+  const failedMd = buildMarkdown({ profile: null, entries: [failed], conversations: [] }, {
+    exportedAt: EXPORTED,
+    zone: "UTC",
+  });
   assert(failedMd.endsWith("## Thursday, October 29, 2026, 8:46 AM\n"), failedMd);
 });
 
 Deno.test("markdown: a heavy moment since 2026-11-08 is a whole reflection, exported like any other and never labelled", () => {
   const heavy = entry({ is_crisis: true, is_active_prayer: false });
   const ordinary = entry({ is_crisis: false, is_active_prayer: false });
-  const heavyMd = buildMarkdown({ profile: profile("UTC"), entries: [heavy] }, { exportedAt: EXPORTED, zone: "UTC" });
-  const ordinaryMd = buildMarkdown({ profile: profile("UTC"), entries: [ordinary] }, {
+  const heavyMd = buildMarkdown({ profile: profile("UTC"), entries: [heavy], conversations: [] }, {
+    exportedAt: EXPORTED,
+    zone: "UTC",
+  });
+  const ordinaryMd = buildMarkdown({ profile: profile("UTC"), entries: [ordinary], conversations: [] }, {
     exportedAt: EXPORTED,
     zone: "UTC",
   });
@@ -325,6 +339,7 @@ Deno.test("readme: what is inside, when and where, the line about privacy, and e
       "journal.json",
       "audio/recordings",
       "audio/devotionals",
+      "Scholar conversations",
       "34 entries",
       "12 audio files",
       `audio/devotionals/2026-10-01-${ID_1}.wav (there was no room for it)`,
@@ -450,6 +465,7 @@ Deno.test("zip: the files are stamped with the export time on the profile's cloc
 
 Deno.test("markdown and json: an affirmation's verse (step 37) follows its text as one line; one without a verse has none", () => {
   const data: UserData = {
+    conversations: [],
     profile: profile("UTC"),
     entries: [
       entry({
@@ -478,4 +494,98 @@ Deno.test("markdown and json: an affirmation's verse (step 37) follows its text 
   const json = JSON.parse(buildJson(data, { exportedAt: EXPORTED, zone: "UTC", included: new Map() }));
   assertEquals(json.entries[0].affirmations[0].verse_reference, "Psalm 46:1");
   assertEquals(json.entries[0].affirmations[1].verse_text, null);
+});
+
+// ---- Scholar (step 38) ------------------------------------------------------------------------------------------------
+
+// A message of a Scholar conversation, as collectUserData gives it.
+const scholarMessage = (over: Record<string, unknown>) => ({
+  id: crypto.randomUUID(),
+  conversation_id: ID_3,
+  user_id: USER,
+  role: "user",
+  reply_to: null,
+  input_type: "text",
+  status: "ready",
+  error_code: null,
+  content: { blocks: [{ type: "text", text: "What does Psalm 23 mean?" }] } as Record<string, unknown> | null,
+  is_heavy: false,
+  claimed_at: null,
+  created_at: "2026-11-09T10:00:00.000Z",
+  ...over,
+});
+
+function conversation(over: Record<string, unknown>, messages: Record<string, unknown>[]): UserConversation {
+  return {
+    id: ID_3,
+    user_id: USER,
+    entry_id: null,
+    title: "The Shepherd Who Stays",
+    is_heavy: false,
+    last_message_at: "2026-11-09T10:01:00.000Z",
+    created_at: "2026-11-09T10:00:00.000Z",
+    messages,
+    ...over,
+  } as UserConversation;
+}
+
+Deno.test("json and markdown: Scholar conversations, every column but user_id; in the Markdown newest first, never labelled", () => {
+  const question = scholarMessage({});
+  const answer = scholarMessage({
+    role: "scholar",
+    reply_to: question.id,
+    input_type: null,
+    created_at: "2026-11-09T10:01:00.000Z",
+    content: {
+      blocks: [
+        { type: "passage", reference: "Psalm 23:1", text: "The LORD is my shepherd;\nI shall not want." },
+        { type: "text", text: "A shepherd leads and guards.\n\nGod does the same for you." },
+        { type: "prayer", text: "Lord, lead me today." },
+      ],
+    },
+  });
+  // A spoken message that was never transcribed has no words: it is not in the Markdown.
+  const unheard = scholarMessage({ input_type: "audio", content: null, created_at: "2026-11-09T10:02:00.000Z" });
+  const older = conversation({}, [question, answer, unheard]);
+  const heavy = conversation({
+    id: ID_4,
+    title: null,
+    is_heavy: true,
+    created_at: "2026-11-10T09:00:00.000Z",
+    last_message_at: "2026-11-10T09:05:00.000Z",
+  }, [
+    scholarMessage({
+      conversation_id: ID_4,
+      content: { blocks: [{ type: "text", text: "It has been a hard week." }] },
+    }),
+  ]);
+  const data: UserData = { profile: profile("UTC"), entries: [], conversations: [older, heavy] };
+
+  const json = JSON.parse(buildJson(data, { exportedAt: EXPORTED, zone: "UTC", included: new Map() }));
+  assertEquals(json.schemaVersion, 2);
+  assertEquals(json.conversations.map((row: { id: string }) => row.id), [ID_3, ID_4], "oldest first, as read");
+  assertEquals(json.conversations[0].messages.length, 3);
+  assert(!JSON.stringify(json.conversations).includes("user_id"));
+  assertEquals(json.conversations[1].is_heavy, true, "the person's own data keeps the flag");
+  assertEquals(json.conversations[0].messages[1].content.blocks[0].reference, "Psalm 23:1");
+
+  const md = buildMarkdown(data, { exportedAt: EXPORTED, zone: "UTC" });
+  assert(md.includes("\n# Scholar conversations\n"), md);
+  const section = md.slice(md.indexOf("# Scholar conversations"));
+  assert(
+    section.indexOf("## A conversation with Scholar") < section.indexOf("## The Shepherd Who Stays"),
+    "newest first",
+  );
+  for (
+    const part of [
+      "## The Shepherd Who Stays\n\nMonday, November 9, 2026\n\n**You:** What does Psalm 23 mean?",
+      "**Scholar:**\n\n**Psalm 23:1 (BSB)**\n\nThe LORD is my shepherd;\nI shall not want.\n\nA shepherd leads and guards.\n\nGod does the same for you.\n\n**Prayer**\n\nLord, lead me today. Amen.",
+      "## A conversation with Scholar\n\nTuesday, November 10, 2026\n\n**You:** It has been a hard week.",
+    ]
+  ) {
+    assert(md.includes(part), `missing: ${part}`);
+  }
+  assertEquals(section.split("**You:**").length - 1, 2, "a message with no words is left out");
+  for (const word of ["crisis", "Crisis", "heavy", "Heavy", "988"]) assert(!section.includes(word), word);
+  assert(!buildMarkdown({ ...data, conversations: [] }, { exportedAt: EXPORTED, zone: "UTC" }).includes("Scholar"));
 });

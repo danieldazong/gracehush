@@ -148,6 +148,9 @@ function assertHeavy(
   const row = world.entries.find((candidate) => candidate.id === entry.id);
   assert(row !== undefined);
   assertEquals(row.is_crisis, true);
+  // Every heavy moment carries one help line, saved with it and answered as it was saved (2026-11-11).
+  assert(["crisis", "abuse", "harm_others", "emergency"].includes(String(row.help_line)), String(row.help_line));
+  assertEquals(entry.helpLine, row.help_line);
   assertEquals(row.processing_status, "ready");
   assertEquals(row.error_code, null);
   assertEquals(row.transcript, words);
@@ -308,13 +311,15 @@ Deno.test(
       { type: "jailbreak", threshold: "off" },
     ]);
     assertEquals(body.safety_settings, SCREEN_SAFETY_SETTINGS);
+    // screen-v4 (2026-11-11): the model also names the help line, by the readers' table.
     assertEquals(Object.keys(body.response_format.schema.properties), [
       "no_speech",
       "transcript",
       "risk",
       "categories",
+      "help_line",
     ]);
-    assertEquals(body.response_format.schema.required, ["no_speech", "transcript", "risk", "categories"]);
+    assertEquals(body.response_format.schema.required, ["no_speech", "transcript", "risk", "categories", "help_line"]);
     assertEquals(body.input, `<journal_entry>\n${TEXT}\n</journal_entry>`);
     // The reflection request has neither the screening's prompt nor its filters.
     const reflection = world.geminiCalls[0].json as Record<string, unknown>;
@@ -697,6 +702,80 @@ Deno.test(
     assert(world.entries.every((row) => row.is_crisis === true && row.devotional_script !== null));
     assertEquals(world.affirmations.length, 9);
     assertEquals(unscopedRequests(world, USER), []);
+  }),
+);
+
+Deno.test(
+  "a heavy moment's help line follows what was found: someone hurting them, an emergency, harm to others, else 988",
+  flow([], async (world) => {
+    const cases: [GeminiReply | null, string, string, string][] = [
+      [flagged("crisis", { categories: ["abuse_or_danger_now", "self_harm"] }), QUIET_TEXT, "abuse", "Tonight"],
+      [flagged("crisis", { categories: ["medical_emergency"] }), QUIET_TEXT, "emergency", "Somewhere"],
+      [flagged("uncertain", { categories: ["harm_to_others"] }), QUIET_TEXT, "harm_others", "Before"],
+      [blocked(), QUIET_TEXT, "crisis", "Quiet"],
+      [null, "I am going to hurt someone. I cannot stop thinking about it.", "harm_others", "Morning"],
+      [null, PHRASE_TEXT, "crisis", "Evening"],
+    ];
+    for (const [index, [reply, text, help, first]] of cases.entries()) {
+      if (reply !== null) world.screenQueue.push(reply);
+      world.geminiQueue.push(
+        geminiOk(
+          heavyOutput({ devotional_text: devotionalStartingWith(first), affirmations: affirmationSet(index + 1) }),
+        ),
+      );
+      const clientEntryId = `${String(index + 1).repeat(8)}-0000-4000-8000-000000000000`;
+      const body = await ok(await post(world, handle, textBody({ clientEntryId, text })));
+      assertEquals(body.entry.helpLine, help, help);
+      assertEquals(world.entries.find((row) => row.id === body.entry.id)?.help_line, help);
+      // Sent again, the same line comes back.
+      assertEquals((await ok(await post(world, handle, textBody({ clientEntryId, text })))).entry.helpLine, help);
+    }
+    // The model's own flag on a reflection the screening called clear is the 988 line, and a clear one has none.
+    world.geminiQueue.push(
+      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Under"), affirmations: affirmationSet(7) })),
+    );
+    const own = await ok(
+      await post(world, handle, textBody({ clientEntryId: "99999999-0000-4000-8000-000000000000" })),
+    );
+    assertEquals(own.entry.helpLine, "crisis");
+    world.geminiQueue.push(geminiOk(readyOutput({ affirmations: affirmationSet(8) })));
+    const clear = await ok(
+      await post(world, handle, textBody({ clientEntryId: "aaaaaaaa-0000-4000-8000-000000000000" })),
+    );
+    assertEquals([clear.entry.isCrisis, clear.entry.helpLine], [false, null]);
+    assertEquals(world.entries.find((row) => row.id === clear.entry.id)?.help_line, null);
+    // No help line, category or phrase is in any log line.
+    for (const line of world.logs) {
+      for (const word of ["abuse", "harm_others", "emergency", "self_harm"]) assert(!String(line).includes(word), word);
+    }
+  }),
+);
+
+Deno.test(
+  "screen-v4: the help line the screening names is the one saved, and its kinds of concern choose only when it names none",
+  flow([], async (world) => {
+    const cases: [GeminiReply, string, string][] = [
+      // A parent afraid for their child: the kinds could read as someone in danger, the line the model names is 988.
+      [flagged("crisis", { categories: ["abuse_or_danger_now"], help_line: "crisis" }), "crisis", "Tonight"],
+      [flagged("uncertain", { categories: [], help_line: "abuse" }), "abuse", "Somewhere"],
+      // A line the app does not know is no line: the kinds choose.
+      [flagged("crisis", { categories: ["medical_emergency"], help_line: "pastor" }), "emergency", "Before"],
+    ];
+    for (const [index, [reply, help, first]] of cases.entries()) {
+      world.screenQueue.push(reply);
+      world.geminiQueue.push(
+        geminiOk(
+          heavyOutput({ devotional_text: devotionalStartingWith(first), affirmations: affirmationSet(index + 1) }),
+        ),
+      );
+      const clientEntryId = `${String(index + 1).repeat(8)}-0000-4000-8000-000000000000`;
+      const body = await ok(await post(world, handle, textBody({ clientEntryId, text: QUIET_TEXT })));
+      assertEquals(body.entry.helpLine, help, help);
+      assertEquals(world.entries.find((row) => row.id === body.entry.id)?.help_line, help);
+    }
+    for (const line of world.logs) {
+      for (const word of ["abuse", "emergency", "pastor"]) assert(!String(line).includes(word), word);
+    }
   }),
 );
 

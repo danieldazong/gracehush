@@ -46,6 +46,8 @@ deno.lock
 tts-audition/
 # Step 32: the tone evaluation's outputs (made-up entries, the reflections, the grades, three WAV files and the review sheet)
 tone-eval/
+# Step 38: Scholar's evaluation outputs (the made-up conversations' answers, their judgments and the readers' review pack)
+scholar-eval/
 *-service-account*.json
 gracehush-tts*.json
 

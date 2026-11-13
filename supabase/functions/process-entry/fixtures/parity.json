@@ -86,6 +86,7 @@
         "dominantEmotion": "anxious",
         "status": "ready",
         "isCrisis": false,
+        "helpLine": null,
         "scripture": {
           "reference": "Philippians 4:6–7",
           "text": null,
@@ -235,6 +236,7 @@
         "dominantEmotion": "anxious",
         "status": "ready",
         "isCrisis": false,
+        "helpLine": null,
         "scripture": {
           "reference": "Philippians 4:6–7",
           "text": "Do not be anxious about anything.",
@@ -334,6 +336,7 @@
         "dominantEmotion": null,
         "status": "ready",
         "isCrisis": true,
+        "helpLine": "crisis",
         "scripture": null,
         "devotional": null,
         "prayer": null,
@@ -387,6 +390,7 @@
         "dominantEmotion": null,
         "status": "failed",
         "isCrisis": false,
+        "helpLine": null,
         "scripture": null,
         "devotional": null,
         "prayer": null,
@@ -483,6 +487,7 @@
         "dominantEmotion": "anxious",
         "status": "ready",
         "isCrisis": false,
+        "helpLine": null,
         "scripture": {
           "reference": "Philippians 4:6–7",
           "text": null,
@@ -632,6 +637,7 @@
         "dominantEmotion": "anxious",
         "status": "ready",
         "isCrisis": false,
+        "helpLine": null,
         "scripture": {
           "reference": "Philippians 4:6–7",
           "text": null,
@@ -698,6 +704,7 @@
       "processing_status": "ready",
       "error_code": "SOMETHING_NEW",
       "is_crisis": false,
+      "help_line": "abuse",
       "dominant_emotion": "overwhelmed",
       "scripture_reference": "Philippians 4:6–7",
       "scripture_text": null,
@@ -743,6 +750,7 @@
         "dominantEmotion": "overwhelmed",
         "status": "ready",
         "isCrisis": false,
+        "helpLine": null,
         "scripture": {
           "reference": "Philippians 4:6–7",
           "text": null,
@@ -799,6 +807,7 @@
       "processing_status": "ready",
       "error_code": null,
       "is_crisis": true,
+      "help_line": "abuse",
       "dominant_emotion": "anxious",
       "scripture_reference": "Philippians 4:6–7",
       "scripture_text": "Do not be anxious about anything.",
@@ -872,6 +881,7 @@
         "dominantEmotion": "anxious",
         "status": "ready",
         "isCrisis": true,
+        "helpLine": "abuse",
         "scripture": {
           "reference": "Philippians 4:6–7",
           "text": "Do not be anxious about anything.",

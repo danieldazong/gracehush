@@ -51,6 +51,25 @@ export function openPhoneCall(number: string): Promise<LinkResult> {
   return openUrl(`tel:${number}`);
 }
 
+// A text message to a number, with its first word typed when the service asks for one (the National Domestic Violence Hotline's
+// START). The messages app opens with the text ready and sends nothing by itself. The body follows "&" on iOS and "?" on Android
+// (AGENTS.md, the vendor note on tel: and sms: links).
+export function openTextMessage(number: string, body: string | null = null): Promise<LinkResult> {
+  const prefill = body === null ? "" : `${Platform.OS === "ios" ? "&" : "?"}body=${encodeURIComponent(body)}`;
+  return openUrl(`sms:${number}${prefill}`);
+}
+
+// A web page in the in-app browser: the directory of help lines outside the US.
+export async function openWebPage(url: string): Promise<LinkResult> {
+  try {
+    await WebBrowser.openBrowserAsync(url);
+    return { ok: true };
+  } catch {
+    if (__DEV__) console.warn("[links] a web page could not be opened");
+    return { ok: false };
+  }
+}
+
 // No device details, no user id and no body: the person writes what they want to say.
 export function openSupportEmail(): Promise<LinkResult> {
   return openUrl(`mailto:${SUPPORT_EMAIL}?subject=GraceHush%20feedback`);

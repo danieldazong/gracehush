@@ -116,8 +116,13 @@ export interface Prayer {
 // What marking a prayer answered needs (step 14). `answeredDate` is a local calendar day, "YYYY-MM-DD".
 export type MarkAnsweredInput = { prayerId: string; answeredDate: string; note: string | null };
 
-// scripture, devotional and prayer are null for crisis, pending, uploading, processing and failed
-// entries. A crisis entry never has affirmations.
+// The help line a heavy moment shows (2026-11-11), chosen by the server's screening: the 988 line (crisis), the domestic
+// violence line with 911 (abuse), 988 with 911 (harm_others) or 911 first (emergency). Outside the US the app shows a helpline
+// directory and the local emergency number instead (src/utils/region.ts). Same as the server's copy (contractParity.ts).
+export type HelpKind = "crisis" | "abuse" | "harm_others" | "emergency";
+
+// scripture, devotional and prayer are null for pending, uploading, processing and failed entries, and for a heavy moment
+// saved before 2026-11-08, which holds only the person's words.
 export interface JournalEntry {
   id: string;
   clientEntryId: string | null;
@@ -128,6 +133,8 @@ export interface JournalEntry {
   dominantEmotion: string | null; // raw lowercase AI string; null for crisis and unfinished entries
   status: ProcessingStatus;
   isCrisis: boolean;
+  // The help line under a heavy moment: null for every other entry ("crisis" for one saved before 2026-11-11).
+  helpLine: HelpKind | null;
   scripture: Scripture | null;
   devotional: Devotional | null;
   prayer: Prayer | null;
@@ -320,6 +327,109 @@ export type DeleteAccountErrorCode =
   | "INTERNAL";
 export interface DeleteAccountError {
   error: { code: DeleteAccountErrorCode; message: string; requestId: string };
+}
+
+// ---- Scholar (step 38): scholar-turn and scholar-speak --------------------------------------------------------------------
+// The app's copy of the server's contract (supabase/functions/process-entry/contracts.ts); src/types/contractParity.ts makes any
+// difference between the two a type error.
+
+// A typed message's words, or a spoken message's length (its recording is read from storage, never sent in a body).
+export type ScholarInput = { type: "text"; text: string } | { type: "audio"; durationMs: number };
+
+export type ScholarTurnRequest = {
+  conversationId: string; // a lowercase UUID v4 made on the phone
+  messageId: string; // the same, one per message; a retry reuses it
+  input: ScholarInput;
+  entryId?: string; // only when the conversation is opened from a reflection
+  region?: string; // the phone's region, two capital letters ("US"); the US when missing. Chooses the emergency number.
+};
+
+// An answer's blocks, in the order they are drawn: the lead passage, the text, the supporting passage, the prayer.
+export type ScholarBlock =
+  | { type: "text"; text: string } // paragraphs separated by a blank line
+  | { type: "passage"; scripture: Scripture } // always verified, translation "BSB"
+  | { type: "prayer"; text: string }; // without "Amen": the app adds it
+
+export type ScholarRole = "user" | "scholar";
+export type ScholarMessageStatus = "pending" | "ready" | "failed";
+
+export interface ScholarMessage {
+  id: string;
+  conversationId: string;
+  role: ScholarRole;
+  replyTo: string | null;
+  inputType: "text" | "audio" | null;
+  status: ScholarMessageStatus;
+  errorCode: string | null;
+  blocks: ScholarBlock[];
+  isHeavy: boolean;
+  // The help line under an answer to a flagged message and under the written fallback; null otherwise.
+  helpLine: HelpKind | null;
+  createdAt: string;
+}
+
+export interface ScholarConversation {
+  id: string;
+  entryId: string | null;
+  title: string | null;
+  isHeavy: boolean;
+  lastMessageAt: string;
+  createdAt: string;
+}
+
+export type ScholarUsageKind = "free_day" | "pro_day" | "listen_day" | "listen_plan";
+
+export interface ScholarUsage {
+  kind: ScholarUsageKind;
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsAt: string | null;
+}
+
+export type ScholarTurnResponse = {
+  conversation: ScholarConversation;
+  message: ScholarMessage; // the person's, with the transcript for a spoken one
+  answer: ScholarMessage; // role "scholar"
+  usage: ScholarUsage | null; // null in a heavy conversation
+};
+
+export type ScholarTurnErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "LIMIT_REACHED"
+  | "NOT_FOUND"
+  | "METHOD_NOT_ALLOWED"
+  | "ALREADY_PROCESSING"
+  | "PAYLOAD_TOO_LARGE"
+  | "AUDIO_NOT_FOUND"
+  | "NO_SPEECH"
+  | "RATE_LIMITED"
+  | "AI_UNAVAILABLE"
+  | "SCHOLAR_UNAVAILABLE"
+  | "SCHOLAR_ADULTS_ONLY"
+  | "INTERNAL";
+export interface ScholarTurnError {
+  error: { code: ScholarTurnErrorCode; message: string; requestId: string };
+}
+// The 402 (after a clear screening only): the day's numbers beside `error`.
+export interface ScholarLimitError {
+  error: { code: "LIMIT_REACHED"; message: string; requestId: string };
+  usage: ScholarUsage;
+}
+
+export type ScholarSpeakRequest = { messageId: string; part: number; region?: string };
+export type ScholarSpeakResponse = { part: number; parts: number; audioBase64: string; durationMs: number };
+export type ScholarSpeakErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "LIMIT_REACHED"
+  | "NOT_FOUND"
+  | "METHOD_NOT_ALLOWED"
+  | "AI_UNAVAILABLE"
+  | "INTERNAL";
+export interface ScholarSpeakError {
+  error: { code: ScholarSpeakErrorCode; message: string; requestId: string };
 }
 
 // New Entry (step 10). Step 23 swapped the mock recorder for the real one without changing these; step 24 moved the submit to the

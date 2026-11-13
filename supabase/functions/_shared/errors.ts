@@ -6,7 +6,10 @@
 // being made). sync-subscription (step 30) answers NOT_FOUND for a caller with no profile and BILLING_UNAVAILABLE when
 // RevenueCat cannot be read. delete-account (step 31) answers DELETE_INCOMPLETE when a step of the deletion failed: what was done
 // stays done, and the same request sent again continues. add-affirmation (2026-11-09) answers AFFIRMATION_LIMIT (409) for a
-// reflection that already has all ten affirmations.
+// reflection that already has all ten affirmations. scholar-turn (step 38) answers SCHOLAR_UNAVAILABLE (503) while the server's
+// switch is off or the free daily budget is used up; never for a flagged message or in a heavy conversation. It answers
+// SCHOLAR_ADULTS_ONLY (403, 2026-11-11) for a clear message from an account Scholar was closed for, after the person said they are
+// under 18; a message that shows danger is still answered, with full care.
 
 export type ErrorCode =
   | "INVALID_REQUEST"
@@ -24,7 +27,9 @@ export type ErrorCode =
   | "AI_UNAVAILABLE"
   | "BILLING_UNAVAILABLE"
   | "DELETE_INCOMPLETE"
-  | "AFFIRMATION_LIMIT";
+  | "AFFIRMATION_LIMIT"
+  | "SCHOLAR_UNAVAILABLE"
+  | "SCHOLAR_ADULTS_ONLY";
 
 export const STATUS_BY_CODE: Record<ErrorCode, number> = {
   INVALID_REQUEST: 400,
@@ -43,6 +48,8 @@ export const STATUS_BY_CODE: Record<ErrorCode, number> = {
   BILLING_UNAVAILABLE: 503,
   DELETE_INCOMPLETE: 500,
   AFFIRMATION_LIMIT: 409,
+  SCHOLAR_UNAVAILABLE: 503,
+  SCHOLAR_ADULTS_ONLY: 403,
 };
 
 // The only text a response ever carries about a failure: calm, user-safe, and never built from a provider's words.
@@ -64,6 +71,9 @@ export const MESSAGE_BY_CODE: Record<ErrorCode, string> = {
   BILLING_UNAVAILABLE: "We couldn’t check your subscription right now. Please try again in a moment.",
   DELETE_INCOMPLETE: "We couldn’t finish deleting your account. Please try again.",
   AFFIRMATION_LIMIT: "This reflection already has all ten affirmations.",
+  SCHOLAR_UNAVAILABLE: "Scholar is resting right now. Please try again later.",
+  SCHOLAR_ADULTS_ONLY:
+    "Scholar is for adults, so it isn’t available on this account. If you think this is a mistake, write to support@nouvrix.com.",
 };
 
 export class AppError extends Error {

@@ -70,8 +70,59 @@ Deno.test(
   "collect: a person with no profile row and no entries reads as nothing, after one request per table",
   flow(async (world) => {
     const data = await collectUserData(createAdmin(), USER);
-    assertEquals(data, { profile: null, entries: [] });
-    assertEquals(world.requests.length, 3);
+    assertEquals(data, { profile: null, entries: [], conversations: [] });
+    assertEquals(world.requests.length, 5);
+  }),
+);
+
+Deno.test(
+  "collect: the person's Scholar conversations oldest first, each with its messages in order, and nobody else's",
+  flow(async (world) => {
+    world.seedUser(USER);
+    world.seedUser("user_other");
+    const conversation = (userId: string) => {
+      const id = crypto.randomUUID();
+      world.conversations.push({
+        id,
+        user_id: userId,
+        entry_id: null,
+        title: null,
+        is_heavy: false,
+        last_message_at: world.now(),
+        created_at: world.now(),
+      });
+      return id;
+    };
+    const message = (userId: string, conversationId: string, text: string) =>
+      world.messages.push({
+        id: crypto.randomUUID(),
+        conversation_id: conversationId,
+        user_id: userId,
+        role: "user",
+        reply_to: null,
+        input_type: "text",
+        status: "ready",
+        error_code: null,
+        content: { blocks: [{ type: "text", text }] },
+        is_heavy: false,
+        claimed_at: null,
+        created_at: world.now(),
+      });
+    const first = conversation(USER);
+    const second = conversation(USER);
+    const theirs = conversation("user_other");
+    message(USER, second, "Second, first message.");
+    message(USER, first, "First, first message.");
+    message("user_other", theirs, "Not yours.");
+    message(USER, first, "First, second message.");
+
+    const data = await collectUserData(createAdmin(), USER);
+    assertEquals(data.conversations.map((row) => row.id), [first, second]);
+    const texts = (index: number) =>
+      data.conversations[index].messages.map((row) => (row.content as { blocks: { text: string }[] }).blocks[0].text);
+    assertEquals(texts(0), ["First, first message.", "First, second message."]);
+    assertEquals(texts(1), ["Second, first message."]);
+    assertEquals(unscopedRequests(world, USER), []);
   }),
 );
 

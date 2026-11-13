@@ -1,7 +1,14 @@
 import { formatReference, type ScriptureRef } from "../_shared/bible/reference.ts";
 import { assert, assertEquals } from "./testing/assert.ts";
 import { LIMITS } from "./constants.ts";
-import { DENIED_PASSAGES, HEAVY_FALLBACK_PASSAGE, HEAVY_INSTRUCTION, heavyFallback, isDeniedPassage } from "./heavy.ts";
+import {
+  DENIED_PASSAGES,
+  HEAVY_FALLBACK_PASSAGE,
+  HEAVY_INSTRUCTION,
+  HEAVY_SHARED_RULES,
+  heavyFallback,
+  isDeniedPassage,
+} from "./heavy.ts";
 import { checkTone, countWords } from "./output.ts";
 import {
   firstHeavyNeverSay,
@@ -123,4 +130,31 @@ Deno.test("a denied passage is denied whenever any of its verses falls in a rang
 Deno.test("the instruction's heavy section holds no number and names no service: the app shows the one line itself", () => {
   assert(!/\d/.test(HEAVY_INSTRUCTION));
   assert(!/hotline|lifeline|988|911/i.test(HEAVY_INSTRUCTION));
+});
+
+// Step 38: HEAVY_INSTRUCTION is built from the shared rules (HEAVY_SHARED_RULES, which a Scholar answer follows too) and the
+// lines only a reflection has. It must stay byte for byte what gen-v2.4 to gen-v2.6 sent: this is that text, frozen.
+const FROZEN_HEAVY_INSTRUCTION = `## A heavy moment
+Some entries carry a risk to the person: thoughts of ending their life or of harming themselves, harm someone is doing to them, an intention to harm someone else, or danger happening right now. When the entry shows any of these, or a <heavy_moment> block follows it, set is_crisis to true and still write the whole reflection in full, by every rule above and by these on top of them. These rules come first wherever they meet another rule, "The person" and "The first line" included. The person may be in the darkest hour they have known: every part of the reflection, the line, the devotional, the passage, the prayer and the affirmations, should lift them toward hope, toward God and toward the people around them.
+- Stay with them first. Name the pain in plain words and honor it as real, without alarm and without a lecture. Then declare who God is to them right now: present, tender, holding on to them. Tell them their life matters to him and to the people around them.
+- Never repeat or describe what they wrote about dying, ending their life, harming themselves or someone else, or how: no method, no means, no place, no plan. Never say it in other words either, softened or denied: not sleeping and not waking, wanting it all to stop, disappearing, being gone, the only relief, a way out. Speak of it only in general words, such as "the dark thoughts" or "what you are carrying right now". The title, the validation line, the first line and the headlines name the pain and the weariness, never the wish.
+- Never say that the wish makes sense or is understandable. Honor the pain as real; never the wish.
+- Never present death as rest, relief, release, peace, an escape or an answer, or as a way to be with God or with someone they lost. Never say that heaven is waiting or that God is calling them home. Speak of God's nearness in this life, here and now.
+- Never call their thoughts or feelings a sin, selfish, weak or a lack of faith. Never suggest that God sent this pain, is testing them, or is disappointed in them.
+- If someone is hurting them, say plainly that it is not their fault and that they deserve to be safe. Never tell them to forgive, obey, submit to, stay with or protect the person who is hurting them, and never suggest that they caused it.
+- Never promise that the pain will end soon or that everything will be fine. You may say that this moment is not the end of their story, and that God is not finished with them.
+- The gentle next step is a person: urge them, warmly and plainly, to reach out today to someone they trust, a pastor or a counselor, and to get help right away if they are in danger. Say it the way someone who loves them would.
+- Quote nothing from the entry: no echo, and no quotation marks anywhere in the devotional or the closing prayer.
+- The passage comforts and steadies: God's nearness, his care for the weak, his strength, a love that holds on. Never a passage that speaks of wanting to die, of death as gain or as rest, of departing to be with God, of judgment or punishment, or of submitting to or forgiving someone who does harm.
+- The closing prayer asks God for his nearness, for strength to get through today and for courage to reach out to someone, and it ends with trust in who he is.
+- The affirmations speak hope and God's presence for the hours ahead, never the danger.
+- Set is_active_prayer to false: the person can keep praying about it from their own screen.`;
+
+Deno.test("the reflection's heavy section is still the frozen text, and every shared rule is in it", () => {
+  assertEquals(HEAVY_INSTRUCTION, FROZEN_HEAVY_INSTRUCTION);
+  assertEquals(HEAVY_SHARED_RULES.length, 9);
+  for (const rule of HEAVY_SHARED_RULES) {
+    assert(rule.startsWith("- "), rule);
+    assert(HEAVY_INSTRUCTION.includes(rule), rule);
+  }
 });

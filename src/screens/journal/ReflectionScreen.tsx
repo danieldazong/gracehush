@@ -233,7 +233,7 @@ type ReadyViewProps = {
 // A finished entry with a devotional. The screen keys it by the entry and the tab it was opened on, so another
 // entry starts from its own prayer toggle, tab and expanded state, and a tapped notification for the reflection
 // that is already open turns it to Affirmations (step 28). A heavy moment (2026-11-08) is shown like any other, with
-// one quiet line under its devotional (HelpLine).
+// one quiet line under its devotional (HelpLine), for the help line saved with it (2026-11-11).
 function ReadyView({
   entry,
   devotional,
@@ -308,7 +308,7 @@ function ReadyView({
       </FadeIn>
       {entry.isCrisis ? (
         <FadeIn {...arrive(3)}>
-          <HelpLine />
+          <HelpLine kind={entry.helpLine} />
         </FadeIn>
       ) : null}
       {transcript ? (

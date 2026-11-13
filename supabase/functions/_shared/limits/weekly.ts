@@ -109,6 +109,40 @@ export function weekWindow(now: Date, timeZone: string, weekStartsOn: number = W
   };
 }
 
+// ---- Scholar's day (step 38) ----------------------------------------------------------------------------------------------
+
+// The calendar day of the person's time zone that holds `now`: from its 00:00 (or the first instant of the day where the
+// clocks jumped over midnight) to the next day's, and the day itself as YYYY-MM-DD, the key of a usage row. The same zone
+// handling as weekWindow: a zone that Intl does not know is read as UTC, with a flag. A day is not always 24 hours long.
+export type DayWindow = {
+  start: Date; // the first instant of the day, inclusive
+  end: Date; // the first instant of the next day: when a daily limit resets
+  day: string; // YYYY-MM-DD on the zone's calendar
+  zone: string; // the zone that was used
+  zoneFallback: boolean; // true when the zone was not valid and UTC was used instead
+};
+
+export function dayWindow(now: Date, timeZone: string): DayWindow {
+  let zone = timeZone;
+  let zoneFallback = false;
+  try {
+    formatter(zone);
+  } catch {
+    zone = "UTC";
+    zoneFallback = true;
+  }
+  const here = wall(now.getTime(), zone);
+  const next = addDays(here.year, here.month, here.day, 1);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return {
+    start: new Date(startOfDay(here.year, here.month, here.day, zone)),
+    end: new Date(startOfDay(next.year, next.month, next.day, zone)),
+    day: `${here.year}-${pad(here.month)}-${pad(here.day)}`,
+    zone,
+    zoneFallback,
+  };
+}
+
 // ---- The check itself (step 22) ----------------------------------------------------------------------------------------
 
 export type LimitProfile = { tier: "free" | "trial" | "pro"; timezone: string };

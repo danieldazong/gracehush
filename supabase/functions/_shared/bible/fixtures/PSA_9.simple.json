@@ -1,0 +1,403 @@
+{
+  "translation": {
+    "id": "BSB"
+  },
+  "book": {
+    "id": "PSA"
+  },
+  "numberOfVerses": 20,
+  "chapter": {
+    "number": 9,
+    "content": [
+      {
+        "type": "heading",
+        "text": "I Will Give Thanks to the LORD"
+      },
+      {
+        "type": "hebrew_subtitle",
+        "text": "For the choirmaster. To the tune of “The Death of the Son.” A Psalm of David."
+      },
+      {
+        "type": "line_break"
+      },
+      {
+        "type": "verse",
+        "number": 1,
+        "text": "I will give thanks to the LORD with all my heart;\nI will recount all Your wonders.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 49,
+            "level": 1
+          },
+          {
+            "start": 50,
+            "end": 82,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 2,
+        "text": "I will be glad and rejoice in You;\nI will sing praise to Your name, O Most High.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 34,
+            "level": 1
+          },
+          {
+            "start": 35,
+            "end": 80,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "line_break"
+      },
+      {
+        "type": "verse",
+        "number": 3,
+        "text": "When my enemies retreat,\nthey stumble and perish before You.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 24,
+            "level": 1
+          },
+          {
+            "start": 25,
+            "end": 60,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 4,
+        "text": "For You have upheld my just cause;\nYou sit on Your throne judging righteously.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 34,
+            "level": 1
+          },
+          {
+            "start": 35,
+            "end": 78,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 5,
+        "text": "You have rebuked the nations;\nYou have destroyed the wicked;\nYou have erased their name forever and ever.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 29,
+            "level": 1
+          },
+          {
+            "start": 30,
+            "end": 60,
+            "level": 2
+          },
+          {
+            "start": 61,
+            "end": 105,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 6,
+        "text": "The enemy has come to eternal ruin,\nand You have uprooted their cities;\nthe very memory of them has vanished.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 35,
+            "level": 1
+          },
+          {
+            "start": 36,
+            "end": 71,
+            "level": 2
+          },
+          {
+            "start": 72,
+            "end": 109,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "line_break"
+      },
+      {
+        "type": "verse",
+        "number": 7,
+        "text": "But the LORD abides forever;\nHe has established His throne for judgment.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 28,
+            "level": 1
+          },
+          {
+            "start": 29,
+            "end": 72,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 8,
+        "text": "He judges the world with justice;\nHe governs the people with equity.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 33,
+            "level": 1
+          },
+          {
+            "start": 34,
+            "end": 68,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 9,
+        "text": "The LORD is a refuge for the oppressed,\na stronghold in times of trouble.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 39,
+            "level": 1
+          },
+          {
+            "start": 40,
+            "end": 73,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 10,
+        "text": "Those who know Your name trust in You,\nfor You, O LORD, have not forsaken those who seek You.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 38,
+            "level": 1
+          },
+          {
+            "start": 39,
+            "end": 93,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "line_break"
+      },
+      {
+        "type": "verse",
+        "number": 11,
+        "text": "Sing praises to the LORD, who dwells in Zion;\nproclaim His deeds among the nations.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 45,
+            "level": 1
+          },
+          {
+            "start": 46,
+            "end": 83,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 12,
+        "text": "For the Avenger of bloodshed remembers;\nHe does not ignore the cry of the afflicted.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 39,
+            "level": 1
+          },
+          {
+            "start": 40,
+            "end": 84,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "line_break"
+      },
+      {
+        "type": "verse",
+        "number": 13,
+        "text": "Be merciful to me, O LORD;\nsee how my enemies afflict me!\nLift me up from the gates of death,",
+        "poem": [
+          {
+            "start": 0,
+            "end": 26,
+            "level": 1
+          },
+          {
+            "start": 27,
+            "end": 57,
+            "level": 2
+          },
+          {
+            "start": 58,
+            "end": 93,
+            "level": 1
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 14,
+        "text": "that I may declare all Your praises—\nthat within the gates of Daughter Zion\nI may rejoice in Your salvation.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 36,
+            "level": 2
+          },
+          {
+            "start": 37,
+            "end": 75,
+            "level": 1
+          },
+          {
+            "start": 76,
+            "end": 108,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "line_break"
+      },
+      {
+        "type": "verse",
+        "number": 15,
+        "text": "The nations have fallen into a pit of their making;\ntheir feet are caught in the net they have hidden.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 51,
+            "level": 1
+          },
+          {
+            "start": 52,
+            "end": 102,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 16,
+        "text": "The LORD is known by the justice He brings;\nthe wicked are ensnared by the work of their hands.Higgaion Selah",
+        "poem": [
+          {
+            "start": 0,
+            "end": 43,
+            "level": 1
+          },
+          {
+            "start": 44,
+            "end": 95,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 17,
+        "text": "The wicked will return to Sheol—\nall the nations who forget God.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 32,
+            "level": 1
+          },
+          {
+            "start": 33,
+            "end": 64,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 18,
+        "text": "For the needy will not always be forgotten;\nnor the hope of the oppressed forever dashed.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 43,
+            "level": 1
+          },
+          {
+            "start": 44,
+            "end": 89,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "line_break"
+      },
+      {
+        "type": "verse",
+        "number": 19,
+        "text": "Rise up, O LORD, do not let man prevail;\nlet the nations be judged in Your presence.",
+        "poem": [
+          {
+            "start": 0,
+            "end": 40,
+            "level": 1
+          },
+          {
+            "start": 41,
+            "end": 84,
+            "level": 2
+          }
+        ]
+      },
+      {
+        "type": "verse",
+        "number": 20,
+        "text": "Lay terror upon them, O LORD;\nlet the nations know they are but men.Selah",
+        "poem": [
+          {
+            "start": 0,
+            "end": 29,
+            "level": 1
+          },
+          {
+            "start": 30,
+            "end": 68,
+            "level": 2
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -40,6 +40,7 @@ function entryRow(id: string, createdAt: Date, fields: Partial<JournalEntryRow>)
     processing_status: "ready",
     error_code: null,
     is_crisis: false,
+    help_line: null,
     audio_path: null,
     devotional_audio_path: null,
     devotional_duration_ms: null,

@@ -18,8 +18,8 @@ export function rawAudioPath(userId: string, clientEntryId: string): string {
   return `${userId}/raw/${clientEntryId}.m4a`;
 }
 
-// Reads at most MAX_BODY_BYTES, so a huge or endless body never sits in memory.
-async function readLimited(req: Request): Promise<string> {
+// Reads at most `maxBytes` (MAX_BODY_BYTES unless a caller asks for less), so a huge or endless body never sits in memory.
+async function readLimited(req: Request, maxBytes: number): Promise<string> {
   if (!req.body) return "";
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -28,7 +28,7 @@ async function readLimited(req: Request): Promise<string> {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_BODY_BYTES) {
+    if (total > maxBytes) {
       await reader.cancel();
       throw new AppError("PAYLOAD_TOO_LARGE", "body_size");
     }
@@ -43,12 +43,13 @@ async function readLimited(req: Request): Promise<string> {
   return new TextDecoder().decode(bytes);
 }
 
-export async function readJsonBody(req: Request): Promise<unknown> {
+// Scholar (step 38) reads its smaller bodies with the same reader and a lower limit.
+export async function readJsonBody(req: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   const contentType = req.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("application/json")) throw new AppError("INVALID_REQUEST", "content_type");
   const declared = Number(req.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) throw new AppError("PAYLOAD_TOO_LARGE", "body_size");
-  const text = await readLimited(req);
+  if (Number.isFinite(declared) && declared > maxBytes) throw new AppError("PAYLOAD_TOO_LARGE", "body_size");
+  const text = await readLimited(req, maxBytes);
   try {
     return JSON.parse(text);
   } catch {

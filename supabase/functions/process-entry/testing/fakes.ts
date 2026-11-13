@@ -124,6 +124,8 @@ const ENTRY_DEFAULTS = (): Row => ({
   prayer_summary: null,
   // Step 36: the sentence the Reflection screen shows first.
   validation_line: null,
+  // 2026-11-11 (migration 13): the help line a heavy moment shows, one of four words, null on every other entry.
+  help_line: null,
 });
 
 const COLUMNS: Record<string, string[]> = {
@@ -134,6 +136,8 @@ const COLUMNS: Record<string, string[]> = {
     "timezone",
     "subscription_expires_at",
     "subscription_synced_at",
+    // 2026-11-11 (migration 13): when Scholar was closed for an account that said it is under 18. Only the server writes it.
+    "scholar_closed_at",
   ],
   journal_entries: ["id", "user_id", "created_at", "updated_at", ...Object.keys(ENTRY_DEFAULTS())],
   daily_affirmations: [
@@ -154,7 +158,39 @@ const COLUMNS: Record<string, string[]> = {
     "position",
   ],
   deleted_devotionals: ["entry_id", "user_id", "made_at", "deleted_at"],
+  // Step 38 (supabase/migrations/20261111120000_scholar_conversations.sql).
+  scholar_conversations: ["id", "user_id", "entry_id", "title", "is_heavy", "last_message_at", "created_at"],
+  scholar_messages: [
+    "id",
+    "conversation_id",
+    "user_id",
+    "role",
+    "reply_to",
+    "input_type",
+    "status",
+    "error_code",
+    "content",
+    "is_heavy",
+    "claimed_at",
+    "created_at",
+  ],
+  scholar_usage: ["user_id", "day", "messages", "listens"],
+  scholar_safety_daily: [
+    "day",
+    "screened",
+    "flagged_phrase",
+    "flagged_model",
+    "flagged_uncertain",
+    "flagged_blocked",
+    "flagged_writer",
+    "fallbacks",
+    "screen_failed",
+    "free_answered",
+  ],
 };
+
+// Step 38: the nine anonymous counters of scholar_safety_daily (bump_scholar_safety takes only these names).
+export const SAFETY_COUNTERS = COLUMNS.scholar_safety_daily.filter((column) => column !== "day");
 
 const CATEGORIES = [
   "FAMILY & HEALING",
@@ -185,8 +221,12 @@ export type World = {
   // is about.
   screenCalls: Recorded[];
   screenQueue: GeminiReply[];
-  // Every model request in the order it was made: "screening" or "reflection" (a replacement passage is a reflection).
-  callOrder: ("screening" | "reflection")[];
+  // Scholar's judge (2026-11-11), told apart by the `addressed` in its schema. When judgeQueue is empty it answers that the
+  // answer responded to what was asked, so a test only queues a judgment it is about.
+  judgeCalls: Recorded[];
+  judgeQueue: GeminiReply[];
+  // Every model request in the order it was made: "screening", "judge" or "reflection" (a replacement passage is a reflection).
+  callOrder: ("screening" | "reflection" | "judge")[];
   bible: Map<string, BibleReply>;
   bibleCalls: Recorded[];
   // Google, for the speech step (step 22). A token request is answered with a fresh token ("ya29.test-1", "-2"...) unless
@@ -217,6 +257,8 @@ export type World = {
     profileDelete: number;
     rowsRead: number;
     recentRead: number;
+    // Step 38: a call of either Scholar counter that fails.
+    bump: number;
   };
   // RevenueCat (step 30): GET /v1/subscribers/{id} with a secret key. A queued reply answers first; otherwise the customer
   // stored here for that app user id (200), or, as the real API does for an id it has never seen, a new empty customer (201).
@@ -249,6 +291,17 @@ export type World = {
   appleRevokeCalls: Recorded[];
   appleRevokeQueue: GeminiReply[];
   appleRevoked: string[];
+  // Scholar (step 38): the four tables (conversations, messages, a person's day of usage, the anonymous day of counts), every
+  // call of the two counters (rpcCalls), when each journal_media file was made (storageTimes; MEDIA_CREATED_AT otherwise), and
+  // beforeReply, which runs once when a writer's request (not a screening) reaches Gemini, so a test can change the world while
+  // the reply is being written.
+  conversations: Row[];
+  messages: Row[];
+  scholarUsage: Row[];
+  safetyDaily: Row[];
+  rpcCalls: { name: string; args: Row }[];
+  storageTimes: Map<string, string>;
+  beforeReply: (() => void) | null;
   // False makes deleting a profile leave its entries, affirmations and records behind: a cascade that did not happen.
   cascade: boolean;
   logs: string[];
@@ -275,7 +328,8 @@ function jsonResponse(status: number, body: unknown, headers: HeadersInit = {}):
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
 }
 
-function check(table: string, row: Row, world: World): void {
+// `inserting` is false for an update, whose row keeps its own id (the primary keys are checked on insert only).
+function check(table: string, row: Row, world: World, inserting = true): void {
   const fail = (code: string, message: string): never => {
     throw new PgError(code === "23505" || code === "23503" ? 409 : 400, code, message);
   };
@@ -295,6 +349,12 @@ function check(table: string, row: Row, world: World): void {
     if (typeof row.validation_line === "string" && row.validation_line.length > 240) {
       fail("23514", "validation_line_length");
     }
+    // Migration 13 (2026-11-11): one of four words, and only on a heavy moment.
+    const helpLine = row.help_line ?? null;
+    if (helpLine !== null && !["crisis", "abuse", "harm_others", "emergency"].includes(String(helpLine))) {
+      fail("23514", "help_line_kind");
+    }
+    if (helpLine !== null && row.is_crisis !== true) fail("23514", "help_line_crisis");
     if (row.is_answered !== (row.answered_at !== null)) fail("23514", "answered_fields_match");
     if (row.scripture_verified === true && (row.scripture_reference === null || row.scripture_text === null)) {
       fail("23514", "scripture_verified_check");
@@ -340,6 +400,50 @@ function check(table: string, row: Row, world: World): void {
       (verse.length === 0 || verse.length > 200 || String(reference).length === 0 || String(reference).length > 60)
     ) {
       fail("23514", "affirmation_verse_length");
+    }
+  }
+  if (table === "scholar_conversations") {
+    if (!world.users.some((user) => user.id === row.user_id)) fail("23503", "scholar_conversations_user_id_fkey");
+    if (inserting && world.conversations.some((other) => other.id === row.id)) {
+      fail("23505", "scholar_conversations_pkey");
+    }
+    if (row.entry_id !== null) {
+      const entry = world.entries.find((candidate) =>
+        candidate.id === row.entry_id && candidate.user_id === row.user_id
+      );
+      if (!entry) fail("23503", "scholar_conversations_entry_user_fkey");
+      const clash = world.conversations.some((other) =>
+        other !== row && other.id !== row.id && other.user_id === row.user_id && other.entry_id === row.entry_id
+      );
+      if (clash) fail("23505", "scholar_conversations_user_entry_key");
+    }
+    if (row.title !== null && (typeof row.title !== "string" || row.title.length < 1 || row.title.length > 60)) {
+      fail("23514", "scholar_conversations_title_length");
+    }
+  }
+  if (table === "scholar_messages") {
+    if (inserting && world.messages.some((other) => other.id === row.id)) fail("23505", "scholar_messages_pkey");
+    if (!["user", "scholar"].includes(String(row.role))) fail("23514", "scholar_messages_role_check");
+    if (!["pending", "ready", "failed"].includes(String(row.status))) fail("23514", "scholar_messages_status_check");
+    if (row.input_type !== null && !["text", "audio"].includes(String(row.input_type))) {
+      fail("23514", "scholar_messages_input_type_check");
+    }
+    if ((row.role === "scholar") !== (row.reply_to !== null)) fail("23514", "scholar_messages_reply_shape");
+    if (row.content !== null && new TextEncoder().encode(JSON.stringify(row.content)).length > 16_384) {
+      fail("23514", "scholar_messages_content_size");
+    }
+    const conversation = world.conversations.find((candidate) =>
+      candidate.id === row.conversation_id && candidate.user_id === row.user_id
+    );
+    if (!conversation) fail("23503", "scholar_messages_conversation_user_fkey");
+    if (row.reply_to !== null) {
+      if (!world.messages.some((candidate) => candidate.id === row.reply_to)) {
+        fail("23503", "scholar_messages_reply_to_fkey");
+      }
+      const answered = world.messages.some((other) =>
+        other !== row && other.id !== row.id && other.reply_to === row.reply_to
+      );
+      if (answered) fail("23505", "scholar_messages_reply_to_key");
     }
   }
   if (table === "deleted_devotionals") {
@@ -426,6 +530,64 @@ function featureAffirmation(world: World, request: Recorded): Response {
   return new Response(null, { status: 204 });
 }
 
+// Step 38: deleting conversations takes their messages with them (each message's composite key, on delete cascade).
+function dropConversations(world: World, conversations: Row[]): void {
+  const gone = new Set(conversations.map((row) => row.id));
+  world.conversations.splice(0, world.conversations.length, ...world.conversations.filter((row) => !gone.has(row.id)));
+  world.messages.splice(0, world.messages.length, ...world.messages.filter((row) => !gone.has(row.conversation_id)));
+}
+
+// An answer goes with the question it answers (reply_to, on delete cascade).
+function dropAnswers(world: World, messages: Row[]): void {
+  const gone = new Set(messages.map((row) => row.id));
+  world.messages.splice(0, world.messages.length, ...world.messages.filter((row) => !gone.has(row.reply_to)));
+}
+
+// The migration's two counters (step 38), as PostgREST serves an RPC: bump_scholar_usage adds to a person's day (making it), and
+// bump_scholar_safety adds 1 to one of the nine counters of a UTC day; anything else is 22023, with nothing changed.
+function bumpCounter(world: World, name: string, request: Recorded): Response {
+  if (request.method !== "POST") throw new PgError(405, "PGRST105", "method not allowed");
+  const args = (request.json ?? {}) as Row;
+  world.rpcCalls.push({ name, args: { ...args } });
+  if (world.fail.bump > 0) {
+    world.fail.bump -= 1;
+    throw new PgError(500, "XX000", "the counter could not be written");
+  }
+  const day = String(args.p_day ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new PgError(400, "22007", "invalid date");
+  if (name === "bump_scholar_usage") {
+    const messages = args.p_messages;
+    const listens = args.p_listens;
+    if (
+      typeof messages !== "number" || typeof listens !== "number" || !Number.isInteger(messages) ||
+      !Number.isInteger(listens) || messages < 0 || listens < 0
+    ) {
+      throw new PgError(400, "22023", "counts are 0 or more");
+    }
+    const user = String(args.p_user ?? "");
+    if (!world.users.some((row) => row.id === user)) throw new PgError(409, "23503", "scholar_usage_user_id_fkey");
+    let row = world.scholarUsage.find((candidate) => candidate.user_id === user && candidate.day === day);
+    if (!row) {
+      row = { user_id: user, day, messages: 0, listens: 0 };
+      world.scholarUsage.push(row);
+    }
+    row.messages = Number(row.messages) + messages;
+    row.listens = Number(row.listens) + listens;
+    return new Response(null, { status: 204 });
+  }
+  const counter = String(args.p_counter ?? "");
+  if (!SAFETY_COUNTERS.includes(counter)) throw new PgError(400, "22023", "unknown counter");
+  let row: Row | undefined = world.safetyDaily.find((candidate) => candidate.day === day);
+  if (row === undefined) {
+    const made: Row = { day };
+    for (const column of SAFETY_COUNTERS) made[column] = 0;
+    world.safetyDaily.push(made);
+    row = made;
+  }
+  row[counter] = Number(row[counter]) + 1;
+  return new Response(null, { status: 204 });
+}
+
 function prefer(request: Recorded): Set<string> {
   return new Set((request.headers.get("prefer") ?? "").split(",").map((part) => part.trim()).filter(Boolean));
 }
@@ -439,6 +601,14 @@ function rest(world: World, table: string, request: Recorded): Response {
     ? world.entries
     : table === "deleted_devotionals"
     ? world.deletedDevotionals
+    : table === "scholar_conversations"
+    ? world.conversations
+    : table === "scholar_messages"
+    ? world.messages
+    : table === "scholar_usage"
+    ? world.scholarUsage
+    : table === "scholar_safety_daily"
+    ? world.safetyDaily
     : world.affirmations;
   const filters = filtersOf(request.url);
   const wants = prefer(request);
@@ -513,12 +683,29 @@ function rest(world: World, table: string, request: Recorded): Response {
           timezone: "UTC",
           subscription_expires_at: null,
           subscription_synced_at: null,
+          scholar_closed_at: null,
           ...record,
         };
       } else if (table === "journal_entries") {
         row = { id: crypto.randomUUID(), created_at: now, updated_at: now, ...ENTRY_DEFAULTS(), ...record };
       } else if (table === "deleted_devotionals") {
         row = { deleted_at: now, ...record };
+      } else if (table === "scholar_conversations") {
+        row = { entry_id: null, title: null, is_heavy: false, last_message_at: now, created_at: now, ...record };
+      } else if (table === "scholar_messages") {
+        row = {
+          reply_to: null,
+          input_type: null,
+          status: "ready",
+          error_code: null,
+          content: null,
+          is_heavy: false,
+          claimed_at: null,
+          created_at: now,
+          ...record,
+        };
+      } else if (table === "scholar_usage" || table === "scholar_safety_daily") {
+        throw new PgError(403, "42501", `only the counters write ${table}`);
       } else {
         row = {
           id: crypto.randomUUID(),
@@ -553,8 +740,9 @@ function rest(world: World, table: string, request: Recorded): Response {
     }
     unknownColumns(request.json as Row);
     const targets = rows.filter((row) => matches(row, filters));
-    const updated = targets.map((row) => ({ ...row, ...(request.json as Row), updated_at: world.now() }));
-    for (const next of updated) check(table, next, world);
+    const stamp = table.startsWith("scholar_") ? {} : { updated_at: world.now() };
+    const updated = targets.map((row) => ({ ...row, ...(request.json as Row), ...stamp }));
+    for (const next of updated) check(table, next, world, false);
     targets.forEach((row, index) => Object.assign(row, updated[index]));
     return representation ? jsonResponse(200, updated.map((row) => ({ ...row }))) : new Response(null, { status: 204 });
   }
@@ -570,17 +758,31 @@ function rest(world: World, table: string, request: Recorded): Response {
     }
     const removed = rows.filter((candidate) => matches(candidate, filters));
     for (const row of removed) rows.splice(rows.indexOf(row), 1);
-    // The affirmations of a deleted entry go with it (the foreign key's on delete cascade, step 18).
+    // The affirmations of a deleted entry go with it (the foreign key's on delete cascade, step 18), and since step 38 its
+    // Scholar conversation and that conversation's messages.
     if (table === "journal_entries") {
       const gone = new Set(removed.map((row) => row.id));
       const kept = world.affirmations.filter((affirmation) => !gone.has(affirmation.entry_id));
       world.affirmations.splice(0, world.affirmations.length, ...kept);
+      dropConversations(world, world.conversations.filter((conversation) => gone.has(conversation.entry_id)));
     }
+    // A conversation's messages go with it, and an answer goes with its question (step 38).
+    if (table === "scholar_conversations") dropConversations(world, removed);
+    if (table === "scholar_messages") dropAnswers(world, removed);
     // A deleted profile takes everything of its user with it (each table's user_id foreign key, on delete cascade): the
     // entries, the affirmations and the records of deleted devotionals. world.cascade false is a cascade that did not happen.
     if (table === "users_profile" && world.cascade) {
       const gone = new Set(removed.map((row) => row.id));
-      for (const list of [world.entries, world.affirmations, world.deletedDevotionals]) {
+      for (
+        const list of [
+          world.entries,
+          world.affirmations,
+          world.deletedDevotionals,
+          world.conversations,
+          world.messages,
+          world.scholarUsage,
+        ]
+      ) {
         const kept = list.filter((row) => !gone.has(row.user_id));
         list.splice(0, list.length, ...kept);
       }
@@ -627,6 +829,18 @@ function isScreeningRequest(json: unknown): boolean {
   const body = json as { response_format?: { schema?: { properties?: Record<string, unknown> } } } | null;
   const properties = body?.response_format?.schema?.properties;
   return properties !== undefined && "risk" in properties;
+}
+
+// Scholar's judge (_shared/scholar/judge.ts) is the only request whose schema has an `addressed`.
+function isJudgeRequest(json: unknown): boolean {
+  const body = json as { response_format?: { schema?: { properties?: Record<string, unknown> } } } | null;
+  const properties = body?.response_format?.schema?.properties;
+  return properties !== undefined && "addressed" in properties;
+}
+
+// A judgment (the judge's reply). With no arguments: nothing was asked, and nothing was missed.
+export function judgeOutput(over: Row = {}): Row {
+  return { asked: false, addressed: true, prayer_requested: false, ...over };
 }
 
 // What the screening answers when a test has not queued a reply: clear. A recording is "heard" as SPOKEN.
@@ -723,7 +937,7 @@ function bucketFiles(world: World, bucket: string): Map<string, { size: number; 
   } else {
     for (const [path, bytes] of world.storage) {
       const mimetype = path.endsWith(".wav") ? "audio/wav" : path.endsWith(".mp3") ? "audio/mpeg" : "audio/mp4";
-      files.set(path, { size: bytes.length, mimetype, createdAt: MEDIA_CREATED_AT });
+      files.set(path, { size: bytes.length, mimetype, createdAt: world.storageTimes.get(path) ?? MEDIA_CREATED_AT });
     }
   }
   return files;
@@ -929,6 +1143,8 @@ export function installWorld(): World {
     geminiQueue: [],
     screenCalls: [],
     screenQueue: [],
+    judgeCalls: [],
+    judgeQueue: [],
     callOrder: [],
     bible: new Map(),
     bibleCalls: [],
@@ -950,6 +1166,7 @@ export function installWorld(): World {
       profileDelete: 0,
       rowsRead: 0,
       recentRead: 0,
+      bump: 0,
     },
     revenuecat: new Map(),
     revenuecatQueue: [],
@@ -970,6 +1187,13 @@ export function installWorld(): World {
     appleRevokeCalls: [],
     appleRevokeQueue: [],
     appleRevoked: [],
+    conversations: [],
+    messages: [],
+    scholarUsage: [],
+    safetyDaily: [],
+    rpcCalls: [],
+    storageTimes: new Map(),
+    beforeReply: null,
     cascade: true,
     logs: [],
     background: [],
@@ -997,6 +1221,7 @@ export function installWorld(): World {
           timezone: "UTC",
           subscription_expires_at: null,
           subscription_synced_at: null,
+          scholar_closed_at: null,
         });
       }
     },
@@ -1053,8 +1278,19 @@ export function installWorld(): World {
 
     if (url.origin === ISSUER) return jsonResponse(200, { keys: [publicJwk] });
 
+    if (url.host === GEMINI_HOST && isJudgeRequest(json)) {
+      world.judgeCalls.push(recorded);
+      world.callOrder.push("judge");
+      return await play(world.judgeQueue.shift() ?? geminiOk(judgeOutput()), request);
+    }
+
     if (url.host === GEMINI_HOST) {
       const screening = isScreeningRequest(json);
+      if (!screening && world.beforeReply !== null) {
+        const hook = world.beforeReply;
+        world.beforeReply = null;
+        hook();
+      }
       (screening ? world.screenCalls : world.geminiCalls).push(recorded);
       world.callOrder.push(screening ? "screening" : "reflection");
       const reply = (screening ? world.screenQueue : world.geminiQueue).shift() ??
@@ -1119,6 +1355,8 @@ export function installWorld(): World {
       world.requests.push(recorded);
       try {
         if (url.pathname === "/rest/v1/rpc/feature_affirmation") return featureAffirmation(world, recorded);
+        const counter = /^\/rest\/v1\/rpc\/(bump_scholar_usage|bump_scholar_safety)$/.exec(url.pathname);
+        if (counter) return bumpCounter(world, counter[1], recorded);
         if (url.pathname.startsWith("/rest/v1/")) return rest(world, url.pathname.slice("/rest/v1/".length), recorded);
         const removal = /^\/storage\/v1\/object\/(journal_media|exports)$/.exec(url.pathname);
         if (removal && request.method === "DELETE") return removeObjects(world, removal[1], recorded);
@@ -1175,6 +1413,11 @@ const AFFIRMATION_SETS: readonly (readonly [string, string, string])[] = [
   ["New mercy meets your morning", "Your steps are kept today", "Quiet trust carries your night"],
   ["Mercy walks beside you today", "Your needs are known to him", "Steady love keeps your evening"],
   ["Strength waits for your morning", "His hand steadies your day", "Your rest is his gift tonight"],
+  ["Grace greets your morning", "His peace guards your hours", "Faithful love holds your night"],
+  ["Light finds you early", "God goes ahead of you", "Calm settles over your evening"],
+  ["Hope rises with the day", "Kindness surrounds your work", "Shelter is near you tonight"],
+  ["Each morning is his gift", "Courage meets your afternoon", "Night is no stranger to him"],
+  ["Morning brings his care", "Your path is lit today", "He keeps watch tonight"],
 ];
 
 export function affirmationSet(index: number): Row[] {
@@ -1300,7 +1543,18 @@ export function unscopedRequests(world: World, userId: string): string[] {
     ) {
       offenders.push(`${request.method} ${table}${request.url.search}`);
     }
-    if (table !== "journal_entries" && table !== "daily_affirmations" && table !== "deleted_devotionals") continue;
+    if (table === "rpc/bump_scholar_usage" && (request.json as Row | null)?.p_user !== userId) {
+      offenders.push(`${request.method} ${table}`);
+    }
+    const scoped = [
+      "journal_entries",
+      "daily_affirmations",
+      "deleted_devotionals",
+      "scholar_conversations",
+      "scholar_messages",
+      "scholar_usage",
+    ];
+    if (!scoped.includes(table)) continue;
     if (request.method === "POST") {
       const rows = (Array.isArray(request.json) ? request.json : [request.json]) as Row[];
       if (!rows.every((row) => row.user_id === userId)) offenders.push(`${request.method} ${table}`);

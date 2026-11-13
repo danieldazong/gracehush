@@ -44,13 +44,18 @@ export type SpeechStatus =
 
 // What the free tier's check found (step 22). null: it did not run (the request ended before it, or it was a crisis).
 // "exempt" is a trial or Pro account, for which nothing is counted. ":bad_timezone": the profile's zone was not one Intl
-// knows, so the week was worked out in UTC.
+// knows, so the week was worked out in UTC. Scholar (step 38) counts a paying account too, so its answers add "pro_ok" and
+// "pro_blocked" (the day's messages, or the day's answers read aloud), and a heavy conversation logs "exempt".
 export type LimitStatus =
   | "exempt"
   | "free_ok"
   | "free_blocked"
   | "free_ok:bad_timezone"
-  | "free_blocked:bad_timezone";
+  | "free_blocked:bad_timezone"
+  | "pro_ok"
+  | "pro_blocked"
+  | "pro_ok:bad_timezone"
+  | "pro_blocked:bad_timezone";
 
 // What billing did (step 30). null in the log: no billing step ran. "synced": RevenueCat was read and the plan written;
 // "throttled": sync-subscription answered the plan it had just written; "skipped": the webhook had nothing to sync (its TEST

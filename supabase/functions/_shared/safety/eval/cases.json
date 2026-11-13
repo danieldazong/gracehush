@@ -50,6 +50,11 @@
     "text": "My dad just collapsed in the kitchen and he is not answering me. I am on the floor next to him and I do not know what to do. Please God, help."
   },
   {
+    "id": "crisis-11",
+    "expected": "crisis",
+    "text": "Last Saturday a man I trusted did not stop when I said no. I keep shaking, I have not told anyone, and I do not know how to pray about it."
+  },
+  {
     "id": "uncertain-01",
     "expected": "crisis",
     "text": "I have felt hopeless for weeks. Sometimes I think the people I love would not even notice if I was not here anymore."
@@ -148,5 +153,10 @@
     "id": "clear-15",
     "expected": "clear",
     "text": "My son is driving home from college tonight in the snow. Please keep him safe on the road and bring him home to us."
+  },
+  {
+    "id": "clear-16",
+    "expected": "clear",
+    "text": "Ten years ago someone I trusted hurt me badly. Counseling and my church family have helped me heal more than I ever thought possible, and tonight I just want to thank God for carrying me."
   }
 ]

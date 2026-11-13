@@ -1,19 +1,20 @@
 import { type Zippable, zipSync } from "fflate";
 
-import type { UserData, UserEntry, UserRow } from "../_shared/account/userData.ts";
+import type { UserConversation, UserData, UserEntry, UserRow } from "../_shared/account/userData.ts";
 
 // The pure half of export-data (step 31): the README, the JSON and the Markdown, which audio goes first and under what name,
 // how many bytes a ZIP will take, and the ZIP itself. Nothing here reads, writes or logs.
 //
 // A heavy moment is never labelled. Since 2026-11-08 it is a whole reflection, exported like any other; one saved before then
 // has no devotional, so in the Markdown it is its day and the person's own words, like an entry that never finished. The JSON
-// keeps every column, `is_crisis` included, because it is the person's own data.
+// keeps every column, `is_crisis` included, because it is the person's own data. A Scholar conversation (step 38) is the same:
+// every column in the JSON, `is_heavy` included, and in the Markdown its title (or a plain one) and its messages, never a label.
 
 export const DOWNLOAD_NAME = "gracehush-journal.zip";
 export const README_NAME = "README.txt";
 export const JSON_NAME = "journal.json";
 export const MARKDOWN_NAME = "journal.md";
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // A ZIP as fflate's zipSync writes it, with no extra fields and no data descriptors: per file a local header of 30 bytes and a
 // central directory record of 46 bytes, each followed by the file's name, and one end record of 22 bytes for the whole archive.
@@ -143,7 +144,7 @@ function exportRow(row: UserRow, included: ReadonlyMap<string, string>): UserRow
   const out: UserRow = {};
   const file = (value: unknown) => (typeof value === "string" ? included.get(value) ?? null : null);
   for (const [key, value] of Object.entries(row)) {
-    if (key === "user_id" || key === "affirmations") continue;
+    if (key === "user_id" || key === "affirmations" || key === "messages") continue;
     if (key === "audio_path") out.recording_file = file(value);
     else if (key === "devotional_audio_path") out.devotional_audio_file = file(value);
     else out[key] = value;
@@ -159,12 +160,18 @@ export function buildJson(
     ...exportRow(entry, options.included),
     affirmations: entry.affirmations.map((row) => exportRow(row, options.included)),
   }));
+  // Step 38: every Scholar conversation, oldest first as read, with its messages under it (no file is named in either).
+  const conversations = data.conversations.map((row) => ({
+    ...exportRow(row, options.included),
+    messages: row.messages.map((message) => exportRow(message, options.included)),
+  }));
   const document = {
     exportedAt: options.exportedAt,
     schemaVersion: SCHEMA_VERSION,
     timeZone: options.zone,
     profile: data.profile,
     entries,
+    conversations,
   };
   return `${JSON.stringify(document, null, 2)}\n`;
 }
@@ -228,6 +235,55 @@ function entrySection(entry: UserEntry, zone: string): string[] {
   return out;
 }
 
+// ---- Scholar conversations (step 38) ----------------------------------------------------------------------------------
+// The saved blocks of one message, as the app shows them: a passage as its reference and the Bible's words, the answer's
+// paragraphs, and a prayer under its own label with the "Amen" the app adds (it is stored without one). A block of another shape
+// is left out.
+function blockLines(content: unknown): string[] {
+  const blocks =
+    typeof content === "object" && content !== null && Array.isArray((content as { blocks?: unknown }).blocks)
+      ? (content as { blocks: unknown[] }).blocks
+      : [];
+  const out: string[] = [];
+  for (const block of blocks) {
+    if (typeof block !== "object" || block === null) continue;
+    const { type, text, reference } = block as { type?: unknown; text?: unknown; reference?: unknown };
+    const body = words(text);
+    if (body === null) continue;
+    if (type === "passage") {
+      const where = words(reference);
+      if (where !== null) out.push("", `**${where} (BSB)**`, "", body);
+    } else if (type === "text") {
+      out.push("", body);
+    } else if (type === "prayer") {
+      out.push("", "**Prayer**", "", `${body} Amen.`);
+    }
+  }
+  return out;
+}
+
+const lastMessageMs = (row: UserConversation) => {
+  const ms = Date.parse(String(row.last_message_at ?? row.created_at));
+  return Number.isFinite(ms) ? ms : 0;
+};
+
+// One conversation: its title (a heavy one has none), the day it began, and the messages in order. A message with no words (a
+// recording that was never heard, or an answer that never finished) is left out. Nothing says a conversation was heavy.
+function conversationSection(row: UserConversation, zone: string): string[] {
+  const out = [
+    `## ${words(row.title) ?? "A conversation with Scholar"}`,
+    "",
+    weekdayDay(new Date(String(row.created_at)), zone),
+  ];
+  for (const message of row.messages) {
+    const said = blockLines(message.content);
+    if (said.length === 0) continue;
+    if (message.role === "scholar") out.push("", "**Scholar:**", ...said);
+    else out.push("", `**You:** ${said.filter((line) => line !== "").join("\n\n")}`);
+  }
+  return out;
+}
+
 export function buildMarkdown(data: UserData, options: { exportedAt: string; zone: string }): string {
   const lines = [
     "# Your GraceHush journal",
@@ -235,6 +291,13 @@ export function buildMarkdown(data: UserData, options: { exportedAt: string; zon
     `Exported on ${longDay(new Date(options.exportedAt), options.zone)} (${options.zone}).`,
   ];
   for (const entry of newestFirst(data.entries)) lines.push("", ...entrySection(entry, options.zone));
+  if (data.conversations.length > 0) {
+    lines.push("", "# Scholar conversations");
+    const newest = [...data.conversations].sort((a, b) =>
+      lastMessageMs(b) - lastMessageMs(a) || String(b.id).localeCompare(String(a.id))
+    );
+    for (const row of newest) lines.push("", ...conversationSection(row, options.zone));
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -261,6 +324,7 @@ export function buildReadme(options: {
     "- journal.json: the same journal with every field, for another app.",
     "- audio/recordings: your spoken reflections, as you recorded them.",
     "- audio/devotionals: your spoken devotionals.",
+    "- Scholar conversations: your conversations with Scholar, at the end of journal.md and in journal.json.",
     "",
     `This export holds ${count(options.entries, "entry", "entries")} and ${
       count(options.included, "audio file", "audio files")

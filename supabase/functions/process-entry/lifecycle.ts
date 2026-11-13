@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { AppError } from "../_shared/errors.ts";
 import type { LimitProfile } from "../_shared/limits/weekly.ts";
 import { CLAIM_LEASE_MS } from "./constants.ts";
-import type { AffirmationVerse, InputType, ProcessEntryRequest, TimeSlot } from "./contracts.ts";
+import type { AffirmationVerse, HelpKind, InputType, ProcessEntryRequest, TimeSlot } from "./contracts.ts";
 
 // Every database call of the function lives here. The service-role client bypasses row level security, so each query
 // on a user's table filters by the verified user id, with no exceptions.
@@ -22,6 +22,9 @@ export type EntryRow = {
   // A heavy moment (gen-v2.4): the crisis screening or the model found a risk to the person. Since 2026-11-08 such an entry is
   // a whole reflection too; one saved before that keeps only the person's words (no devotional, passage or affirmations).
   is_crisis: boolean;
+  // 2026-11-11: the help line a heavy moment shows (helpKind.ts), one of four words; null on every other entry, and on a heavy
+  // moment saved before the column existed (the app shows the 988 line for it). Optional: a row made by a test may not name it.
+  help_line?: string | null;
   dominant_emotion: string | null;
   scripture_reference: string | null;
   scripture_text: string | null;
@@ -351,6 +354,8 @@ export type ReadyFields = {
 // The last write of a good run is the status change: until it lands the entry is still "processing", so an entry is
 // never "ready" without its affirmations. `heavy` (gen-v2.4) saves a heavy moment: is_crisis is set, and the entry is never
 // counted by the free tier's limit (checkDevotionalLimit skips is_crisis rows) and never marked a prayer by the server.
+// `helpLine` (2026-11-11) is the help line a heavy moment shows, one word (helpKind.ts); it is saved only with a heavy moment,
+// which the table's help_line_crisis rule also holds, and a heavy moment with none named shows the 988 line.
 export async function saveReadyEntry(
   admin: SupabaseClient,
   userId: string,
@@ -358,11 +363,13 @@ export async function saveReadyEntry(
   fields: ReadyFields,
   affirmations: readonly SavedAffirmation[],
   heavy = false,
+  helpLine: HelpKind | null = null,
 ): Promise<EntryRow> {
   await replaceAffirmations(admin, userId, entryId, affirmations);
   const { data, error } = await admin.from("journal_entries").update({
     ...fields,
     is_crisis: heavy,
+    help_line: heavy ? helpLine ?? "crisis" : null,
     // A reflection is saved without its audio. Speech is a later, best-effort step (speech.ts) that adds the path and the
     // length once the file is stored, so nothing about it can lose or fail a reflection.
     devotional_audio_path: null,

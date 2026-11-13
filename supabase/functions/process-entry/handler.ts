@@ -1,10 +1,10 @@
 import { createAdmin } from "../_shared/admin.ts";
 import { readAuthConfig, verifyClerkRequest } from "../_shared/auth.ts";
-import { readBillingConfig, syncSubscription } from "../_shared/billing/revenuecat.ts";
+import { confirmPaidPlan } from "../_shared/billing/expiry.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import { optionalEnv, requireEnv } from "../_shared/env.ts";
 import { AppError, errorResponse, jsonResponse } from "../_shared/errors.ts";
-import { checkDevotionalLimit, type LimitDecision, type LimitProfile } from "../_shared/limits/weekly.ts";
+import { checkDevotionalLimit, type LimitDecision } from "../_shared/limits/weekly.ts";
 import {
   type BillingStatus,
   blankLogLine,
@@ -22,8 +22,8 @@ import {
 import { screenEntry, type ScreenInput, type ScreenResult, screenTiming } from "../_shared/safety/screen.ts";
 import { readTtsConfig } from "../_shared/tts/config.ts";
 import { downloadRecording } from "./audio.ts";
-import { EXPIRY_CHECK, GEMINI_DEADLINE_MS, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./constants.ts";
-import type { ProcessEntryRequest } from "./contracts.ts";
+import { GEMINI_DEADLINE_MS, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./constants.ts";
+import type { HelpKind, ProcessEntryRequest } from "./contracts.ts";
 import { GeminiBlocked, type GeminiStats, generate, newStats } from "./gemini.ts";
 import { heavyFallback } from "./heavy.ts";
 import {
@@ -42,7 +42,6 @@ import {
   type RecentReflectionRow,
   saveReadyEntry,
   saveTranscript,
-  type StoredProfile,
 } from "./lifecycle.ts";
 import { checkReflection, readReflection, type Reflection } from "./output.ts";
 import { firstWord, groundingCount, prayerVoice } from "./tone.ts";
@@ -199,34 +198,6 @@ function limitStatus(decision: LimitDecision): LimitStatus {
 //
 // A recording that the free limit held back has the words the screening heard saved on its entry (`savedWords`). Sent
 // again, it is screened from those words as written text: the recording is not downloaded and not transcribed a second time.
-// The expiry guard (step 30). A trial or Pro row whose end date has passed is read again from RevenueCat, once and briefly,
-// so a plan that lapsed while no webhook arrived is not a free pass. RevenueCat that cannot be read, or billing that is not set
-// up, leaves the stored plan: a paying person is never blocked by an outage. A row with no end date (from before step 30, or a
-// lifetime grant) is left as it is, and so is a free one.
-async function confirmPaidPlan(
-  context: Context,
-  admin: ReturnType<typeof createAdmin>,
-  userId: string,
-  profile: StoredProfile,
-): Promise<LimitProfile> {
-  const ends = profile.expiresAt === null ? NaN : Date.parse(profile.expiresAt);
-  if (profile.tier === "free" || !Number.isFinite(ends) || ends > Date.now()) return profile;
-  const config = readBillingConfig(optionalEnv);
-  if (!config.ok) {
-    context.billing = "off";
-    return profile;
-  }
-  const started = Date.now();
-  const synced = await syncSubscription(admin, config.apiKey, userId, new Date(), EXPIRY_CHECK);
-  context.billingMs = Date.now() - started;
-  if (!synced.ok) {
-    context.billing = `failed:${synced.reason}`;
-    return profile;
-  }
-  context.billing = "synced";
-  return { ...profile, tier: synced.plan.tier };
-}
-
 async function screenStage(
   context: Context,
   admin: ReturnType<typeof createAdmin>,
@@ -334,6 +305,9 @@ async function run(req: Request, context: Context): Promise<Response> {
     // else of the screening's answer does.
     let heavy = screening.status === "crisis";
     if (screening.status === "crisis") context.crisisSource = screening.source;
+    // Which help line a heavy moment shows (helpKind.ts, 2026-11-11): the screening's choice, saved as one word with the
+    // reflection. A heavy moment the screening did not find (the writer's own flag, a blocked reflection) shows the 988 line.
+    const helpLine: HelpKind = screening.status === "crisis" ? screening.help : "crisis";
 
     // The reflection is written from the screened words alone, never from the recording again. A recording a safety filter
     // blocked before its words were read has none, and gets the written fallback.
@@ -358,7 +332,11 @@ async function run(req: Request, context: Context): Promise<Response> {
     // the entry and the week's numbers; sent again after an upgrade or when the week turns, it is claimed and checked again.
     if (!heavy && words !== null) {
       const stored = await db(() => readProfile(admin, user.userId));
-      const profile = await confirmPaidPlan(context, admin, user.userId, stored);
+      // The expiry guard (step 30, _shared/billing/expiry.ts since step 38).
+      const confirmed = await confirmPaidPlan(admin, user.userId, stored);
+      context.billing = confirmed.billing;
+      context.billingMs = confirmed.billingMs;
+      const profile = confirmed.profile;
       const decision = await db(() => checkDevotionalLimit(admin, user.userId, profile, claim.row));
       context.limit = limitStatus(decision);
       context.limitUsed = decision.kind === "free" ? decision.used : null;
@@ -501,6 +479,7 @@ async function run(req: Request, context: Context): Promise<Response> {
         },
         affirmations,
         heavy,
+        helpLine,
       )
     );
     saved = true;

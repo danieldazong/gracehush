@@ -15,6 +15,36 @@ import { deleteUserRows, removeUserFiles } from "./lifecycle.ts";
 
 const USER = "user_test";
 
+// One Scholar conversation of the person's (step 38), with one message, and a day of usage.
+function seedScholar(world: World, userId: string): void {
+  world.seedUser(userId);
+  const conversation = crypto.randomUUID();
+  world.conversations.push({
+    id: conversation,
+    user_id: userId,
+    entry_id: null,
+    title: null,
+    is_heavy: false,
+    last_message_at: world.now(),
+    created_at: world.now(),
+  });
+  world.messages.push({
+    id: crypto.randomUUID(),
+    conversation_id: conversation,
+    user_id: userId,
+    role: "user",
+    reply_to: null,
+    input_type: "text",
+    status: "ready",
+    error_code: null,
+    content: { blocks: [{ type: "text", text: "A question." }] },
+    is_heavy: false,
+    claimed_at: null,
+    created_at: world.now(),
+  });
+  world.scholarUsage.push({ user_id: userId, day: "2026-11-11", messages: 2, listens: 1 });
+}
+
 function flow(work: (world: World) => Promise<void>) {
   return async () => {
     const world = installWorld();
@@ -56,10 +86,16 @@ Deno.test(
     seedDevotional(world, USER);
     seedDeletedDevotional(world, USER, world.now());
     seedDevotional(world, "user_other");
+    seedScholar(world, USER);
+    seedScholar(world, "user_other");
     assertEquals(await deleteUserRows(createAdmin(), USER), { profiles: 1, leftover: 0 });
     assertEquals(world.users.map((row) => row.id), ["user_other"]);
     assertEquals(world.entries.map((row) => row.user_id), ["user_other"]);
     assertEquals(world.deletedDevotionals.length, 0);
+    // Scholar (step 38): the person's conversations, messages and usage go too, and nobody else's.
+    assertEquals(world.conversations.map((row) => row.user_id), ["user_other"]);
+    assertEquals(world.messages.map((row) => row.user_id), ["user_other"]);
+    assertEquals(world.scholarUsage.map((row) => row.user_id), ["user_other"]);
     assertEquals(await deleteUserRows(createAdmin(), USER), { profiles: 0, leftover: 0 });
     assertEquals(unscopedRequests(world, USER), []);
   }),
@@ -82,9 +118,24 @@ Deno.test(
       created_at: world.now(),
     });
     seedDeletedDevotional(world, USER, world.now());
+    seedScholar(world, USER);
     world.cascade = false;
-    assertEquals(await deleteUserRows(createAdmin(), USER), { profiles: 1, leftover: 3 });
+    assertEquals(await deleteUserRows(createAdmin(), USER), { profiles: 1, leftover: 6 });
     assertEquals([world.entries.length, world.affirmations.length, world.deletedDevotionals.length], [0, 0, 0]);
+    assertEquals([world.conversations.length, world.messages.length, world.scholarUsage.length], [0, 0, 0]);
+    // A message goes before its conversation, and an affirmation before its entry.
+    const deletes = world.requests.filter((request) => request.method === "DELETE").map((request) =>
+      request.url.pathname.replace("/rest/v1/", "")
+    );
+    assertEquals(deletes, [
+      "users_profile",
+      "scholar_messages",
+      "scholar_conversations",
+      "scholar_usage",
+      "daily_affirmations",
+      "journal_entries",
+      "deleted_devotionals",
+    ]);
 
     world.seedUser(USER);
     world.fail.profileDelete = 1;

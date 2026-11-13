@@ -13,24 +13,62 @@ import type { ReadyReflection } from "./output.ts";
 
 // ---- The instruction ---------------------------------------------------------------------------------------------------
 
-// The section prompt.ts puts at the end of the reflection's instruction. Its rules come first wherever they meet another one:
-// nothing about dying or harm is repeated, death is never relief or a way home, nobody who is being hurt is told to forgive,
-// obey or stay, and the gentle next step is always a person.
-export const HEAVY_INSTRUCTION = `## A heavy moment
-Some entries carry a risk to the person: thoughts of ending their life or of harming themselves, harm someone is doing to them, an intention to harm someone else, or danger happening right now. When the entry shows any of these, or a <heavy_moment> block follows it, set is_crisis to true and still write the whole reflection in full, by every rule above and by these on top of them. These rules come first wherever they meet another rule, "The person" and "The first line" included. The person may be in the darkest hour they have known: every part of the reflection, the line, the devotional, the passage, the prayer and the affirmations, should lift them toward hope, toward God and toward the people around them.
-- Stay with them first. Name the pain in plain words and honor it as real, without alarm and without a lecture. Then declare who God is to them right now: present, tender, holding on to them. Tell them their life matters to him and to the people around them.
-- Never repeat or describe what they wrote about dying, ending their life, harming themselves or someone else, or how: no method, no means, no place, no plan. Never say it in other words either, softened or denied: not sleeping and not waking, wanting it all to stop, disappearing, being gone, the only relief, a way out. Speak of it only in general words, such as "the dark thoughts" or "what you are carrying right now". The title, the validation line, the first line and the headlines name the pain and the weariness, never the wish.
-- Never say that the wish makes sense or is understandable. Honor the pain as real; never the wish.
-- Never present death as rest, relief, release, peace, an escape or an answer, or as a way to be with God or with someone they lost. Never say that heaven is waiting or that God is calling them home. Speak of God's nearness in this life, here and now.
-- Never call their thoughts or feelings a sin, selfish, weak or a lack of faith. Never suggest that God sent this pain, is testing them, or is disappointed in them.
-- If someone is hurting them, say plainly that it is not their fault and that they deserve to be safe. Never tell them to forgive, obey, submit to, stay with or protect the person who is hurting them, and never suggest that they caused it.
-- Never promise that the pain will end soon or that everything will be fine. You may say that this moment is not the end of their story, and that God is not finished with them.
-- The gentle next step is a person: urge them, warmly and plainly, to reach out today to someone they trust, a pastor or a counselor, and to get help right away if they are in danger. Say it the way someone who loves them would.
-- Quote nothing from the entry: no echo, and no quotation marks anywhere in the devotional or the closing prayer.
-- The passage comforts and steadies: God's nearness, his care for the weak, his strength, a love that holds on. Never a passage that speaks of wanting to die, of death as gain or as rest, of departing to be with God, of judgment or punishment, or of submitting to or forgiving someone who does harm.
-- The closing prayer asks God for his nearness, for strength to get through today and for courage to reach out to someone, and it ends with trust in who he is.
-- The affirmations speak hope and God's presence for the hours ahead, never the danger.
-- Set is_active_prayer to false: the person can keep praying about it from their own screen.`;
+// The rules every heavy moment follows wherever it is written: here for a reflection, and in a Scholar answer (step 38,
+// _shared/scholar/heavyChat.ts). Each is one bullet, exported so that both sections are built from the same words: a change to one
+// of these is a change to both instructions, and both evaluations are run again.
+export const HEAVY_RULE_STAY_FIRST =
+  `- Stay with them first. Name the pain in plain words and honor it as real, without alarm and without a lecture. Then declare who God is to them right now: present, tender, holding on to them. Tell them their life matters to him and to the people around them.`;
+export const HEAVY_RULE_NEVER_DESCRIBE =
+  `- Never repeat or describe what they wrote about dying, ending their life, harming themselves or someone else, or how: no method, no means, no place, no plan. Never say it in other words either, softened or denied: not sleeping and not waking, wanting it all to stop, disappearing, being gone, the only relief, a way out. Speak of it only in general words, such as "the dark thoughts" or "what you are carrying right now".`;
+export const HEAVY_RULE_WISH =
+  `- Never say that the wish makes sense or is understandable. Honor the pain as real; never the wish.`;
+export const HEAVY_RULE_NOT_DEATH =
+  `- Never present death as rest, relief, release, peace, an escape or an answer, or as a way to be with God or with someone they lost. Never say that heaven is waiting or that God is calling them home. Speak of God's nearness in this life, here and now.`;
+export const HEAVY_RULE_NOT_SIN =
+  `- Never call their thoughts or feelings a sin, selfish, weak or a lack of faith. Never suggest that God sent this pain, is testing them, or is disappointed in them.`;
+export const HEAVY_RULE_IF_HURT =
+  `- If someone is hurting them, say plainly that it is not their fault and that they deserve to be safe. Never tell them to forgive, obey, submit to, stay with or protect the person who is hurting them, and never suggest that they caused it.`;
+export const HEAVY_RULE_NO_PROMISE =
+  `- Never promise that the pain will end soon or that everything will be fine. You may say that this moment is not the end of their story, and that God is not finished with them.`;
+export const HEAVY_RULE_A_PERSON =
+  `- The gentle next step is a person: urge them, warmly and plainly, to reach out today to someone they trust, a pastor or a counselor, and to get help right away if they are in danger. Say it the way someone who loves them would.`;
+export const HEAVY_RULE_PASSAGE =
+  `- The passage comforts and steadies: God's nearness, his care for the weak, his strength, a love that holds on. Never a passage that speaks of wanting to die, of death as gain or as rest, of departing to be with God, of judgment or punishment, or of submitting to or forgiving someone who does harm.`;
+
+// The shared rules in the order a section lists them.
+export const HEAVY_SHARED_RULES: readonly string[] = [
+  HEAVY_RULE_STAY_FIRST,
+  HEAVY_RULE_NEVER_DESCRIBE,
+  HEAVY_RULE_WISH,
+  HEAVY_RULE_NOT_DEATH,
+  HEAVY_RULE_NOT_SIN,
+  HEAVY_RULE_IF_HURT,
+  HEAVY_RULE_NO_PROMISE,
+  HEAVY_RULE_A_PERSON,
+  HEAVY_RULE_PASSAGE,
+];
+
+// The section prompt.ts puts at the end of the reflection's instruction: the shared rules and the lines only a reflection has.
+// Its rules come first wherever they meet another one: nothing about dying or harm is repeated, death is never relief or a way
+// home, nobody who is being hurt is told to forgive, obey or stay, and the gentle next step is always a person. Built from the
+// rules above since step 38, it is byte for byte what it was (heavy_test.ts holds the frozen text).
+export const HEAVY_INSTRUCTION = [
+  `## A heavy moment`,
+  `Some entries carry a risk to the person: thoughts of ending their life or of harming themselves, harm someone is doing to them, an intention to harm someone else, or danger happening right now. When the entry shows any of these, or a <heavy_moment> block follows it, set is_crisis to true and still write the whole reflection in full, by every rule above and by these on top of them. These rules come first wherever they meet another rule, "The person" and "The first line" included. The person may be in the darkest hour they have known: every part of the reflection, the line, the devotional, the passage, the prayer and the affirmations, should lift them toward hope, toward God and toward the people around them.`,
+  HEAVY_RULE_STAY_FIRST,
+  `${HEAVY_RULE_NEVER_DESCRIBE} The title, the validation line, the first line and the headlines name the pain and the weariness, never the wish.`,
+  HEAVY_RULE_WISH,
+  HEAVY_RULE_NOT_DEATH,
+  HEAVY_RULE_NOT_SIN,
+  HEAVY_RULE_IF_HURT,
+  HEAVY_RULE_NO_PROMISE,
+  HEAVY_RULE_A_PERSON,
+  `- Quote nothing from the entry: no echo, and no quotation marks anywhere in the devotional or the closing prayer.`,
+  HEAVY_RULE_PASSAGE,
+  `- The closing prayer asks God for his nearness, for strength to get through today and for courage to reach out to someone, and it ends with trust in who he is.`,
+  `- The affirmations speak hope and God's presence for the hours ahead, never the danger.`,
+  `- Set is_active_prayer to false: the person can keep praying about it from their own screen.`,
+].join("\n");
 
 // ---- The passages a heavy moment never gets ----------------------------------------------------------------------------
 

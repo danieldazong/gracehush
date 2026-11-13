@@ -20,6 +20,7 @@ export function toPendingEntry(item: OutboxItem): HomeEntry {
     dominantEmotion: null,
     status: item.status === "sending" ? "processing" : item.status === "needs_action" ? "failed" : "pending",
     isCrisis: false,
+    helpLine: null,
     scripture: null,
     devotional: null,
     prayer: null,

@@ -3,23 +3,29 @@ import { copy } from "@/constants/copy";
 import type {
   Affirmation,
   Devotional,
+  HelpKind,
   InputType,
   JournalEntry,
   Prayer,
   PrayerCategory,
   ProcessingStatus,
+  ScholarBlock,
+  ScholarConversation,
+  ScholarMessage,
+  ScholarMessageStatus,
   Scripture,
   StoredErrorCode,
   SubscriptionTier,
   TimeSlot,
   UserProfile,
 } from "@/types";
-import type { AffirmationRow, EntryRow } from "@/data/columns";
+import type { AffirmationRow, ConversationRow, EntryRow, MessageRow } from "@/data/columns";
 import type { UserProfileRow } from "@/types/database";
 import { affirmationPosition } from "@/utils/affirmationOrder";
 
 const TIME_SLOTS: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 const INPUT_TYPES: readonly InputType[] = ["text", "audio"];
+const HELP_KINDS: readonly HelpKind[] = ["crisis", "abuse", "harm_others", "emergency"];
 const TIERS: readonly SubscriptionTier[] = ["free", "trial", "pro"];
 const STATUSES: readonly ProcessingStatus[] = [
   "pending",
@@ -169,11 +175,69 @@ export function toJournalEntry(row: EntryRow): JournalEntry {
     dominantEmotion: finished ? (row.dominant_emotion ?? null) : null,
     status,
     isCrisis: row.is_crisis === true,
+    // 2026-11-11: the help line a heavy moment shows. One saved before the column existed shows the 988 line.
+    helpLine: row.is_crisis === true ? (pick(HELP_KINDS, row.help_line) ?? "crisis") : null,
     scripture: finished ? toScripture(row) : null,
     devotional: finished ? toDevotional(row) : null,
     prayer: toPrayer(row),
     failureCode: pick(ERROR_CODES, row.error_code),
     // A pending or uploading row exists only on this device (decision 9; step 24 may replace it).
     isLocalOnly: status === "pending" || status === "uploading",
+  };
+}
+
+// ---- Scholar (step 38) -------------------------------------------------------------------------------------------------
+// A saved conversation and message as the app shows them: the same rules as the server's supabase/functions/scholar-turn/
+// response.ts, so a message read from the table equals the one an answer brought.
+
+const MESSAGE_STATUSES: readonly ScholarMessageStatus[] = ["pending", "ready", "failed"];
+
+export function toConversation(row: ConversationRow): ScholarConversation {
+  return {
+    id: row.id,
+    entryId: row.entry_id,
+    title: row.title,
+    isHeavy: row.is_heavy,
+    lastMessageAt: row.last_message_at,
+    createdAt: row.created_at,
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// A saved block, or null for one that does not have the shape of one (never shown). A passage is saved as its reference and the
+// Bible's words, and Scholar never saves one it did not read: it is verified BSB scripture.
+function toBlock(block: unknown): ScholarBlock | null {
+  if (!isObject(block)) return null;
+  const { type, text, reference } = block;
+  if (typeof text !== "string" || text === "") return null;
+  if (type === "text" || type === "prayer") return { type, text };
+  if (type === "passage" && typeof reference === "string" && reference !== "") {
+    return { type: "passage", scripture: { reference, text, translation: "BSB", verified: true } };
+  }
+  return null;
+}
+
+export function toScholarMessage(row: MessageRow): ScholarMessage {
+  const content = isObject(row.content) ? row.content : null;
+  const blocks = content !== null && Array.isArray(content.blocks) ? content.blocks : [];
+  const help = content?.help;
+  const role = row.role === "scholar" ? "scholar" : "user";
+  const isHeavy = row.is_heavy === true;
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    role,
+    replyTo: row.reply_to,
+    inputType: row.input_type === "text" || row.input_type === "audio" ? row.input_type : null,
+    status: pick(MESSAGE_STATUSES, row.status) ?? "failed",
+    errorCode: row.error_code,
+    blocks: blocks.map(toBlock).filter((block): block is ScholarBlock => block !== null),
+    isHeavy,
+    // An answer that carries a help line shows the one saved with it; one saved before 2026-11-11 shows the 988 line.
+    helpLine: role === "scholar" && isHeavy ? (pick(HELP_KINDS, typeof help === "string" ? help : null) ?? "crisis") : null,
+    createdAt: row.created_at,
   };
 }

@@ -1,7 +1,9 @@
+import { HELP_KINDS } from "../_shared/safety/helpKind.ts";
 import { PRAYER_CATEGORIES, TIME_SLOTS } from "./constants.ts";
 import type {
   Affirmation,
   Devotional,
+  HelpKind,
   InputType,
   JournalEntry,
   Prayer,
@@ -118,6 +120,8 @@ export function toResponse(row: EntryRow, affirmations: AffirmationRow[]): Proce
     dominantEmotion: finished ? (row.dominant_emotion ?? null) : null,
     status,
     isCrisis: row.is_crisis === true,
+    // 2026-11-11: the help line a heavy moment shows. One saved before the column existed shows the 988 line.
+    helpLine: row.is_crisis === true ? (pick<HelpKind>(HELP_KINDS, row.help_line) ?? "crisis") : null,
     scripture: finished ? toScripture(row) : null,
     devotional: finished ? toDevotional(row) : null,
     prayer: toPrayer(row, finished),

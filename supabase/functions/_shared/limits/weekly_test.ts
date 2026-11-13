@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "../../process-entry/testing/assert.ts";
 import { FREE_DEVOTIONALS_PER_WEEK, WEEK_STARTS_ON } from "./constants.ts";
-import { weekWindow } from "./weekly.ts";
+import { dayWindow, weekWindow } from "./weekly.ts";
 
 const iso = (date: Date) => date.toISOString().replace(".000Z", "Z");
 const window = (now: string, zone: string, weekStartsOn?: number) => {
@@ -172,4 +172,90 @@ Deno.test("for 18 zones over two years: every instant is in its week, weeks tile
   // 14 of the 18 zones change their clocks (UTC, Lagos, Kolkata and the like do not): a few weeks a year each.
   assert(irregular >= 40, `only ${irregular} weeks with a clock change were found`);
   assert(checked > 1_500, `only ${checked} instants were checked`);
+});
+
+// ---- dayWindow (step 38: Scholar's day) ---------------------------------------------------------------------------------
+
+const day = (now: string, zone: string) => {
+  const found = dayWindow(new Date(now), zone);
+  return {
+    start: iso(found.start),
+    end: iso(found.end),
+    day: found.day,
+    zone: found.zone,
+    fallback: found.zoneFallback,
+  };
+};
+
+Deno.test("dayWindow: the local calendar day, from its midnight to the next", () => {
+  assertEquals(day("2026-11-11T15:00:00Z", "UTC"), {
+    start: "2026-11-11T00:00:00Z",
+    end: "2026-11-12T00:00:00Z",
+    day: "2026-11-11",
+    zone: "UTC",
+    fallback: false,
+  });
+  // Lagos (UTC+1): 23:30 UTC is already the next day there.
+  assertEquals(day("2026-11-11T23:30:00Z", "Africa/Lagos"), {
+    start: "2026-11-11T23:00:00Z",
+    end: "2026-11-12T23:00:00Z",
+    day: "2026-11-12",
+    zone: "Africa/Lagos",
+    fallback: false,
+  });
+  // The first instant of a day is in it, and one millisecond earlier is in the day before.
+  assertEquals(day("2026-11-12T00:00:00Z", "UTC").day, "2026-11-12");
+  assertEquals(dayWindow(new Date("2026-11-11T23:59:59.999Z"), "UTC").day, "2026-11-11");
+});
+
+Deno.test("dayWindow: a daylight-saving day is 23 or 25 hours, and the far zones keep their own date", () => {
+  const spring = day("2026-03-08T12:00:00Z", "America/New_York");
+  assertEquals([spring.start, spring.end, spring.day], ["2026-03-08T05:00:00Z", "2026-03-09T04:00:00Z", "2026-03-08"]);
+  assertEquals((Date.parse(spring.end) - Date.parse(spring.start)) / 3_600_000, 23);
+  const fall = day("2026-11-01T12:00:00Z", "America/New_York");
+  assertEquals([fall.start, fall.end, fall.day], ["2026-11-01T04:00:00Z", "2026-11-02T05:00:00Z", "2026-11-01"]);
+  assertEquals((Date.parse(fall.end) - Date.parse(fall.start)) / 3_600_000, 25);
+  // Kiritimati (UTC+14) and Pago Pago (UTC-11) are a whole day apart at the same instant.
+  assertEquals(day("2026-11-11T12:00:00Z", "Pacific/Kiritimati").day, "2026-11-12");
+  assertEquals(day("2026-11-11T12:00:00Z", "Pacific/Pago_Pago").day, "2026-11-11");
+  assertEquals(day("2026-11-11T05:00:00Z", "Pacific/Pago_Pago").day, "2026-11-10");
+});
+
+Deno.test("dayWindow: a zone Intl does not know is read as UTC, and says so", () => {
+  assertEquals(day("2026-11-11T15:00:00Z", "Not/AZone"), {
+    start: "2026-11-11T00:00:00Z",
+    end: "2026-11-12T00:00:00Z",
+    day: "2026-11-11",
+    zone: "UTC",
+    fallback: true,
+  });
+});
+
+Deno.test("dayWindow: for 6 zones over a year, every instant is in its day, days tile, and each starts at local midnight", () => {
+  const zones = [
+    "UTC",
+    "Africa/Lagos",
+    "America/New_York",
+    "Pacific/Auckland",
+    "Australia/Lord_Howe",
+    "America/Havana",
+  ];
+  for (const zone of zones) {
+    const local = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    let previous: ReturnType<typeof dayWindow> | null = null;
+    for (let at = Date.parse("2026-01-01T00:00:00Z"); at < Date.parse("2027-01-01T00:00:00Z"); at += 5 * 3_600_000) {
+      const found = dayWindow(new Date(at), zone);
+      assert(found.start.getTime() <= at && at < found.end.getTime(), `${zone} ${new Date(at).toISOString()}`);
+      if (previous !== null && previous.day !== found.day) {
+        assertEquals(found.start.getTime(), previous.end.getTime(), `${zone} tiles at ${found.day}`);
+      }
+      assertEquals(local.format(found.start), found.day, `${zone} ${found.day} starts on its own date`);
+      previous = found;
+    }
+  }
 });

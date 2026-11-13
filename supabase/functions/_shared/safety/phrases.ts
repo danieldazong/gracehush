@@ -12,7 +12,8 @@
 // A template is a phrase with groups of alternatives: "i want to (die|be dead)" stands for two phrases. Every phrase is
 // written in the form normalizeForMatch gives a text (lower case, no punctuation, contractions spelled out, no filler
 // words), which phrases_test.ts checks.
-const TEMPLATES = [
+// The person's own life (2026-11-11: a match here shows the 988 line, helpKind.ts "crisis").
+const SELF_TEMPLATES = [
   // Wanting to die, or not wanting to be alive.
   "i want to (die|be dead)",
   "i (wish|wished) i (was|were) dead",
@@ -33,7 +34,10 @@ const TEMPLATES = [
   "i will (kill|hurt|harm) myself",
   "i (might|should) kill myself",
   "(thinking|thought|thoughts) (about|of) (killing|hurting|harming) myself",
-  // Intent to harm someone else.
+];
+
+// Intent to harm someone else (a match here shows 988 and 911, helpKind.ts "harm_others").
+const OTHERS_TEMPLATES = [
   "i want to (kill|murder|hurt) (him|her|them|someone|somebody)",
   "i am going to (kill|murder|hurt) (him|her|them|someone|somebody)",
   "i will (kill|murder|hurt) (him|her|them|someone|somebody)",
@@ -55,8 +59,11 @@ function expand(template: string): string[] {
   return found[1].split("|").flatMap((option) => expand(template.replace(group, () => option)));
 }
 
+const SELF_PHRASES: readonly string[] = SELF_TEMPLATES.flatMap(expand);
+const OTHERS_PHRASES: readonly string[] = OTHERS_TEMPLATES.flatMap(expand);
+
 // Exported for the tests only.
-export const CRISIS_PHRASES: readonly string[] = TEMPLATES.flatMap(expand);
+export const CRISIS_PHRASES: readonly string[] = [...SELF_PHRASES, ...OTHERS_PHRASES];
 export const BENIGN_IDIOMS: readonly string[] = BENIGN_TEMPLATES.flatMap(expand);
 
 const CONTRACTIONS = new Map([
@@ -108,9 +115,19 @@ export function normalizeForMatch(text: string): string {
     .join(" ");
 }
 
-// True when the text holds one of the phrases as whole words. Spaces are put on both ends so "diet" is not "die".
-export function matchCrisisPhrase(text: string): boolean {
+// Which group of phrases the text holds as whole words, the person's own life first, or null. Spaces are put on both ends so
+// "diet" is not "die". The group only chooses the help line (helpKind.ts); it is never stored, shown or logged.
+export type PhraseGroup = "self" | "others";
+
+export function matchCrisisGroup(text: string): PhraseGroup | null {
   let padded = ` ${normalizeForMatch(text)} `;
   for (const idiom of BENIGN_IDIOMS) padded = padded.replaceAll(` ${idiom} `, "  ");
-  return CRISIS_PHRASES.some((phrase) => padded.includes(` ${phrase} `));
+  if (SELF_PHRASES.some((phrase) => padded.includes(` ${phrase} `))) return "self";
+  if (OTHERS_PHRASES.some((phrase) => padded.includes(` ${phrase} `))) return "others";
+  return null;
+}
+
+// True when the text holds one of the phrases as whole words.
+export function matchCrisisPhrase(text: string): boolean {
+  return matchCrisisGroup(text) !== null;
 }
