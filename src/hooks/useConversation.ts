@@ -448,6 +448,21 @@ export function useConversation(params: Params) {
     void load();
   }, [load]);
 
+  // After a live talk (step 39): its turns were saved on the server as this conversation's messages, in the conversation the
+  // server answered with (a reflection's existing one wins). Read again, with no loading state; a read that fails keeps the screen.
+  const refreshAfterTalk = useCallback(
+    async (id: string) => {
+      const run = ++loads.current;
+      const result = await getConversation(id);
+      if (!mounted.current || run !== loads.current || !result.ok || result.data.conversation === null) return;
+      idRef.current = id;
+      setConversationId(id);
+      setConversation(result.data.conversation);
+      put(result.data.messages);
+    },
+    [put],
+  );
+
   // The ⋯ menu's Delete forever. Online only; the screen goes back afterwards.
   const remove = useCallback(async (): Promise<boolean> => {
     const result = await deleteConversation(idRef.current);
@@ -484,6 +499,7 @@ export function useConversation(params: Params) {
     sendStarter,
     dismissNotice: () => setNotice(null),
     reload,
+    refreshAfterTalk,
     remove,
   };
 }

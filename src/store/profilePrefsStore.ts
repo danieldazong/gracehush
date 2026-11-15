@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { AMBIENT_SOUNDS } from "@/constants/app";
+import { isScholarVoiceKey, type ScholarVoiceKey } from "@/constants/scholarVoices";
 import type { ProfilePatch, SubscriptionTier } from "@/types";
 
 import { safeStorage } from "./safeStorage";
@@ -17,6 +18,9 @@ import { safeStorage } from "./safeStorage";
 // - `aiWording` is which words of that permission the account allowed (step 38): AI_WORDING names Scholar beside the
 //   devotionals. Missing means the first words (2026-11-07), and an account that allowed under them sees a one-time note in its
 //   first Scholar conversation, which records the new words.
+// - `voicePermissionAt` (step 39) is when this account allowed its voice to go to ElevenLabs in a live talk, or missing for not
+//   yet. It lives only on this phone, like the AI permission, and a talk needs both.
+// - `scholarVoice` (step 39) is the voice this account chose for Scholar's live talk, or missing for the default. On this phone only.
 // No journal text is kept here.
 export type Settings = Required<ProfilePatch>;
 
@@ -31,6 +35,8 @@ export type ProfileEntry = {
   snapshot: ServerSnapshot | null;
   aiPermissionAt: string | null;
   aiWording?: number;
+  voicePermissionAt?: string;
+  scholarVoice?: ScholarVoiceKey;
 };
 
 // The permission's current words (step 38). The first words, which named only the devotionals, were 1.
@@ -43,6 +49,8 @@ interface ProfilePrefsState {
   saveSnapshot: (userId: string, snapshot: ServerSnapshot) => void;
   setAiPermission: (userId: string, at: string | null) => void;
   markAiWording: (userId: string) => void; // the one-time note was shown
+  setVoicePermission: (userId: string, at: string | null) => void;
+  setScholarVoice: (userId: string, voice: ScholarVoiceKey) => void;
   forgetUser: (userId: string) => void; // account deletion
 }
 
@@ -142,6 +150,20 @@ export const useProfilePrefsStore = create<ProfilePrefsState>()(
           if (entry === undefined || entry.aiWording === AI_WORDING) return state;
           return { byUser: { ...state.byUser, [userId]: { ...entry, aiWording: AI_WORDING } } };
         }),
+      setVoicePermission: (userId, at) =>
+        set((state) => {
+          const entry = state.byUser[userId] ?? emptyEntry();
+          const next: ProfileEntry = { ...entry };
+          if (at === null) delete next.voicePermissionAt;
+          else next.voicePermissionAt = at;
+          return { byUser: { ...state.byUser, [userId]: next } };
+        }),
+      setScholarVoice: (userId, voice) =>
+        set((state) => {
+          const entry = state.byUser[userId] ?? emptyEntry();
+          if (entry.scholarVoice === voice) return state;
+          return { byUser: { ...state.byUser, [userId]: { ...entry, scholarVoice: voice } } };
+        }),
       forgetUser: (userId) =>
         set((state) => ({
           byUser: Object.fromEntries(Object.entries(state.byUser).filter(([id]) => id !== userId)),
@@ -179,6 +201,9 @@ export const useProfilePrefsStore = create<ProfilePrefsState>()(
                   aiPermissionAt: isTimestamp(entry.aiPermissionAt) ? entry.aiPermissionAt : null,
                   // Kept only when it is a whole number: a missing or damaged value reads as the first words.
                   ...(Number.isInteger(entry.aiWording) ? { aiWording: entry.aiWording as number } : {}),
+                  // Missing, or damaged, reads as no voice permission and the default voice (step 39).
+                  ...(isTimestamp(entry.voicePermissionAt) ? { voicePermissionAt: entry.voicePermissionAt } : {}),
+                  ...(isScholarVoiceKey(entry.scholarVoice) ? { scholarVoice: entry.scholarVoice } : {}),
                 },
               ],
             ];

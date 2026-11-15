@@ -122,7 +122,7 @@ function PaywallReady({
 }: {
   state: ReadyState;
   source: "profile" | "limit" | "scholar";
-  reason: "messages" | "listen" | undefined;
+  reason: "messages" | "listen" | "talk" | undefined;
   hasEntry: boolean;
   pinned: boolean;
   linkNotice: LinkNotice | null;

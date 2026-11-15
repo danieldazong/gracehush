@@ -29,6 +29,7 @@ const icons = {
   send: { android: "arrow_upward", ios: "arrow.up" },
   keyboard: { android: "keyboard", ios: "keyboard" },
   close: { android: "close", ios: "xmark" },
+  talk: { android: "graphic_eq", ios: "waveform" },
 } satisfies Record<string, SymbolViewProps["name"]>;
 
 type ConversationComposerProps = {
@@ -39,13 +40,24 @@ type ConversationComposerProps = {
   // False when nothing was sent: the words stay in the field.
   onSend: (text: string) => boolean;
   onSendSpoken: (take: SpokenTake) => SpokenSend;
+  // Step 39: starts a live talk; null hides the Talk button (a build with no WebRTC, or a free account in a heavy conversation).
+  onTalk?: (() => void) | null;
 };
 
 // Scholar's composer (step 38), pinned under the conversation: Type (a field and one button: a ghost mic while the field is
 // empty, a plum send once there are words) and Speak (a take of at most two minutes, sent as a recording that the server
 // transcribes and screens). Never disabled by a limit: a message is always sent, because the server screens it first and answers
-// a heavy one whatever the count. The AI line under it is always on screen.
-export function ConversationComposer({ initialMode, busy, inputRef, onSend, onSendSpoken }: ConversationComposerProps) {
+// a heavy one whatever the count. The AI line under it is always on screen. Since step 39 a plum Talk button sits beside the mic
+// while the field is empty, and starts a live talk. It is in the Speak row too, while no take is under way (2026-11-15: the
+// owner opened a conversation from the ask bar's microphone, which lands in Speak, and found it missing there).
+export function ConversationComposer({
+  initialMode,
+  busy,
+  inputRef,
+  onSend,
+  onSendSpoken,
+  onTalk = null,
+}: ConversationComposerProps) {
   const [mode, setMode] = useState(initialMode);
   const [text, setText] = useState("");
   // Each take is a message: its id names the file (recordings/chat-{id}.m4a) and the request. A sent take gets a new one.
@@ -92,18 +104,21 @@ export function ConversationComposer({ initialMode, busy, inputRef, onSend, onSe
               </View>
             </Pressable>
           ) : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={copy.scholar.a11y.speak}
-              accessibilityState={{ disabled: busy }}
-              disabled={busy}
-              onPress={() => setMode("speak")}
-              style={({ pressed }) => [busy && styles.disabled, pressed && styles.pressed]}
-            >
-              <View className="size-11 items-center justify-center rounded-full border border-petal bg-card">
-                <Icon name={icons.mic} size={20} color={colors.plum} />
-              </View>
-            </Pressable>
+            <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={copy.scholar.a11y.speak}
+                accessibilityState={{ disabled: busy }}
+                disabled={busy}
+                onPress={() => setMode("speak")}
+                style={({ pressed }) => [busy && styles.disabled, pressed && styles.pressed]}
+              >
+                <View className="size-11 items-center justify-center rounded-full border border-petal bg-card">
+                  <Icon name={icons.mic} size={20} color={colors.plum} />
+                </View>
+              </Pressable>
+              {onTalk !== null ? <TalkButton onPress={onTalk} disabled={busy} /> : null}
+            </>
           )}
         </View>
       ) : (
@@ -114,10 +129,30 @@ export function ConversationComposer({ initialMode, busy, inputRef, onSend, onSe
           onType={() => setMode("type")}
           onSent={() => setTakeId(randomUUID())}
           onSendSpoken={onSendSpoken}
+          onTalk={onTalk}
         />
       )}
       <Text className="text-center font-dm text-[11px] leading-[16px] text-mauve">{copy.scholar.aiLine}</Text>
     </View>
+  );
+}
+
+// The live-talk button, one shape in both rows so they cannot drift: a 44 plum circle with a white waveform.
+function TalkButton({ onPress, disabled }: { onPress: () => void; disabled: boolean }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={copy.scholar.talk.button}
+      accessibilityHint={copy.scholar.talk.hint}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [disabled && styles.disabled, pressed && styles.pressed]}
+    >
+      <View className="size-11 items-center justify-center rounded-full bg-plum">
+        <Icon name={icons.talk} size={20} color={colors.card} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -127,11 +162,14 @@ type SpeakRowProps = {
   onType: () => void;
   onSent: () => void;
   onSendSpoken: (take: SpokenTake) => SpokenSend;
+  // The same Talk as the Type row's (null hides it). Drawn only while nothing is being recorded: a take under way, paused or
+  // recorded has its own row, and a live talk would leave it behind.
+  onTalk: (() => void) | null;
 };
 
 // One take, from the first tap to its send. The recorder is New Entry's as it is; the take stops at two minutes here (the
 // recorder's own limit is New Entry's five), with a warning at 1:45. A take under a second is thrown away.
-function SpeakRow({ takeId, busy, onType, onSent, onSendSpoken }: SpeakRowProps) {
+function SpeakRow({ takeId, busy, onType, onSent, onSendSpoken, onTalk }: SpeakRowProps) {
   const recorder = useRecorder(chatRecordingId(takeId));
   const { state, durationMs, levels, error, stop, start, discard, recording: kept } = recorder;
   const recording = state === "recording";
@@ -288,6 +326,7 @@ function SpeakRow({ takeId, busy, onType, onSent, onSendSpoken }: SpeakRowProps)
           </View>
         </Pressable>
         <Text className="flex-1 text-center text-body text-mauve">{copy.scholar.speak.tap}</Text>
+        {onTalk !== null ? <TalkButton onPress={onTalk} disabled={busy || requesting} /> : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={copy.scholar.a11y.speak}

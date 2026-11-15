@@ -713,6 +713,8 @@ const view = (store) => {
       assert.deepEqual(mentioning(/from "@\/services\/ambientPlayer"/), [
         "src/screens/profile/ProfileScreen.tsx",
         "src/services/recorder.ts",
+        // Step 39: a live talk stops the bed (and the preview) before the microphone opens.
+        "src/services/talkAudio.ts",
         "src/store/playerStore.ts",
       ]);
     });

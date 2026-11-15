@@ -35,6 +35,18 @@ const nowPlayingOptions: NativeStackNavigationOptions = {
   animation: "slide_from_bottom",
 };
 
+// Scholar's live talk (step 39) is a full-screen page with no swipe to close: End, Close and the back key end the talk first.
+// The navigator loads its file only when the route opens, so Expo Go (which has no WebRTC) never loads the ElevenLabs package,
+// which registers WebRTC the moment it is imported.
+const talkOptions: NativeStackNavigationOptions = { presentation: "fullScreenModal", animation: "slide_from_bottom" };
+
+function loadTalkScreen() {
+  // A lazy require is React Navigation's documented way to load a screen on first use (getComponent).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return (require("@/screens/scholar/ScholarTalkScreen") as typeof import("@/screens/scholar/ScholarTalkScreen"))
+    .ScholarTalkScreen;
+}
+
 // A screen shown as a modal is presented outside the app's root view on iOS, so a SafeAreaView in it cannot find the root
 // SafeAreaProvider: it reads its own insets once, often before the modal is in place, and the Close row then sat under the
 // status bar (seen on the iPhone, 2026-10-27). A provider of its own follows the modal's real insets.
@@ -83,6 +95,7 @@ export function RootNavigator() {
           />
           <Stack.Screen name="Reflection" component={ReflectionScreen} />
           <Stack.Screen name="Conversation" component={ConversationScreen} />
+          <Stack.Screen name="ScholarTalk" getComponent={loadTalkScreen} options={talkOptions} layout={modalLayout} />
           <Stack.Screen
             name="NowPlaying"
             component={NowPlayingScreen}

@@ -989,7 +989,8 @@ async function contractChecks() {
     }
     const policy = read("src/services/analyticsPolicy.ts");
     const names = [...policy.matchAll(/name: "([a-z_]+)"/g)].map((match) => match[1]);
-    assert.equal(names.length, 20, names.join(","));
+    // Step 39 added scholar_talk_started and scholar_talk_ended (22 in all).
+    assert.equal(names.length, 22, names.join(","));
     for (const name of names) assert.ok(!/crisis|support|sign/.test(name), name);
   });
 }

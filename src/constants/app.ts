@@ -146,3 +146,14 @@ export const SCHOLAR_BREAK_NUDGE_TURNS = 20; // the break note, once a visit
 // The AI reminder (2026-11-11, the public page and New York's companion law): at the start of a conversation, and again before a
 // message sent this long after the last reminder.
 export const SCHOLAR_AI_REMINDER_MS = 3 * 60 * 60 * 1000;
+
+// Scholar's live talk (step 39). Every limit is the server's and reaches the app in `limits`: none is written here.
+export const SCHOLAR_VOICE_START_TIMEOUT_MS = 15_000; // the token from ElevenLabs, the row and the signed session
+export const SCHOLAR_VOICE_END_TIMEOUT_MS = 10_000;
+export const SCHOLAR_VOICE_END_RETRIES_MS = [2_000, 5_000]; // a failed end is tried again twice; the next start closes it anyway
+export const SCHOLAR_TALK_WARNING_S = 30; // "30 seconds left"
+export const SCHOLAR_TALK_END_GRACE_MS = 20_000; // at the cap, Scholar finishes its sentence, or this long at most
+export const SCHOLAR_TALK_LOW_S = 300; // after a talk, the line that says how much of the month is left, from this many seconds
+export const SCHOLAR_TALK_CONNECT_TIMEOUT_MS = 20_000; // ElevenLabs' connection, after the token
+export const SCHOLAR_TALK_REFRESH_MS = 1_500; // after an answer, the conversation is read again this long later
+export const KEEP_AWAKE_TALK_TAG = "gracehush-talk";

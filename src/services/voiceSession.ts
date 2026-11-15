@@ -2,16 +2,15 @@ import { createConnection, setSetupStrategy, setupWebRTCSession } from "@elevenl
 import { AndroidAudioTypePresets, AudioDeviceModule, AudioEngineMuteMode, AudioSession } from "@livekit/react-native";
 import { Platform } from "react-native";
 
-// Live voice (step 39), the TEST RUN: the voice session's setup, in place of the one @elevenlabs/react-native 1.2.39
-// registers (its newest release, with @elevenlabs/client 1.36.0). Theirs ends a talk in the wrong order: it switches the
-// iPhone's audio session off before it closes the connection, iOS refuses while the microphone and the speaker run
-// ("Session deactivation failed"), and that error skips the close, so the talk stays connected (found on the phone on
-// 2026-11-12: it ran on to the agent's 10-minute limit). Theirs also never gives the audio session back when a talk fails
-// to connect. This copy is theirs but for those two things, the microphone's mute mode below, and the native volume levels,
-// which their package does not export. Step 39's voice service carries the same fixes.
+// The live talk's voice session (step 39), in place of the one @elevenlabs/react-native 1.2.39 registers (with
+// @elevenlabs/client 1.36.0). Theirs ends a talk in the wrong order: it switches the iPhone's audio session off before it closes the
+// connection, iOS refuses while the microphone and the speaker run ("Session deactivation failed"), and that error skips the
+// close, so the talk stays connected (found on the phone in the test run, 2026-11-12: it ran on to the agent's limit). Theirs
+// also never gives the audio session back when a talk fails to connect. This copy is theirs but for those two things, the
+// microphone's mute mode below, and the native volume levels, which their package does not export.
 //
 // Installed right before each talk starts: their package registers its own setup when its module is first evaluated, so
-// installing at the start of a talk always wins.
+// installing at the start of a talk always wins. Only the Talk screen imports this file.
 
 type SessionEventKind =
   | "audio_session_released"
@@ -66,7 +65,7 @@ async function setInputMixerMute(onEvent?: SessionEvent): Promise<void> {
   }
 }
 
-export function installVoiceSessionSetup(onEvent?: SessionEvent): void {
+export function installVoiceSession(onEvent?: SessionEvent): void {
   const strategy: SetupStrategy = async (options) => {
     if (options.connectionType === "websocket" || options.signedUrl) {
       throw new Error("Only WebRTC talks are supported on a phone.");

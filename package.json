@@ -6,6 +6,7 @@
     "@clerk/expo": "^4.13.0",
     "@clerk/expo-google-signin": "^1.1.0",
     "@config-plugins/react-native-webrtc": "15.0.2",
+    "@elevenlabs/client": "1.36.0",
     "@elevenlabs/react-native": "1.2.39",
     "@expo-google-fonts/dm-sans": "^0.4.2",
     "@expo-google-fonts/fraunces": "^0.4.1",

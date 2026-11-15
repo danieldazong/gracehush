@@ -1,4 +1,4 @@
-// Scholar's checks on the phone's side (step 38, Part two). They run the app's real gateway, queries, repository, conversation
+// Scholar's checks on the phone's side (step 38, Part two, and step 39's live talk). They run the app's real gateway, queries, repository, conversation
 // hook, row builder and Listen player, with the real supabase-js client against the fake Supabase of step 25
 // (../journal-data/world.cjs), whose scholar-turn and scholar-speak answer as the real functions do without a model, and read
 // the screens' source for what a plain Node run cannot draw. Every check ends by asserting that nothing the database refuses was
@@ -881,6 +881,555 @@ async function copyChecks() {
   });
 }
 
+// ================================================================== the live talk (step 39)
+const talkOf = (w) => w.use("@/services/scholarTalk");
+
+// The account's two answers (Google's AI, and its voice to ElevenLabs) and, optionally, its chosen voice.
+function allowTalk(w, { ai = true, voice = true, voiceKey = null } = {}) {
+  const store = w.use("@/store/profilePrefsStore").useProfilePrefsStore.getState();
+  const at = new Date(clock.now).toISOString();
+  if (ai) store.setAiPermission("user_a", at);
+  if (voice) store.setVoicePermission("user_a", at);
+  if (voiceKey !== null) store.setScholarVoice("user_a", voiceKey);
+}
+
+const paid = (w, sub = "user_a") => void (w.server.state.serverPlans[sub] = "pro");
+
+// The Talk screen's side: ElevenLabs' three calls, recorded.
+function fakeControls(talk) {
+  const controls = { starts: [], ends: 0, mutes: [] };
+  controls.detach = talk.attachTalkControls({
+    start: (token, session) => void controls.starts.push({ token, session }),
+    end: () => void (controls.ends += 1),
+    setMuted: (muted) => void controls.mutes.push(muted),
+  });
+  return controls;
+}
+
+const events = (w, name) => w.analyticsCalls.filter(([event]) => event === name).map(([, props]) => props);
+
+// Begins a talk in CONV and connects it, as the Talk screen does.
+async function liveTalk(w, talk, input = {}) {
+  await talk.beginTalk({ conversationId: CONV, entryId: null, ...input });
+  await settle(3);
+  talk.talkEvent({ type: "connected" });
+  await settle(2);
+  assert.equal(talk.getTalkState().phase, "live");
+}
+
+async function talkChecks() {
+  await test("talk gateway: a start carries the conversation, the voice key and the region in the database's region; an end only the talk", async (w) => {
+    paid(w);
+    allowTalk(w, { voiceKey: "deep" });
+    const started = await repo(w).startTalk({ conversationId: CONV, entryId: null });
+    assert.equal(started.ok, true);
+    const [call] = calls(w, "scholar-voice-start");
+    assert.deepEqual(Object.keys(call.body).sort(), ["conversationId", "region", "voice"]);
+    assert.equal(call.body.voice, "deep", "the chosen voice, as a key: the phone never knows a voice id");
+    assert.equal(call.body.region, w.use("@/utils/region").deviceRegionCode());
+    assert.equal(call.headers["x-region"], "us-east-1");
+    assert.equal(call.sub, "user_a", "the caller is the session's, never a body field");
+    assert.equal(started.data.voice, "deep");
+    assert.equal(started.data.conversationToken, "token-talk-1");
+    assert.equal(started.data.session, "session-talk-1");
+    assert.deepEqual(
+      { talkSeconds: started.data.limits.talkSeconds, monthSecondsLeft: started.data.limits.monthSecondsLeft },
+      { talkSeconds: 600, monthSecondsLeft: 1800 },
+    );
+    assert.match(started.data.limits.resetsAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "a time the phone can read");
+    const ended = await repo(w).finishTalk(started.data.talkId);
+    assert.equal(ended.ok, true);
+    assert.equal(ended.limits.monthSecondsLeft, 1740, "what is left is the server's number");
+    const [end] = calls(w, "scholar-voice-end");
+    assert.deepEqual(Object.keys(end.body), ["talkId"]);
+    assert.equal(end.headers["x-region"], "us-east-1");
+    // From a reflection, the entry rides along.
+    const entry = serverRow(90);
+    w.server.state.entries.push(entry);
+    await repo(w).startTalk({ conversationId: mid(9), entryId: entry.id });
+    assert.equal(calls(w, "scholar-voice-start")[1].body.entryId, entry.id);
+    // An answer that is not the contract is UNKNOWN; a 402 carries talk_plan or talk_month.
+    w.server.state.functions["scholar-voice-start"].push(() => json(200, { talkId: "talk-x" }));
+    const odd = await repo(w).startTalk({ conversationId: CONV, entryId: null });
+    assert.equal(odd.ok, false);
+    assert.equal(odd.code, "UNKNOWN");
+    w.server.state.talkMonthLeft = 20;
+    const month = await repo(w).startTalk({ conversationId: CONV, entryId: null });
+    assert.equal(month.ok, false);
+    assert.equal(month.code, "LIMIT_REACHED");
+    assert.equal(month.usage.kind, "talk_month");
+    w.server.state.serverPlans.user_a = "free";
+    const plan = await repo(w).startTalk({ conversationId: CONV, entryId: null });
+    assert.equal(plan.code, "LIMIT_REACHED");
+    assert.equal(plan.usage.kind, "talk_plan");
+  }, { permission: true });
+
+  await test("talk gateway: no start without the AI permission, without the voice permission, offline or on the mock data; an end always", async (w) => {
+    paid(w);
+    const start = () => repo(w).startTalk({ conversationId: CONV, entryId: null });
+    assert.equal((await start()).code, "NO_PERMISSION");
+    allowTalk(w, { voice: false });
+    assert.equal((await start()).code, "NO_VOICE_PERMISSION");
+    allowTalk(w);
+    offline(w);
+    assert.equal((await start()).code, "OFFLINE");
+    w.use("@/store/offlineStore").useOfflineStore.getState().setNet(true, true);
+    w.use("@/store/devStore").useDevStore.getState().setDataSource("mock");
+    assert.equal((await start()).code, "MOCK");
+    assert.equal(calls(w, "scholar-voice-start").length, 0, "nothing was sent");
+    w.use("@/store/devStore").useDevStore.getState().setDataSource("supabase");
+    const started = await start();
+    assert.equal(started.ok, true);
+    // A talk whose permission was taken back during it still closes.
+    w.use("@/store/profilePrefsStore").useProfilePrefsStore.getState().setVoicePermission("user_a", null);
+    assert.equal((await repo(w).finishTalk(started.data.talkId)).ok, true);
+  }, { permission: true });
+
+  await test("talk: starting, connecting, live, ending, ended; the app's sound stops before and the playback mode comes back after", async (w) => {
+    paid(w);
+    allowTalk(w);
+    const talk = talkOf(w);
+    const controls = fakeControls(talk);
+    const listening = w.appState.count();
+    const begun = talk.beginTalk({ conversationId: CONV, entryId: null });
+    assert.equal(talk.getTalkState().phase, "starting");
+    assert.deepEqual(w.talkAudio.calls, ["quiet", "awake"], "the app's own sound stops and the screen stays awake first");
+    assert.equal(w.appState.count(), listening + 1, "the talk watches the app's state");
+    await begun;
+    await settle(3);
+    let state = talk.getTalkState();
+    assert.equal(state.phase, "connecting");
+    assert.equal(state.talkId, "talk-1");
+    assert.equal(state.voice, "warm", "the default voice");
+    assert.equal(state.secondsLeft, 600, "the talk's own cap, from the server");
+    assert.deepEqual(controls.starts, [{ token: "token-talk-1", session: "session-talk-1" }], "ElevenLabs gets the token and the session");
+    talk.talkEvent({ type: "connected" });
+    assert.equal(talk.getTalkState().phase, "live");
+    assert.deepEqual(events(w, "scholar_talk_started"), [{ voice: "warm" }]);
+    await advance(65_000);
+    assert.equal(talk.getTalkState().secondsLeft, 535, "the countdown follows the clock");
+    talk.talkEvent({ type: "user_spoke" });
+    assert.equal(talk.getTalkState().mode, "thinking");
+    talk.talkEvent({ type: "mode", mode: "speaking" });
+    assert.equal(talk.getTalkState().mode, "speaking");
+    talk.talkEvent({ type: "mode", mode: "listening" });
+    assert.equal(talk.getTalkState().mode, "listening");
+    await advance(2_000);
+    assert.ok(calls(w, "scholar-turn").length === 0, "a refresh only reads");
+    await talk.endTalk();
+    state = talk.getTalkState();
+    assert.equal(state.phase, "ended");
+    assert.equal(state.endedBy, "person");
+    assert.equal(controls.ends, 1, "ElevenLabs' connection is closed");
+    assert.deepEqual(w.talkAudio.calls, ["quiet", "awake", "asleep", "playback mode"], "the screen may sleep and the playback mode is back");
+    assert.equal(w.appState.count(), listening, "the app's state is no longer watched");
+    assert.deepEqual(events(w, "scholar_talk_ended"), [{ length: "1_to_5", ended_by: "person" }]);
+    await talk.talkClosing();
+    assert.deepEqual(calls(w, "scholar-voice-end").map((call) => call.body.talkId), ["talk-1"], "the server is told at once");
+    const last = talk.getTalkState().last;
+    assert.equal(last.requestedId, CONV);
+    assert.equal(last.conversationId, CONV);
+    assert.equal(last.limits.monthSecondsLeft, 1740, "what is left of the month, as the server answered the end");
+    // The screen has gone: back to idle, with the last talk kept for the Conversation screen.
+    talk.resetTalk();
+    assert.equal(talk.getTalkState().phase, "idle");
+    assert.equal(talk.getTalkState().last.seq, last.seq);
+    controls.detach();
+  }, { permission: true });
+
+  await test("talk: the lock and the Home Screen end a talk, Control Center (inactive) does not", async (w) => {
+    paid(w);
+    allowTalk(w);
+    const talk = talkOf(w);
+    const controls = fakeControls(talk);
+    await liveTalk(w, talk);
+    w.appState.emit("inactive");
+    await settle(3);
+    assert.equal(talk.getTalkState().phase, "live", "inactive never ends a talk");
+    assert.equal(controls.ends, 0);
+    w.appState.emit("background");
+    await settle(5);
+    assert.equal(talk.getTalkState().phase, "ended");
+    assert.equal(talk.getTalkState().endedBy, "left_app");
+    assert.equal(controls.ends, 1);
+    await talk.talkClosing();
+    assert.equal(calls(w, "scholar-voice-end").length, 1);
+  }, { permission: true });
+
+  await test("talk: at its cap Scholar finishes its sentence, for 20 seconds at most; a silent talk ends at once; no time left is the server's 402", async (w) => {
+    paid(w);
+    allowTalk(w);
+    w.server.state.talkMonthLeft = 90;
+    const talk = talkOf(w);
+    fakeControls(talk);
+    // 90 seconds: at the cap Scholar is speaking, and the talk ends when it stops.
+    await liveTalk(w, talk);
+    assert.equal(talk.getTalkState().secondsLeft, 90);
+    await advance(60_000);
+    assert.equal(talk.getTalkState().secondsLeft, 30);
+    talk.talkEvent({ type: "mode", mode: "speaking" });
+    await advance(31_000);
+    let state = talk.getTalkState();
+    assert.equal(state.capReached, true);
+    assert.equal(state.phase, "live", "Scholar finishes its sentence");
+    talk.talkEvent({ type: "mode", mode: "listening" });
+    await settle(5);
+    assert.equal(talk.getTalkState().endedBy, "cap");
+    await talk.talkClosing();
+    // 30 seconds left of the month: speaking at the cap, it ends 20 seconds later.
+    talk.resetTalk();
+    await liveTalk(w, talk);
+    assert.equal(talk.getTalkState().secondsLeft, 30);
+    talk.talkEvent({ type: "mode", mode: "speaking" });
+    await advance(31_000);
+    await advance(18_000);
+    assert.equal(talk.getTalkState().phase, "live", "the grace is 20 seconds");
+    await advance(1_500);
+    assert.equal(talk.getTalkState().phase, "ended");
+    assert.equal(talk.getTalkState().endedBy, "cap");
+    await talk.talkClosing();
+    // Listening at the cap: it ends at once.
+    w.server.state.talkMonthLeft = 60;
+    talk.resetTalk();
+    await liveTalk(w, talk);
+    await advance(60_000);
+    assert.equal(talk.getTalkState().phase, "ended");
+    assert.equal(talk.getTalkState().endedBy, "cap");
+    await talk.talkClosing();
+    // No time left: the server refuses, and the talk fails with its numbers after the phone's side is put back.
+    talk.resetTalk();
+    const before = w.talkAudio.calls.length;
+    await talk.beginTalk({ conversationId: CONV, entryId: null });
+    await settle(3);
+    state = talk.getTalkState();
+    assert.equal(state.phase, "failed");
+    assert.equal(state.failure.code, "LIMIT_REACHED");
+    assert.equal(state.failure.usage.kind, "talk_month");
+    assert.deepEqual(w.talkAudio.calls.slice(before), ["quiet", "awake", "asleep", "playback mode"]);
+    assert.deepEqual(
+      events(w, "scholar_talk_ended").map((props) => props.ended_by),
+      ["cap", "cap", "cap"],
+      "an ended talk is tracked once; a failed start never",
+    );
+  }, { permission: true });
+
+  await test("talk: a heavy talk has its help line, no countdown and no cap, sends no event and costs nothing", async (w) => {
+    paid(w);
+    allowTalk(w);
+    seedConversation(w, {
+      heavy: true,
+      messages: [
+        userRow(1, "HEAVY words", { is_heavy: true }),
+        answerRow(2, 1, { is_heavy: true, content: { blocks: [{ type: "text", text: "An answer." }], help: "abuse" } }),
+      ],
+    });
+    const talk = talkOf(w);
+    fakeControls(talk);
+    await talk.beginTalk({ conversationId: CONV, entryId: null });
+    await settle(5);
+    let state = talk.getTalkState();
+    assert.equal(state.heavy, true, "the server's answer says heavy");
+    assert.equal(state.secondsLeft, null, "no countdown");
+    assert.equal(state.help, "abuse", "the conversation's own help line");
+    talk.talkEvent({ type: "connected" });
+    await advance(700_000);
+    state = talk.getTalkState();
+    assert.equal(state.phase, "live", "never cut");
+    assert.equal(state.capReached, false);
+    await talk.endTalk();
+    await talk.talkClosing();
+    assert.deepEqual(events(w, "scholar_talk_started"), [], "no event about a hard moment");
+    assert.deepEqual(events(w, "scholar_talk_ended"), []);
+    assert.equal(talk.getTalkState().last.limits, null, "nothing of it is counted, so nothing is shown");
+    assert.equal(calls(w, "scholar-voice-end").length, 1, "its end is still told");
+    assert.equal(w.server.state.talkMonthLeft, 1800, "the month is untouched");
+  }, { permission: true });
+
+  await test("talk: a talk that turns heavy stops its countdown and takes the newest help line", async (w) => {
+    paid(w);
+    allowTalk(w);
+    seedConversation(w, { messages: [userRow(1, "A question"), answerRow(2, 1)] });
+    const talk = talkOf(w);
+    fakeControls(talk);
+    await liveTalk(w, talk);
+    assert.equal(talk.getTalkState().secondsLeft, 600);
+    // A turn of the talk was screened heavy: the server marks the conversation and saves the answer with its line.
+    const conversation = w.server.state.scholarConversations.find((row) => row.id === CONV);
+    conversation.is_heavy = true;
+    w.server.state.scholarMessages.push(
+      {
+        id: mid(3), conversation_id: CONV, user_id: "user_a", role: "user", reply_to: null, input_type: "audio", status: "ready",
+        error_code: null, is_heavy: true, claimed_at: null, created_at: stamp(clock.now + 10_000), content: { blocks: [{ type: "text", text: "HEAVY" }] },
+      },
+      {
+        id: mid(4), conversation_id: CONV, user_id: "user_a", role: "scholar", reply_to: mid(3), input_type: null, status: "ready",
+        error_code: null, is_heavy: true, claimed_at: null, created_at: stamp(clock.now + 11_000),
+        content: { blocks: [{ type: "text", text: "An answer." }], help: "crisis" },
+      },
+    );
+    talk.talkEvent({ type: "mode", mode: "speaking" });
+    talk.talkEvent({ type: "mode", mode: "listening" });
+    await advance(2_000);
+    const state = talk.getTalkState();
+    assert.equal(state.heavy, true);
+    assert.equal(state.secondsLeft, null);
+    assert.equal(state.help, "crisis");
+    await advance(700_000);
+    assert.equal(talk.getTalkState().phase, "live", "never cut once heavy");
+    await talk.endTalk();
+    assert.deepEqual(events(w, "scholar_talk_ended"), [], "a talk that ended heavy is not tracked");
+  }, { permission: true });
+
+  await test("talk: a connection that never comes ends after 20 seconds; a dropped one ends with no second close", async (w) => {
+    paid(w);
+    allowTalk(w);
+    const talk = talkOf(w);
+    const controls = fakeControls(talk);
+    await talk.beginTalk({ conversationId: CONV, entryId: null });
+    await settle(3);
+    await advance(19_000);
+    assert.equal(talk.getTalkState().phase, "connecting");
+    await advance(1_500);
+    assert.equal(talk.getTalkState().phase, "ended");
+    assert.equal(talk.getTalkState().endedBy, "dropped");
+    assert.equal(controls.ends, 1);
+    assert.deepEqual(events(w, "scholar_talk_ended"), [], "a talk that never went live is not tracked");
+    await talk.talkClosing();
+    talk.resetTalk();
+    await liveTalk(w, talk);
+    talk.talkEvent({ type: "disconnected" });
+    await settle(5);
+    assert.equal(talk.getTalkState().endedBy, "dropped");
+    assert.equal(controls.ends, 1, "a connection that is already gone is not closed again");
+    talk.resetTalk();
+    await liveTalk(w, talk);
+    talk.talkEvent({ type: "error" });
+    await settle(5);
+    assert.equal(talk.getTalkState().endedBy, "dropped");
+    assert.equal(controls.ends, 2, "after an error the connection is closed");
+    await talk.talkClosing();
+  }, { permission: true });
+
+  await test("talk: one talk at a time; ending while it starts closes the server's talk and never reaches ElevenLabs", async (w) => {
+    paid(w);
+    allowTalk(w);
+    let release;
+    const held = new Promise((resolve) => (release = resolve));
+    w.server.state.functions["scholar-voice-start"].push((call) => held.then(() => w.server.state.scholarRoutes.voiceStart(call.body, call.sub)));
+    const talk = talkOf(w);
+    const controls = fakeControls(talk);
+    const first = talk.beginTalk({ conversationId: CONV, entryId: null });
+    await settle(3);
+    await talk.beginTalk({ conversationId: CONV, entryId: null });
+    await settle(3);
+    assert.equal(calls(w, "scholar-voice-start").length, 1, "a second start while one is on does nothing");
+    await talk.endTalk();
+    assert.equal(talk.getTalkState().phase, "ended");
+    assert.equal(controls.ends, 0, "nothing to close at ElevenLabs yet");
+    release();
+    await first;
+    await settle(5);
+    await talk.talkClosing();
+    assert.deepEqual(controls.starts, [], "the token never reaches ElevenLabs");
+    assert.deepEqual(calls(w, "scholar-voice-end").map((call) => call.body.talkId), ["talk-1"], "the talk the server opened is closed");
+  }, { permission: true });
+
+  await test("talk: the end is told twice more after a failure, never after NOT_FOUND", async (w) => {
+    paid(w);
+    allowTalk(w);
+    const talk = talkOf(w);
+    fakeControls(talk);
+    const queue = w.server.state.functions["scholar-voice-end"];
+    queue.push(() => W.fnError(500, "INTERNAL"), () => W.fnError(500, "INTERNAL"));
+    await liveTalk(w, talk);
+    await talk.endTalk();
+    await settle(3);
+    assert.equal(calls(w, "scholar-voice-end").length, 1);
+    await advance(2_000);
+    assert.equal(calls(w, "scholar-voice-end").length, 2);
+    await advance(5_000);
+    assert.equal(calls(w, "scholar-voice-end").length, 3);
+    await talk.talkClosing();
+    assert.equal(talk.getTalkState().last.limits.monthSecondsLeft, 1740, "the third try answered");
+    await advance(60_000);
+    assert.equal(calls(w, "scholar-voice-end").length, 3, "and nothing more");
+    talk.resetTalk();
+    queue.push(() => W.fnError(404, "NOT_FOUND"));
+    await liveTalk(w, talk);
+    await talk.endTalk();
+    await advance(60_000);
+    assert.equal(calls(w, "scholar-voice-end").length, 4, "NOT_FOUND is not tried again");
+  }, { permission: true });
+
+  await test("talk: mute reaches ElevenLabs only while live; sign-out ends a talk and keeps nothing of it", async (w) => {
+    paid(w);
+    allowTalk(w);
+    const talk = talkOf(w);
+    const controls = fakeControls(talk);
+    await talk.beginTalk({ conversationId: CONV, entryId: null });
+    talk.setTalkMuted(true);
+    assert.deepEqual(controls.mutes, [], "not before the talk is live");
+    await settle(3);
+    talk.talkEvent({ type: "connected" });
+    talk.setTalkMuted(true);
+    assert.deepEqual(controls.mutes, [true]);
+    assert.equal(talk.getTalkState().muted, true);
+    await talk.endLiveTalk();
+    const state = talk.getTalkState();
+    assert.equal(state.phase, "idle");
+    assert.equal(state.last, null, "nothing of it is kept");
+    assert.equal(state.muted, false);
+    assert.equal(controls.ends, 1);
+    await talk.talkClosing();
+    assert.equal(calls(w, "scholar-voice-end").length, 1, "its end is told while the session still works");
+  }, { permission: true });
+
+  await test("talk: a failed talk turn is a spoken message with its words, and Try again sends it under the same id with no upload", async (w) => {
+    seedConversation(w, {
+      messages: [
+        userRow(1, "A spoken question", { input_type: "audio", status: "failed", error_code: "AI_UNAVAILABLE" }),
+      ],
+    });
+    const handle = renderConversation(w, { conversationId: CONV });
+    const state = await until(handle, (s) => s.phase === "ready" && s.messages.length === 1, "loaded");
+    assert.equal(state.messages[0].inputType, "audio");
+    state.retry(mid(1));
+    await until(handle, (s) => !s.sending && s.messages.length === 2, "the answer");
+    const [call] = calls(w, "scholar-turn");
+    assert.equal(call.body.messageId, mid(1), "the same id");
+    assert.deepEqual(call.body.input, { type: "audio", durationMs: 1_000 }, "the saved words answer it: no recording");
+    assert.equal(w.upload.calls.length, 0, "nothing is uploaded");
+    handle.unmount();
+  });
+
+  await test("talk: after a talk the conversation reads its turns from the server, in the conversation the server answered", async (w) => {
+    seedConversation(w, { messages: [userRow(1, "A question"), answerRow(2, 1)] });
+    const handle = renderConversation(w, { conversationId: CONV });
+    await until(handle, (s) => s.phase === "ready" && s.messages.length === 2, "loaded");
+    // The talk's two turns, saved on the server as this conversation's spoken messages.
+    w.server.state.scholarMessages.push(
+      {
+        id: mid(3), conversation_id: CONV, user_id: "user_a", role: "user", reply_to: null, input_type: "audio", status: "ready",
+        error_code: null, is_heavy: false, claimed_at: null, created_at: stamp(clock.now + 5_000), content: { blocks: [{ type: "text", text: "Spoken" }] },
+      },
+      {
+        id: mid(4), conversation_id: CONV, user_id: "user_a", role: "scholar", reply_to: mid(3), input_type: null, status: "ready",
+        error_code: null, is_heavy: false, claimed_at: null, created_at: stamp(clock.now + 6_000), content: { blocks: [{ type: "text", text: "Said." }] },
+      },
+    );
+    await handle.result.current.refreshAfterTalk(CONV);
+    const state = await until(handle, (s) => s.messages.length === 4, "the talk's turns");
+    assert.deepEqual(state.messages.map((message) => message.id), [mid(1), mid(2), mid(3), mid(4)]);
+    assert.equal(calls(w, "scholar-turn").length, 0, "reading is not sending");
+    handle.unmount();
+  });
+}
+
+function talkSourceChecks() {
+  sourceCheck("talk: the phone's voice keys equal the server's, and the default is the same", () => {
+    const app = read("src/constants/scholarVoices.ts");
+    const server = read("supabase/functions/_shared/voice/voices.ts");
+    const appKeys = /SCHOLAR_VOICE_KEYS = \[([^\]]+)\]/.exec(app)[1].match(/"(\w+)"/g).map((key) => key.slice(1, -1));
+    const serverKeys = [...server.matchAll(/\{ key: "(\w+)"/g)].map((match) => match[1]);
+    assert.deepEqual(appKeys, serverKeys);
+    assert.equal(/DEFAULT_SCHOLAR_VOICE: ScholarVoiceKey = "(\w+)"/.exec(app)[1], /DEFAULT_VOICE: VoiceKey = "(\w+)"/.exec(server)[1]);
+    const ids = [...server.matchAll(/elevenLabsVoiceId: "(\w+)"/g)].map((match) => match[1]);
+    assert.equal(ids.length, appKeys.length);
+    for (const rel of ["src/constants/scholarVoices.ts", "src/constants/sounds.ts", "src/constants/copy.ts"]) {
+      for (const id of ids) assert.ok(!read(rel).includes(id), `the phone holds no voice id (${rel})`);
+    }
+    const sounds = read("src/constants/sounds.ts");
+    for (const key of appKeys) assert.match(sounds, new RegExp(`\\b${key}:`), `a preview for ${key}`);
+  });
+
+  sourceCheck("talk: only the Talk screen loads ElevenLabs, and only once its route opens; Talk shows only where a talk can run", () => {
+    const files = [];
+    const walk = (dir) => {
+      for (const name of fs.readdirSync(path.join(REPO, dir))) {
+        const rel = `${dir}/${name}`;
+        if (fs.statSync(path.join(REPO, rel)).isDirectory()) walk(rel);
+        else if (/\.(ts|tsx)$/.test(name)) files.push(rel);
+      }
+    };
+    walk("src");
+    const importers = files.filter((rel) => /from "@elevenlabs\/|from "@livekit\//.test(read(rel)));
+    assert.deepEqual(importers.sort(), ["src/screens/scholar/ScholarTalkScreen.tsx", "src/services/voiceSession.ts"]);
+    const sessionUsers = files.filter((rel) => /from "@\/services\/voiceSession"/.test(read(rel)));
+    assert.deepEqual(sessionUsers, ["src/screens/scholar/ScholarTalkScreen.tsx"]);
+    const screenUsers = files.filter((rel) => /screens\/scholar\/ScholarTalkScreen/.test(read(rel)));
+    assert.deepEqual(screenUsers, ["src/navigation/RootNavigator.tsx"]);
+    assert.match(read("src/navigation/RootNavigator.tsx"), /getComponent=\{loadTalkScreen\}/, "loaded when the route opens");
+    const conversation = read("src/screens/scholar/ConversationScreen.tsx");
+    assert.match(conversation, /const canTalk = voiceSupported\(\) && !\(chat\.heavy && known && !isPaid\);/, "never a paywall in a heavy conversation");
+    assert.match(read("src/services/talkAudio.ts"), /stopScholarAudio\(\);/);
+  });
+
+  sourceCheck("talk: the composer draws the Talk button in the Type row and in the idle Speak row, from one component, and never while a take is under way", () => {
+    const composer = read("src/screens/scholar/ConversationComposer.tsx");
+    assert.equal((composer.match(/<TalkButton\b/g) ?? []).length, 2, "one in the Type row, one in the idle Speak row");
+    assert.equal((composer.match(/copy\.scholar\.talk\.button/g) ?? []).length, 1, "the button's label lives in one component");
+    // SpeakRow returns the denied row, then the recording, paused and recorded row, then the idle row: only the last draws Talk.
+    // (The slice starts at the denied branch: the function's own signature names onTalk as a parameter.)
+    const speakFrom = composer.indexOf("function SpeakRow(");
+    const speakRow = composer.slice(composer.indexOf('if (state === "denied") {', speakFrom));
+    const underway = speakRow.indexOf("if (recording || paused || recorded) {");
+    const idle = speakRow.indexOf("copy.scholar.speak.tap}</Text>");
+    assert.ok(speakFrom > 0 && underway > 0 && idle > underway, "the idle row comes after the take-under-way row");
+    assert.ok(!/TalkButton|onTalk/.test(speakRow.slice(0, idle)), "no Talk in the denied row or while a take is recording, paused or recorded");
+    assert.match(speakRow.slice(idle), /onTalk !== null \? <TalkButton onPress=\{onTalk\} disabled=\{busy \|\| requesting\} \/> : null/, "the idle row draws Talk beside the mic and waits like the mic does");
+    assert.match(composer, /onTalk=\{onTalk\}\s*\/>/, "the composer hands its Talk to the Speak row");
+  });
+
+  sourceCheck("talk: the Talk screen draws our saved words, never ElevenLabs' text, and knows no limit number", () => {
+    const screen = read("src/screens/scholar/ScholarTalkScreen.tsx");
+    assert.match(screen, /onMessage=\{\(\{ role \}\) =>/, "ElevenLabs' text is never read: only who spoke");
+    assert.ok(!/\b600\b|\b1800\b|\b30 \* 60\b/.test(screen), "the cap is the server's");
+    assert.ok(!/console\./.test(screen), "nothing is logged");
+    const service = read("src/services/scholarTalk.ts");
+    assert.ok(!/console\./.test(service));
+    assert.match(service, /if \(next === "background"\) void finish\("left_app"\);/, "only the background ends a talk");
+    assert.match(read("src/services/account.ts"), /await endLiveTalk\(\);/, "sign-out ends a talk first");
+  });
+}
+
+async function talkCopyChecks() {
+  await test("talk copy: curly punctuation, the GraceHush spelling, no promise of privacy, and every voice named", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    const strings = [];
+    const walk = (value) => {
+      if (typeof value === "string") strings.push(value);
+      else if (typeof value === "function") {
+        const arity = Math.max(value.length, 1);
+        strings.push(String(value(...Array(arity).fill("3"))), String(value(...Array(arity).fill("1"))));
+      } else if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === "object") Object.values(value).forEach(walk);
+    };
+    walk(copy.scholar.talk);
+    walk(copy.voicePermission);
+    walk(copy.scholarVoice);
+    walk(copy.profile.scholarVoice);
+    walk(copy.profile.voicePermission);
+    walk(copy.paywall.scholar.talk);
+    assert.ok(strings.length > 30, "the talk's words are there");
+    for (const s of strings) {
+      assert.ok(!s.includes("'"), `a straight apostrophe: ${s}`);
+      assert.ok(!s.includes('"'), `a straight quote: ${s}`);
+      assert.ok(!/Gracehush/.test(s), `the old spelling: ${s}`);
+      assert.ok(!/confidential|human|guarantee|encrypted/i.test(s), `a claim the app cannot make: ${s}`);
+    }
+    const keys = w.use("@/constants/scholarVoices").SCHOLAR_VOICE_KEYS;
+    for (const key of keys) {
+      assert.ok(copy.scholarVoice.voices[key]?.name, `a name for ${key}`);
+      assert.ok(copy.scholarVoice.voices[key]?.description, `a line for ${key}`);
+    }
+    const names = keys.map((key) => copy.scholarVoice.voices[key].name);
+    assert.equal(new Set(names).size, keys.length, "eight different names");
+    // The permission names who hears the voice, and that nothing is recorded by the app.
+    const permission = JSON.stringify(copy.voicePermission);
+    assert.match(permission, /ElevenLabs/);
+  });
+}
+
 (async () => {
   await dataChecks();
   await conversationChecks();
@@ -889,6 +1438,9 @@ async function copyChecks() {
   await accountChecks();
   sourceChecks();
   await copyChecks();
+  await talkChecks();
+  talkSourceChecks();
+  await talkCopyChecks();
   for (const stack of strayFetches) failures.push(stack);
   if (failures.length > 0) {
     console.log(`${passed} checks passed, ${failures.length} FAILED:\n`);

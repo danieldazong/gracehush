@@ -2,6 +2,7 @@ import { useAuth } from "@clerk/expo";
 import { useCallback, useState } from "react";
 
 import { syncNow } from "@/services/syncEngine";
+import { DEFAULT_SCHOLAR_VOICE, type ScholarVoiceKey } from "@/constants/scholarVoices";
 import { AI_WORDING, useProfilePrefsStore } from "@/store/profilePrefsStore";
 
 // The signed-in account's answer to the AI permission, for New Entry, Journal and Profile. Allowing it sends what was held at once;
@@ -20,6 +21,36 @@ export function useAiPermission() {
     [userId],
   );
   return { allowed, setAllowed };
+}
+
+// The live talk's permission (step 39): this account's voice goes to ElevenLabs in a talk. Kept on this phone only, like the AI
+// permission; account deletion forgets it, and sign-out keeps it.
+export function useVoicePermission() {
+  const { userId } = useAuth();
+  const allowed = useProfilePrefsStore((state) => userId != null && state.byUser[userId]?.voicePermissionAt != null);
+  const setAllowed = useCallback(
+    (next: boolean) => {
+      if (!userId) return;
+      useProfilePrefsStore.getState().setVoicePermission(userId, next ? new Date().toISOString() : null);
+    },
+    [userId],
+  );
+  return { allowed, setAllowed };
+}
+
+// The voice this account chose for Scholar's live talk (step 39), or the default.
+export function useScholarVoice() {
+  const { userId } = useAuth();
+  const voice = useProfilePrefsStore(
+    (state): ScholarVoiceKey => (userId != null ? state.byUser[userId]?.scholarVoice : undefined) ?? DEFAULT_SCHOLAR_VOICE,
+  );
+  const setVoice = useCallback(
+    (next: ScholarVoiceKey) => {
+      if (userId) useProfilePrefsStore.getState().setScholarVoice(userId, next);
+    },
+    [userId],
+  );
+  return { voice, setVoice };
 }
 
 // The one-time note (step 38): an account that allowed under the first words, which named only the devotionals, is told once

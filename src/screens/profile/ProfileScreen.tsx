@@ -23,6 +23,7 @@ import { DevToolsPanel } from "@/components/dev/DevToolsPanel";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { AmbientPanel } from "@/components/profile/AmbientPanel";
+import { VoiceRows } from "@/components/scholar/VoiceRows";
 import { PlanCard } from "@/components/profile/PlanCard";
 import { RemindersPanel } from "@/components/profile/RemindersPanel";
 import { SettingsGroup } from "@/components/profile/SettingsGroup";
@@ -35,7 +36,7 @@ import { PRIVACY_POLICY_URL, SUPPORT_EMAIL, TERMS_URL } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { analyticsEnv } from "@/constants/env";
 import { colors } from "@/constants/theme";
-import { useAiPermission } from "@/hooks/useAiPermission";
+import { useAiPermission, useScholarVoice, useVoicePermission } from "@/hooks/useAiPermission";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import { useProfileSettings } from "@/hooks/useProfileSettings";
@@ -58,6 +59,7 @@ import {
 import { haptics } from "@/services/haptics";
 import { requestNotificationPermission } from "@/services/notifications";
 import { restorePurchases } from "@/services/purchases";
+import { voiceSupported } from "@/services/voiceSupport";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
 import type { PermissionResult, ProfilePatch, TimeSlot } from "@/types";
@@ -73,6 +75,8 @@ const icons = {
   ambient: { android: "graphic_eq", ios: "waveform" },
   affirmations: { android: "notifications", ios: "bell" },
   aiPermission: { android: "pan_tool", ios: "hand.raised" },
+  scholarVoice: { android: "record_voice_over", ios: "person.wave.2" },
+  voicePermission: { android: "settings_voice", ios: "mic.badge.plus" },
   analytics: { android: "bar_chart", ios: "chart.bar" },
   // The row's tile is a plain cloud: the trailing icon carries the state, so a "done" cloud would contradict "pending".
   cloud: { android: "cloud", ios: "icloud" },
@@ -356,6 +360,12 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   const setAnalyticsConsent = useOnboardingStore((store) => store.setAnalyticsConsent);
   // Share with Google's AI (2026-11-03): this account's answer, kept on the phone only, so it never fails.
   const { allowed: aiAllowed, setAllowed: setAiAllowed } = useAiPermission();
+  // Scholar's live talk (step 39): the chosen voice and the ElevenLabs permission, kept on this phone only. Both rows show only in
+  // a build that can hold a talk.
+  const { allowed: voiceAllowed, setAllowed: setVoiceAllowed } = useVoicePermission();
+  const { voice, setVoice } = useScholarVoice();
+  const showVoice = voiceSupported();
+  const [voiceOpen, setVoiceOpen] = useState(false);
 
   // Screen state, reset when the screen unmounts. Both accordion rows start closed.
   const [remindersOpen, setRemindersOpen] = useState(false);
@@ -761,6 +771,32 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
                       />
                     ) : null}
                   </View>
+                  {showVoice ? (
+                    <View>
+                      <SettingsRow
+                        icon={icons.scholarVoice}
+                        title={text.scholarVoice.title}
+                        subtitle={copy.scholarVoice.voices[voice].name}
+                        trailing={
+                          <Icon
+                            name={voiceOpen ? icons.chevronDown : icons.chevron}
+                            size={20}
+                            color={colors.mauve}
+                          />
+                        }
+                        onPress={() => setVoiceOpen((open) => !open)}
+                        accessibilityLabel={text.rowLabel(text.scholarVoice.title, copy.scholarVoice.voices[voice].name)}
+                        accessibilityHint={voiceOpen ? text.scholarVoice.hideHint : text.scholarVoice.showHint}
+                        accessibilityState={{ expanded: voiceOpen }}
+                      />
+                      {voiceOpen ? (
+                        <View className="gap-2 pb-2">
+                          <Text className="pl-[68px] pr-4 text-body-sm text-mauve">{text.scholarVoice.helper}</Text>
+                          <VoiceRows selected={voice} onSelect={setVoice} framed={false} />
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
                 </SettingsGroup>
                 {has("saveAmbient") ? <Notice message={text.errors.save} /> : null}
               </View>
@@ -838,6 +874,29 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
                     accessibilityHint={aiAllowed ? text.aiPermission.on : text.aiPermission.off}
                     accessibilityState={{ checked: aiAllowed }}
                   />
+                  {showVoice ? (
+                    <SettingsRow
+                      icon={icons.voicePermission}
+                      title={text.voicePermission.title}
+                      subtitle={voiceAllowed ? text.voicePermission.on : text.voicePermission.off}
+                      trailing={
+                        <Switch
+                          value={voiceAllowed}
+                          trackColor={{ false: colors.petal, true: colors.plum }}
+                          thumbColor={colors.card}
+                          ios_backgroundColor={colors.petal}
+                        />
+                      }
+                      onPress={() => {
+                        haptics.selection();
+                        setVoiceAllowed(!voiceAllowed);
+                      }}
+                      accessibilityRole="switch"
+                      accessibilityLabel={text.voicePermission.title}
+                      accessibilityHint={voiceAllowed ? text.voicePermission.on : text.voicePermission.off}
+                      accessibilityState={{ checked: voiceAllowed }}
+                    />
+                  ) : null}
                   {analyticsEnv.status === "ok" ? (
                     <SettingsRow
                       icon={icons.analytics}

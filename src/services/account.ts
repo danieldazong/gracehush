@@ -13,6 +13,7 @@ import { startRealtime, stopRealtime } from "@/services/realtime";
 import { deleteAllRecordings } from "@/services/recordingFiles";
 import { endRevenueCatSession } from "@/services/revenuecat";
 import { clearScholarAudio } from "@/services/scholarPlayer";
+import { endLiveTalk } from "@/services/scholarTalk";
 import { startPlanWatch, stopPlanWatch } from "@/services/subscriptionSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { isSyncEngineStarted, startSyncEngine, stopSyncEngine } from "@/services/syncEngine";
@@ -101,7 +102,10 @@ async function deleteMockAccount(): Promise<RepoResult<null>> {
 // device-level (AGENTS.md, Authentication Rules). Steps 17, 24, 26, 28, 30, 33 and 34 each add their line (step 27's is
 // inside the player store's stop()).
 export async function signOutCleanup(): Promise<void> {
-  // Realtime stops first (step 33), before the database and the token go: a message on its way, or a read it started, then
+  // A live talk with Scholar ends first (step 39): its microphone closes and the server is told while the session still works.
+  // Nothing of a talk is kept on the phone.
+  await endLiveTalk();
+  // Realtime stops next (step 33), before the database and the token go: a message on its way, or a read it started, then
   // writes nothing.
   await stopRealtime();
   // A reminder edit that has not reached the server belongs to the account that made it: it must never be sent to

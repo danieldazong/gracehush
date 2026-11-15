@@ -1,5 +1,6 @@
-import { readScholarUsage, scholarSpeak, scholarTurn } from "@/api/journalApi";
+import { readScholarUsage, scholarSpeak, scholarTurn, scholarVoiceEnd, scholarVoiceStart } from "@/api/journalApi";
 import { copy } from "@/constants/copy";
+import { scholarVoiceOf, type ScholarVoiceKey } from "@/constants/scholarVoices";
 import { toConversation, toScholarMessage } from "@/data/mappers";
 import { getDataSource, takeMockScholarOutcome } from "@/data/mock/scenario";
 import * as mock from "@/data/mock/scholar";
@@ -10,7 +11,7 @@ import {
   selectConversations,
   selectMessages,
 } from "@/data/scholarRemote";
-import { hasAiPermission } from "@/services/aiPermission";
+import { getScholarVoice, hasAiPermission, hasVoicePermission } from "@/services/aiPermission";
 import { uploadRawRecording } from "@/services/mediaUpload";
 import { deleteRecording } from "@/services/recordingFiles";
 import { getSupabaseUserId } from "@/services/supabaseClient";
@@ -23,6 +24,8 @@ import type {
   ScholarTurnRequest,
   ScholarTurnResponse,
   ScholarUsage,
+  ScholarVoiceLimits,
+  ScholarVoiceStartResponse,
 } from "@/types";
 import { deviceRegionCode } from "@/utils/region";
 import { normalizeTimestamp } from "@/utils/timestamp";
@@ -179,6 +182,46 @@ export async function speak(messageId: string, part: number): Promise<SpeakResul
   const result = await scholarSpeak(withRegion({ messageId, part }));
   if (result.ok) return { ok: true, data: result.data };
   return { ok: false, code: result.code, usage: readScholarUsage(result.body) };
+}
+
+// ---- The live talk (step 39) ----
+// A talk that could not start: the function's own code, or NO_PERMISSION (Google's AI is not allowed), NO_VOICE_PERMISSION
+// (ElevenLabs is not allowed), OFFLINE and MOCK (the mock data has no voice), each with nothing sent. `usage` is what a 402
+// carries (talk_plan for a free account, talk_month when the month's time is used up).
+export type TalkStart = ScholarVoiceStartResponse & { voice: ScholarVoiceKey };
+export type TalkStartResult = { ok: true; data: TalkStart } | { ok: false; code: string; usage: ScholarUsage | null };
+export type TalkEndResult = { ok: true; limits: ScholarVoiceLimits } | { ok: false; code: string };
+
+function canonicalLimits(limits: ScholarVoiceLimits): ScholarVoiceLimits {
+  return { ...limits, resetsAt: normalizeTimestamp(limits.resetsAt) };
+}
+
+// Starts a live talk in a conversation: ElevenLabs' one-time token and the session the server signed. Both permissions are asked
+// first, then the mock data, then the network. The voice is the one this account chose on this phone; the server picks its
+// agent, and answers with the voice the talk really uses.
+export async function startTalk(input: { conversationId: string; entryId: string | null }): Promise<TalkStartResult> {
+  if (!hasAiPermission()) return { ok: false, code: "NO_PERMISSION", usage: null };
+  if (!hasVoicePermission()) return { ok: false, code: "NO_VOICE_PERMISSION", usage: null };
+  if (isMock()) return { ok: false, code: "MOCK", usage: null };
+  if (!selectCanSend(useOfflineStore.getState())) return { ok: false, code: "OFFLINE", usage: null };
+  const request = withRegion({
+    conversationId: input.conversationId,
+    voice: getScholarVoice(),
+    ...(input.entryId === null ? {} : { entryId: input.entryId }),
+  });
+  const result = await scholarVoiceStart(request);
+  if (!result.ok) return { ok: false, code: result.code, usage: readScholarUsage(result.body) };
+  return {
+    ok: true,
+    data: { ...result.data, voice: scholarVoiceOf(result.data.voice), limits: canonicalLimits(result.data.limits) },
+  };
+}
+
+// The talk is over. Ending always works: no permission is asked, so a talk whose permission was taken back during it still
+// closes. The answer is what is left of the month's talk time.
+export async function finishTalk(talkId: string): Promise<TalkEndResult> {
+  const result = await scholarVoiceEnd(talkId);
+  return result.ok ? { ok: true, limits: canonicalLimits(result.data.limits) } : { ok: false, code: result.code };
 }
 
 // Deletes a conversation for good (its messages go with it). Online only, never queued; one that is already gone counts as

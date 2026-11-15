@@ -802,6 +802,8 @@ async function accountChecks() {
       // Step 38: Scholar's voice stops and its parts go, and the session's turns are forgotten (expo-audio cannot load here).
       "@/services/scholarPlayer": { __esModule: true, clearScholarAudio: () => void order.push("scholar audio"), stopScholarAudio: () => undefined },
       "@/data/scholarRepository": { __esModule: true, forgetScholarSession: () => void order.push("scholar session") },
+      // Step 39: a live talk ends first, while the session still works (the talk service needs expo-keep-awake and expo-audio).
+      "@/services/scholarTalk": { __esModule: true, endLiveTalk: async () => void order.push("talk ended") },
     };
     const mod = makeWorld2(w, extra);
     const database = mod.use("@/db/database");
@@ -822,7 +824,8 @@ async function accountChecks() {
     };
     await mod.use("@/services/account").signOutCleanup();
     assert.ok(order.indexOf("engine stopped") < order.indexOf("database deleted"), order.join(" > "));
-    assert.equal(order[0], "realtime stopped", `Realtime stops before anything else: ${order.join(" > ")}`);
+    assert.equal(order[0], "talk ended", `a live talk ends before anything else: ${order.join(" > ")}`);
+    assert.equal(order[1], "realtime stopped", `Realtime stops next: ${order.join(" > ")}`);
     assert.equal(engine.isSyncEngineStarted(), false);
     assert.equal(database.isDatabaseOpen(), false);
     assert.equal(w.sqlite.exists(`gracehush-${sha16("user_a")}.db`), false);

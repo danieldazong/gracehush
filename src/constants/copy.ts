@@ -47,6 +47,44 @@ export const copy = {
       },
     ],
   },
+  // Scholar's live talk (step 39): the one-time sheet before the first talk names ElevenLabs (Apple's guideline 5.1.2(i)). Nothing
+  // is sent and no microphone opens before Allow. Drafted for the owner and the lawyer: what ElevenLabs keeps until GraceHush
+  // deletes a talk there (its words and a summary its own model writes) is said on the face (decision 35).
+  voicePermission: {
+    title: "Allow ElevenLabs to hear and speak for Scholar?",
+    body: "In a live talk, your voice goes to ElevenLabs, which turns it into text and speaks Scholar’s answers. Google’s AI still writes the answers, as it does when you type.",
+    trust: "ElevenLabs keeps no recording. It holds a talk’s words and a short summary until GraceHush deletes them there, soon after the talk ends, and its use of your talks to train its models is switched off.",
+    caption: "Nothing is sent until you tap Allow.",
+    allow: "Allow",
+    notNow: "Not now",
+    privacy: "Privacy Policy",
+  },
+  // The eight voices of a live talk (step 39): one Scholar, eight voices, named for how they sound (decision 30). The names are
+  // the owner's to change; the keys are constants/scholarVoices.ts's.
+  scholarVoice: {
+    title: "Choose Scholar’s voice",
+    start: "Start talking",
+    changeLater: "You can change this in Profile.",
+    preview: "Preview",
+    stop: "Stop",
+    voices: {
+      warm: { name: "Warm", description: "A woman’s voice · American · warm and reassuring" },
+      bright: { name: "Bright", description: "A woman’s voice · American · bright and gentle" },
+      clear: { name: "Clear", description: "A woman’s voice · British · clear and calm" },
+      soft: { name: "Soft", description: "A woman’s voice · British · soft and velvety" },
+      storyteller: { name: "Storyteller", description: "A man’s voice · British · a warm storyteller" },
+      deep: { name: "Deep", description: "A man’s voice · American · deep and comforting" },
+      steady: { name: "Steady", description: "A man’s voice · American · smooth and steady" },
+      wise: { name: "Wise", description: "A man’s voice · American · mature and wise" },
+    },
+    a11y: {
+      // The middle dots are read aloud as words, so the spoken line uses commas.
+      voice: (name: string, description: string) => `${name}, ${description.split(" · ").join(", ")}`,
+      voices: "Scholar’s voices",
+      preview: (name: string) => `Preview the ${name} voice`,
+      stop: "Stop the preview",
+    },
+  },
   onboarding: {
     stepCounter: (step: number, total: number) => `${step} of ${total}`,
     stepLabel: (step: number, total: number) => `Step ${step} of ${total}`,
@@ -943,6 +981,18 @@ export const copy = {
       label: (synced: number, pending: number) =>
         `Offline Reflections, ${synced} synced, ${pending} pending`,
     },
+    // The live talk's two rows (step 39): Scholar's voice under Preferences, and the ElevenLabs permission under Privacy.
+    scholarVoice: {
+      title: "Scholar’s Voice",
+      helper: "The voice Scholar speaks with in a live talk.",
+      showHint: "Shows the voices",
+      hideHint: "Hides the voices",
+    },
+    voicePermission: {
+      title: "Share Your Voice with ElevenLabs",
+      on: "On. In a live talk, your voice goes to ElevenLabs, which speaks Scholar’s answers.",
+      off: "Off. Live talks with Scholar are off.",
+    },
     // The AI permission's switch (2026-11-03): New Entry asks first, and this is where it is changed afterwards.
     aiPermission: {
       title: "Share with Google’s AI",
@@ -1083,6 +1133,8 @@ export const copy = {
       messages: "You’ve used today’s free messages with Scholar.",
       listen: "Hearing Scholar’s answers is part of GraceHush Pro.",
       features: ["Longer conversations with Scholar", "Scholar reads its answers aloud"],
+      // Step 39: opened from Talk.
+      talk: "Talking with Scholar is part of GraceHush Pro.",
     },
     plan: {
       groupLabel: "Plans",
@@ -1244,6 +1296,44 @@ export const copy = {
       back: "Go back",
     },
     reflectionRow: { title: "Talk it through with Scholar", subtitle: "Ask about this passage or your day" },
+    // The live talk (step 39). Every number comes from the server.
+    talk: {
+      button: "Talk with Scholar",
+      hint: "Starts a live voice talk",
+      title: "Scholar",
+      close: "Close",
+      status: {
+        connecting: "Connecting…",
+        listening: "Listening",
+        thinking: "Scholar is thinking…",
+        speaking: "Scholar is speaking",
+        muted: "Muted",
+        ending: "Ending the talk…",
+      },
+      warning: "30 seconds left",
+      mute: "Mute",
+      unmute: "Unmute",
+      end: "End talk",
+      ended: {
+        cap: "This talk reached its time. Your conversation is saved.",
+        leftApp: "The talk ended when you left GraceHush.",
+        dropped: "The talk was interrupted. Your conversation is saved.",
+        back: "Back to conversation",
+      },
+      failed: {
+        start: "Scholar couldn’t start a talk just now.",
+        today: "You’ve started as many talks as you can today. Please try again tomorrow.",
+        retry: "Try again",
+        close: "Close",
+      },
+      // After a talk, when little of the month is left; and on a tap on Talk once it is used up. No Paywall: the account has Pro.
+      low: (minutes: number) =>
+        minutes === 1 ? "About 1 minute of talk left this month." : `About ${minutes} minutes of talk left this month.`,
+      monthUsed: (day: string) => `You’ve used this month’s talk time. It returns on ${day}.`,
+      a11y: {
+        status: (status: string) => `Talk status: ${status}`,
+      },
+    },
     a11y: {
       message: "Message to Scholar",
       send: "Send message",

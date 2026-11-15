@@ -51,7 +51,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "GraceHush uses the microphone so you can pray out loud. Your recording is used only to create your reflection.",
+          "microphonePermission": "GraceHush uses the microphone when you record a reflection, speak a message to Scholar or start a live talk.",
           "recordAudioAndroid": true,
           "enableBackgroundRecording": false,
           "enableBackgroundPlayback": true
@@ -70,7 +70,7 @@
         "@config-plugins/react-native-webrtc",
         {
           "cameraPermission": "GraceHush doesn’t use your camera.",
-          "microphonePermission": "GraceHush uses the microphone so you can pray out loud. Your recording is used only to create your reflection."
+          "microphonePermission": "GraceHush uses the microphone when you record a reflection, speak a message to Scholar or start a live talk."
         }
       ],
       [

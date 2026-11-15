@@ -30,10 +30,14 @@ export type RootStackParamList = {
     starter?: "verse" | "anxious" | "pray";
     compose?: "type" | "speak";
   };
+  // Scholar's live talk (step 39): a full-screen page over the conversation it belongs to. `entryId` only when that
+  // conversation was opened from a reflection.
+  ScholarTalk: { conversationId: string; entryId?: string };
   // `entryId` is the reflection the free limit stopped. When it is a heavy moment the Paywall replaces itself
   // with Reflection: a heavy moment is never paywalled.
-  // `source: "scholar"` (step 38) comes from a Scholar limit: `reason` says which, today's messages or hearing an answer.
-  Paywall: { source: "profile" | "limit" | "scholar"; entryId?: string; reason?: "messages" | "listen" };
+  // `source: "scholar"` (step 38) comes from a Scholar limit: `reason` says which, today's messages, hearing an answer, or
+  // (step 39) a live talk.
+  Paywall: { source: "profile" | "limit" | "scholar"; entryId?: string; reason?: "messages" | "listen" | "talk" };
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> = NativeStackScreenProps<

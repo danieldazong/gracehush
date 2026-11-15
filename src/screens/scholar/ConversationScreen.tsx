@@ -6,6 +6,7 @@ import {
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -25,17 +26,19 @@ import { Skeleton } from "@/components/Skeleton";
 import { ConversationNotice } from "@/components/scholar/ConversationNotice";
 import { ScholarAnswer, type ListenView } from "@/components/scholar/ScholarAnswer";
 import { SuggestionChips } from "@/components/scholar/SuggestionChips";
+import { TalkSheet, type TalkSheetStep } from "@/components/scholar/TalkSheet";
 import { UserMessage } from "@/components/scholar/UserMessage";
-import { MODAL_HANDOFF_FALLBACK_MS, PRIVACY_POLICY_URL, SUPPORT_EMAIL } from "@/constants/app";
+import { MODAL_HANDOFF_FALLBACK_MS, PRIVACY_POLICY_URL, SCHOLAR_TALK_LOW_S, SUPPORT_EMAIL } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { images } from "@/constants/images";
 import { colors, layout, shadows } from "@/constants/theme";
-import { useAiPermission, useAiWordingNote } from "@/hooks/useAiPermission";
+import { useAiPermission, useAiWordingNote, useScholarVoice, useVoicePermission } from "@/hooks/useAiPermission";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useConversation, type ConversationNotice as NoticeKind } from "@/hooks/useConversation";
 import { useEntitlement } from "@/hooks/useEntitlement";
 import type { RootStackScreenProps } from "@/navigation/types";
 import { openLegalPage } from "@/services/externalLinks";
+import { getMicPermission, requestMicPermission } from "@/services/recorder";
 import {
   clearScholarAudio,
   getScholarListenState,
@@ -44,6 +47,8 @@ import {
   subscribeScholarListen,
   type ScholarListenState,
 } from "@/services/scholarPlayer";
+import { getTalkState, resetTalk, subscribeTalk } from "@/services/scholarTalk";
+import { voiceSupported } from "@/services/voiceSupport";
 import { selectIsOnline, useOfflineStore } from "@/store/offlineStore";
 import type { ScholarMessage } from "@/types";
 import type { ConversationRow } from "@/utils/scholarRows";
@@ -125,6 +130,14 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
   const [deleteFailed, setDeleteFailed] = useState<string | null>(null);
   // The menu's choice waits for the sheet to close before its dialog opens (iOS presents one Modal at a time).
   const afterMenu = useRef<(() => void) | null>(null);
+  // The live talk (step 39): its one-time sheet, the microphone line, and the talk that last ended.
+  const { allowed: voiceAllowed, setAllowed: setVoiceAllowed } = useVoicePermission();
+  const { voice, setVoice } = useScholarVoice();
+  const [talkSheet, setTalkSheet] = useState<TalkSheetStep | null>(null);
+  const [micOff, setMicOff] = useState(false);
+  const afterTalkSheet = useRef<(() => void) | null>(null);
+  const talk = useSyncExternalStore(subscribeTalk, getTalkState);
+  const seenTalk = useRef(getTalkState().last?.seq ?? null);
 
   // Leaving stops Scholar's voice and deletes the parts it read (they stay only for this visit).
   useEffect(() => () => clearScholarAudio(), []);
@@ -147,6 +160,16 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
     return () => subscription.remove();
   }, []);
 
+  // When a talk from this conversation ends, its turns are read from the server (they are its messages).
+  const lastTalk = talk.last;
+  const { refreshAfterTalk } = chat;
+  useEffect(() => {
+    if (lastTalk === null || lastTalk.seq === seenTalk.current) return;
+    if (lastTalk.requestedId !== chat.conversationId && lastTalk.conversationId !== chat.conversationId) return;
+    seenTalk.current = lastTalk.seq;
+    void refreshAfterTalk(lastTalk.conversationId);
+  }, [lastTalk, chat.conversationId, refreshAfterTalk]);
+
   // "Scholar is writing" while a turn is in flight, then "Scholar answered": the two alternate, so each answer is heard.
   const announcement = chat.sending ? copy.scholar.a11y.writing : chat.fresh.length > 0 ? copy.scholar.a11y.answered : null;
   useAnnounce(announcement);
@@ -168,6 +191,50 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
       stopScholarAudio();
       navigation.navigate("Paywall", { source: "scholar", reason: "listen" });
     }
+  }
+
+  // Talk, in the plan's order: a free account goes to the Paywall; no voice permission yet, the one-time sheet; then the
+  // microphone, asked with the recorder's own functions; then the Talk screen.
+  function openTalk() {
+    if (known && !isPaid) {
+      navigation.navigate("Paywall", { source: "scholar", reason: "talk" });
+      return;
+    }
+    if (!voiceAllowed) {
+      setTalkSheet("permission");
+      return;
+    }
+    void startTalking();
+  }
+
+  async function startTalking() {
+    let mic = await getMicPermission();
+    if (mic === "undetermined") mic = await requestMicPermission();
+    if (mic !== "granted") {
+      setMicOff(true);
+      return;
+    }
+    setMicOff(false);
+    resetTalk();
+    const entryId = chat.entry?.id ?? params.entryId;
+    navigation.navigate("ScholarTalk", {
+      conversationId: chat.conversationId,
+      ...(entryId === undefined ? {} : { entryId }),
+    });
+  }
+
+  function runAfterTalkSheet() {
+    const run = afterTalkSheet.current;
+    afterTalkSheet.current = null;
+    run?.();
+  }
+
+  // "Start talking" closes the sheet first (iOS presents one Modal at a time), then the microphone and the Talk screen follow.
+  function startFromSheet() {
+    setTalkSheet(null);
+    afterTalkSheet.current = () => void startTalking();
+    if (Platform.OS === "ios") setTimeout(runAfterTalkSheet, MODAL_HANDOFF_FALLBACK_MS);
+    else runAfterTalkSheet();
   }
 
   function openDelete() {
@@ -208,6 +275,18 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
 
   // One notice at a time: what the last turn said, else no connection.
   const noticeKind: NoticeKind | null = chat.notice ?? (online === false ? "offline" : null);
+  // Talk shows in a build that can hold one, and never for a free account in a heavy conversation (no paywall there).
+  const canTalk = voiceSupported() && !(chat.heavy && known && !isPaid);
+  // After a talk from this conversation, when little of the month is left (the server's numbers).
+  const talkLeft =
+    lastTalk !== null &&
+    (lastTalk.requestedId === chat.conversationId || lastTalk.conversationId === chat.conversationId) &&
+    lastTalk.limits !== null &&
+    lastTalk.limits.monthSecondsLeft !== null &&
+    lastTalk.limits.monthSecondsLeft > 0 &&
+    lastTalk.limits.monthSecondsLeft <= SCHOLAR_TALK_LOW_S
+      ? Math.max(1, Math.round(lastTalk.limits.monthSecondsLeft / 60))
+      : null;
   const chipsNew = chat.entry !== null || params.entryId !== undefined ? copy.scholar.chips.reflection : Object.values(copy.scholar.starters);
 
   function renderRow({ item }: { item: ConversationRow }) {
@@ -392,6 +471,22 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
                 help={noticeKind === "rateLimited" && chat.heavy ? chat.help : null}
               />
             </View>
+          ) : micOff ? (
+            <View className="px-4 pb-2">
+              <ConversationNotice
+                text={copy.scholar.speak.micOff}
+                action={{
+                  label: copy.scholar.speak.openSettings,
+                  onPress: () => {
+                    void Linking.openSettings().catch(() => undefined);
+                  },
+                }}
+              />
+            </View>
+          ) : talkLeft !== null ? (
+            <Text accessibilityLiveRegion="polite" className="px-4 pb-2 text-center text-body-sm text-mauve">
+              {copy.scholar.talk.low(talkLeft)}
+            </Text>
           ) : chat.headsUp !== null ? (
             <Text accessibilityLiveRegion="polite" className="px-4 pb-2 text-center text-body-sm text-mauve">
               {copy.scholar.remaining(chat.headsUp)}
@@ -405,6 +500,7 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
             inputRef={inputRef}
             onSend={chat.send}
             onSendSpoken={chat.sendSpoken}
+            onTalk={canTalk ? openTalk : null}
           />
         </View>
       </>
@@ -476,6 +572,20 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
           </Text>
         ) : null}
       </ConfirmDialog>
+
+      <TalkSheet
+        step={talkSheet}
+        voice={voice}
+        onAllow={() => {
+          setVoiceAllowed(true);
+          setTalkSheet("voice");
+        }}
+        onChooseVoice={setVoice}
+        onStart={startFromSheet}
+        onClose={() => setTalkSheet(null)}
+        onDismiss={runAfterTalkSheet}
+        onOpenPrivacy={() => void openLegalPage(PRIVACY_POLICY_URL)}
+      />
 
       {/* Nothing is sent until this account has allowed Google's AI (Apple's guideline 5.1.2(i)). A starter waits for Allow;
           "Not now" goes back and nothing is sent. */}

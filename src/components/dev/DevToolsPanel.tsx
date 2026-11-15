@@ -1,7 +1,7 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { useNavigation } from "@react-navigation/native";
-import { lazy, Suspense, useEffect, useState } from "react";
-import { NativeModules, Pressable, Text, View } from "react-native";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { Pressable, Text, View } from "react-native";
 
 import { getLastFunctionCall, type FunctionCall } from "@/api/journalApi";
 import { ENTRIES_PAGE_SIZE } from "@/constants/app";
@@ -54,6 +54,8 @@ import {
 } from "@/services/affirmationScheduler";
 import { countRawUploads, uploadRawRecording } from "@/services/mediaUpload";
 import { listRecordings } from "@/services/recordingFiles";
+import { getTalkState, subscribeTalk } from "@/services/scholarTalk";
+import { voiceSupported } from "@/services/voiceSupport";
 import { resumeAfterUpgrade, subscribe, syncNow } from "@/services/syncEngine";
 import {
   checkSessionToken,
@@ -317,12 +319,22 @@ function DevButton({
   );
 }
 
-// Step 39's test run: the live voice test loads only in a development build that carries the WebRTC native modules.
-// Expo Go has none, and loading the voice packages there would crash the app, so they are not even imported there.
-const VoiceSpike =
-  __DEV__ && NativeModules.WebRTCModule != null && NativeModules.LivekitReactNativeModule != null
-    ? lazy(() => import("@/components/dev/VoiceSpike"))
-    : null;
+// Step 39: the live talk, in words and keys only: whether this build can hold one, the permission, the voice, and how the last
+// talk started or ended (a code and a reason, never a token or an id).
+function TalkLine() {
+  const talk = useSyncExternalStore(subscribeTalk, getTalkState);
+  const userId = getSupabaseUserId();
+  const entry = useProfilePrefsStore((state) => (userId === null ? undefined : state.byUser[userId]));
+  const parts = [
+    `supported ${voiceSupported() ? "yes" : "no"}`,
+    `permission ${entry?.voicePermissionAt != null ? "yes" : "no"}`,
+    `voice ${entry?.scholarVoice ?? "warm (default)"}`,
+    `phase ${talk.phase}`,
+  ];
+  if (talk.failure !== null) parts.push(`last start ${talk.failure.code}${talk.failure.usage ? ` (${talk.failure.usage.kind})` : ""}`);
+  if (talk.endedBy !== null) parts.push(`ended by ${talk.endedBy}`);
+  return <Text className="text-center text-body-sm text-ink">{`talk: ${parts.join(" | ")}`}</Text>;
+}
 
 function DevToolsContent() {
   const { signOut } = useAuth();
@@ -754,16 +766,20 @@ function DevToolsContent() {
               <Text className="text-center text-body-sm text-mauve">{preparingNote}</Text>
             ) : null}
           </View>
-          {/* Step 39's test run: one ElevenLabs talk with the test endpoint. Times and event kinds only. */}
+          {/* Step 39: Scholar's live talk. Words and keys only. */}
           <View className="items-center gap-2">
-            <Text className="text-center text-body-sm text-mauve">Live voice test (dev)</Text>
-            {VoiceSpike !== null ? (
-              <Suspense fallback={<Text className="text-center text-body-sm text-mauve">Loading the voice test…</Text>}>
-                <VoiceSpike />
-              </Suspense>
-            ) : (
-              <Text className="text-center text-body-sm text-mauve">Needs the development build.</Text>
-            )}
+            <Text className="text-center text-body-sm text-mauve">Talk (dev)</Text>
+            <TalkLine />
+            <View className="flex-row flex-wrap justify-center gap-2">
+              {/* Talk asks for the ElevenLabs permission again, as it does the first time. */}
+              <DevButton
+                label="Reset voice permission (dev)"
+                onPress={() => {
+                  const userId = getSupabaseUserId();
+                  if (userId !== null) useProfilePrefsStore.getState().setVoicePermission(userId, null);
+                }}
+              />
+            </View>
           </View>
           {/* Step 34: product analytics. Event names and property keys only. */}
           <View className="items-center gap-2">

@@ -477,6 +477,7 @@ const row = ({
       analyticsReset: 0,
       scholarCleared: 0,
       scholarForgotten: 0,
+      talksEnded: 0,
     };
     const remote = { server, fetchFails: null, pushFails: [], onPush: null, onFetch: null };
     const session = { userId: "user_a" };
@@ -542,6 +543,8 @@ const row = ({
     // the storage client behind them cannot load in Node).
     fakes["@/services/scholarPlayer"] = { clearScholarAudio: () => void calls.scholarCleared++, stopScholarAudio: () => undefined };
     fakes["@/data/scholarRepository"] = { forgetScholarSession: () => void calls.scholarForgotten++ };
+    // Step 39: signOutCleanup ends a live talk first (the talk service needs expo-keep-awake and expo-audio).
+    fakes["@/services/scholarTalk"] = { endLiveTalk: async () => void calls.talksEnded++ };
     const env = makeEnv({ stored, fakes });
     // the real scenario + devStore decide the source
     env.use("@/store/devStore").useDevStore.getState().setDataSource(source);
@@ -1016,6 +1019,7 @@ const row = ({
     assert.equal(ctx.calls.analyticsReset, 1, "and resets analytics");
     assert.equal(ctx.calls.scholarCleared, 1, "and stops Scholar's voice and deletes the parts it read");
     assert.equal(ctx.calls.scholarForgotten, 1, "and forgets Scholar's turns of this session");
+    assert.equal(ctx.calls.talksEnded, 1, "and ends a live talk with Scholar (step 39)");
     assert.equal(ob.getState().remindersDirty, false);
     assert.deepEqual(unsentOf(ctx), { ambientSound: "soft-rain" }, "sign out keeps the user's unsent setting");
     await sleep(1000);
@@ -1152,6 +1156,7 @@ const row = ({
         "@/services/analytics": { resetAnalytics: async () => undefined, track: () => undefined },
         "@/services/scholarPlayer": { clearScholarAudio: () => undefined, stopScholarAudio: () => undefined },
         "@/data/scholarRepository": { forgetScholarSession: () => undefined },
+        "@/services/scholarTalk": { endLiveTalk: async () => undefined },
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();

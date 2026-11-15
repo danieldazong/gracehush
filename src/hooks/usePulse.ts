@@ -6,8 +6,9 @@ import { useReduceMotion } from "@/hooks/useReduceMotion";
 const HALF_CYCLE_MS = 1000;
 
 // A slow 2s pulse from 1 to `to` and back, for an opacity or a scale. It rests at 1 while `active` is
-// false and while Reduce Motion is on, so the caller never needs a second code path for either.
-export function usePulse(to: number, active: boolean): Animated.Value {
+// false and while Reduce Motion is on, so the caller never needs a second code path for either. `halfCycleMs` makes it
+// quicker (the Talk screen's halo while Scholar speaks, step 39).
+export function usePulse(to: number, active: boolean, halfCycleMs: number = HALF_CYCLE_MS): Animated.Value {
   const reduceMotion = useReduceMotion();
   const [value] = useState(() => new Animated.Value(1));
 
@@ -18,13 +19,13 @@ export function usePulse(to: number, active: boolean): Animated.Value {
     }
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(value, { toValue: to, duration: HALF_CYCLE_MS, useNativeDriver: true }),
-        Animated.timing(value, { toValue: 1, duration: HALF_CYCLE_MS, useNativeDriver: true }),
+        Animated.timing(value, { toValue: to, duration: halfCycleMs, useNativeDriver: true }),
+        Animated.timing(value, { toValue: 1, duration: halfCycleMs, useNativeDriver: true }),
       ]),
     );
     loop.start();
     return () => loop.stop();
-  }, [active, reduceMotion, to, value]);
+  }, [active, reduceMotion, to, value, halfCycleMs]);
 
   return value;
 }

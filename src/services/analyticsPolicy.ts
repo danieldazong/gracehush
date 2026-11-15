@@ -1,4 +1,5 @@
 import { AMBIENT_SOUNDS, PLAYBACK_RATES } from "@/constants/app";
+import { SCHOLAR_VOICE_KEYS, type ScholarVoiceKey } from "@/constants/scholarVoices";
 import type { MainTabParamList, RootStackParamList } from "@/navigation/types";
 import type { AmbientSound, PackageKind, PlaybackRate, PurchaseErrorCode, TimeSlot } from "@/types";
 
@@ -34,7 +35,13 @@ export type AnalyticsEvent =
   | { name: "data_export_requested"; props: Record<string, never> }
   // Scholar (step 38): with the first answered message of a conversation, and after each answer. Never in a heavy conversation.
   | { name: "scholar_conversation_started"; props: { source: "tab" | "starter" | "reflection" } }
-  | { name: "scholar_message_sent"; props: { mode: "text" | "voice"; turn: "first" | "follow_up" } };
+  | { name: "scholar_message_sent"; props: { mode: "text" | "voice"; turn: "first" | "follow_up" } }
+  // Step 39: a live talk, never about a heavy one. The voice is one of the eight keys, the length a bucket, the end a reason.
+  | { name: "scholar_talk_started"; props: { voice: ScholarVoiceKey } }
+  | {
+      name: "scholar_talk_ended";
+      props: { length: "under_1" | "1_to_5" | "over_5"; ended_by: "person" | "cap" | "left_app" | "dropped" };
+    };
 
 export type AnalyticsEventName = AnalyticsEvent["name"];
 export type AnalyticsProps<N extends AnalyticsEventName> = Extract<AnalyticsEvent, { name: N }>["props"];
@@ -124,6 +131,11 @@ const EVENT_PROPS: { [N in AnalyticsEventName]: { [K in keyof AnalyticsProps<N>]
   data_export_requested: {},
   scholar_conversation_started: { source: oneOf(["tab", "starter", "reflection"]) },
   scholar_message_sent: { mode: oneOf(["text", "voice"]), turn: oneOf(["first", "follow_up"]) },
+  scholar_talk_started: { voice: oneOf(SCHOLAR_VOICE_KEYS) },
+  scholar_talk_ended: {
+    length: oneOf(["under_1", "1_to_5", "over_5"]),
+    ended_by: oneOf(["person", "cap", "left_app", "dropped"]),
+  },
 };
 
 const SYSTEM_PROPS: Record<(typeof SYSTEM_EVENTS)[number], Record<string, Check>> = {

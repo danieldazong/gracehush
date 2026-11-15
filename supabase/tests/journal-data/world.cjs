@@ -299,7 +299,15 @@ function makeServer() {
       "delete-account": [],
       "scholar-turn": [],
       "scholar-speak": [],
+      "scholar-voice-start": [],
+      "scholar-voice-end": [],
     },
+    // Step 39: the live talks the fake started, the month's talk seconds left for every account (the server's number), what
+    // each talk costs when it ends, and when the month's time returns.
+    voiceTalks: [],
+    talkMonthLeft: 1800,
+    talkSecondsPerTalk: 60,
+    talkResetsAt: "2026-12-01T00:00:00.000000+00:00",
     // Step 38: Scholar's two tables, in database shape (supabase/migrations/20261111120000_scholar_conversations.sql), the
     // uploads the app made (the world links its upload calls here, so a spoken message's recording can be found), and the day's
     // limits the fake applies (the server's numbers: the app holds none).
@@ -657,8 +665,77 @@ function makeServer() {
     return json(200, { part: body.part, parts: 2, audioBase64: audio, durationMs: 1500 });
   }
 
+  // Step 39: a live talk starts as scholar-voice-start does, without ElevenLabs: the plan, the conversation (made when it is new;
+  // a reflection's existing one wins), the month's time, and a token and a session that only name the talk. A key the body does
+  // not know is refused, so no voice id and no user id can travel.
+  const VOICE_KEYS = ["warm", "bright", "clear", "soft", "storyteller", "deep", "steady", "wise"];
+  function voiceStart(body, sub) {
+    const object = body !== null && typeof body === "object" && !Array.isArray(body);
+    if (!object || Object.keys(body).some((key) => !["conversationId", "voice", "entryId", "region"].includes(key))) {
+      return fnError(400, "INVALID_REQUEST");
+    }
+    if (!SCHOLAR_UUID.test(body.conversationId ?? "")) return fnError(400, "INVALID_REQUEST");
+    let conversation = state.scholarConversations.find((row) => row.id === body.conversationId);
+    if (conversation !== undefined && conversation.user_id !== sub) return fnError(404, "NOT_FOUND");
+    const fromEntry = typeof body.entryId === "string" ? state.entries.find((row) => row.id === body.entryId && row.user_id === sub) : undefined;
+    if (conversation === undefined && fromEntry !== undefined) {
+      conversation = state.scholarConversations.find((row) => row.entry_id === fromEntry.id && row.user_id === sub);
+    }
+    const heavy = conversation?.is_heavy === true || (conversation === undefined && fromEntry?.is_crisis === true);
+    const paid = state.serverPlans[sub] === "pro" || state.serverPlans[sub] === "trial";
+    const limitError = (kind, resetsAt) =>
+      json(402, {
+        error: { code: "LIMIT_REACHED", message: "A fixed message", requestId: "req-1" },
+        usage: { kind, used: 0, limit: 0, remaining: 0, resetsAt },
+      });
+    if (!paid) return limitError("talk_plan", null);
+    if (!heavy && state.talkMonthLeft < 30) return limitError("talk_month", state.talkResetsAt);
+    if (conversation === undefined) {
+      const at = stamp(clock.now);
+      conversation = {
+        id: body.conversationId,
+        user_id: sub,
+        entry_id: fromEntry?.id ?? null,
+        title: null,
+        is_heavy: heavy,
+        last_message_at: at,
+        created_at: at,
+      };
+      state.scholarConversations.push(conversation);
+    }
+    const talkId = `talk-${state.voiceTalks.length + 1}`;
+    const voice = VOICE_KEYS.includes(body.voice) ? body.voice : "warm";
+    state.voiceTalks.push({ id: talkId, sub, conversationId: conversation.id, voice, heavy, ended: false });
+    return json(200, {
+      talkId,
+      conversationId: conversation.id,
+      conversationToken: `token-${talkId}`,
+      session: `session-${talkId}`,
+      voice,
+      heavy,
+      limits: heavy
+        ? { talkSeconds: null, monthSecondsLeft: null, resetsAt: state.talkResetsAt }
+        : { talkSeconds: Math.min(600, state.talkMonthLeft), monthSecondsLeft: state.talkMonthLeft, resetsAt: state.talkResetsAt },
+    });
+  }
+
+  // The talk is over: its time is counted (never in a heavy one), and what is left of the month is answered.
+  function voiceEnd(body, sub) {
+    const object = body !== null && typeof body === "object" && !Array.isArray(body);
+    if (!object || Object.keys(body).some((key) => key !== "talkId")) return fnError(400, "INVALID_REQUEST");
+    const talk = state.voiceTalks.find((row) => row.id === body.talkId && row.sub === sub);
+    if (talk === undefined) return fnError(404, "NOT_FOUND");
+    if (!talk.ended && !talk.heavy) state.talkMonthLeft = Math.max(0, state.talkMonthLeft - state.talkSecondsPerTalk);
+    talk.ended = true;
+    return json(200, {
+      limits: talk.heavy
+        ? { talkSeconds: null, monthSecondsLeft: null, resetsAt: state.talkResetsAt }
+        : { talkSeconds: Math.min(600, state.talkMonthLeft), monthSecondsLeft: state.talkMonthLeft, resetsAt: state.talkResetsAt },
+    });
+  }
+
   // A check can hold a Scholar call and then answer it as the fake would (a scripted function that calls these).
-  state.scholarRoutes = { turn: scholarTurn, speak: scholarSpeak };
+  state.scholarRoutes = { turn: scholarTurn, speak: scholarSpeak, voiceStart, voiceEnd };
 
   async function fake(input, init = {}) {
     const url = new URL(typeof input === "string" ? input : input.url);
@@ -729,6 +806,8 @@ function makeServer() {
       }
       if (name === "scholar-turn") return scholarTurn(body, sub);
       if (name === "scholar-speak") return scholarSpeak(body, sub);
+      if (name === "scholar-voice-start") return voiceStart(body, sub);
+      if (name === "scholar-voice-end") return voiceEnd(body, sub);
       if (name === "export-data") {
         // Step 31: a link to the caller's ZIP, valid for an hour, as the real function signs it.
         const expiresAt = new RealDate(clock.now + 3600_000).toISOString();
@@ -889,8 +968,25 @@ function makeLiveWorld({
       subscribeScholarListen: () => () => undefined,
     };
   }
+  // Step 39: the live talk's own sound (the players, the keep-awake tag and the playback mode) needs expo-audio and
+  // expo-keep-awake. A stand-in records the calls in order; the talk service itself is real.
+  const talkAudio = { calls: [] };
+  fakes["@/services/talkAudio"] = {
+    __esModule: true,
+    quietBeforeTalk: () => void talkAudio.calls.push("quiet"),
+    holdAwake: (on) => void talkAudio.calls.push(on ? "awake" : "asleep"),
+    restorePlaybackMode: async () => void talkAudio.calls.push("playback mode"),
+  };
   // The account has allowed Google's AI in every suite but supabase/tests/ai-permission, which checks the real answer.
-  if (aiPermission === "fake") fakes["@/services/aiPermission"] = { __esModule: true, hasAiPermission: () => true };
+  // Step 39: and its voice to ElevenLabs, in the default voice.
+  if (aiPermission === "fake") {
+    fakes["@/services/aiPermission"] = {
+      __esModule: true,
+      hasAiPermission: () => true,
+      hasVoicePermission: () => true,
+      getScholarVoice: () => "warm",
+    };
+  }
   // A suite can fake more modules that plain Node cannot load (step 29b: the player store and the devotional files).
   Object.assign(fakes, extraFakes);
   const env = makeEnv({ fakes });
@@ -912,6 +1008,7 @@ function makeLiveWorld({
     analyticsCalls,
     hapticsCalls,
     scholarAudio,
+    talkAudio,
     affirmationRequests: () => affirmationRequests,
     renderHook,
     logs,
