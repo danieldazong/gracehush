@@ -1106,19 +1106,20 @@ export const copy = {
   paywall: {
     loading: "Loading plans",
     restore: "Restore purchases",
-    hero: {
-      title: "Go deeper with GraceHush Pro",
-      subtitle: "A calm, unhurried space for your daily walk with God.",
+    // The one line over the scene's fade (2026-11-15): one line on every iPhone at the default text size (316 points,
+    // in a column of at least 335; the design's "Go deeper with GraceHush Pro" is 424 and broke into two on every phone),
+    // so both plans sit above the pinned button. The subtitle went with it: the picture carries the mood now.
+    hero: { title: "Unlock GraceHush Pro" },
+    // The four rows under the title, one per feature that AGENTS.md defines as a Pro gate (Subscription Rules): the
+    // devotionals, and Scholar's three (steps 38 and 39). Since 2026-11-15 every paywall shows all four, as the Welcome's
+    // rows (one line each). To advertise another, first make it a real gate there, then add its row here.
+    features: {
+      devotionals: "Unlimited audio devotionals",
+      scholarMessages: "Longer conversations with Scholar",
+      scholarListen: "Scholar reads its answers aloud",
+      scholarTalk: "Talk with Scholar out loud",
     },
-    // One row per feature that AGENTS.md defines as Pro (Subscription Rules). V1 has one. To advertise another,
-    // first make it a real gate there, then add its row here.
-    features: [
-      {
-        title: "Unlimited audio devotionals",
-        helper: (freePerWeek: number) => `Free plans include ${freePerWeek} a week.`,
-      },
-    ],
-    // The banner above the hero when the free limit sent the user here.
+    // The banner under the title when the free limit sent the user here (above the hero until 2026-11-15).
     limit: {
       used: (limit: number) =>
         limit === 1
@@ -1127,18 +1128,19 @@ export const copy = {
       resets: (resetDay: string) => `They reset ${resetDay}.`,
       saved: "Your reflection is saved.",
     },
-    // From Scholar (step 38): the banner says what sent the person here, and two rows say what Pro adds there. Both are real
-    // gates on the server (Subscription Rules): more messages a day than the free plan's, and answers read aloud.
+    // From Scholar (step 38): the banner under the title says what sent the person here. What Pro adds there is in
+    // `features` above since 2026-11-15, on every paywall.
     scholar: {
       messages: "You’ve used today’s free messages with Scholar.",
       listen: "Hearing Scholar’s answers is part of GraceHush Pro.",
-      features: ["Longer conversations with Scholar", "Scholar reads its answers aloud"],
       // Step 39: opened from Talk.
       talk: "Talking with Scholar is part of GraceHush Pro.",
     },
     plan: {
       groupLabel: "Plans",
-      title: { annual: "Yearly Access", monthly: "Monthly Access" },
+      // "Yearly" and "Monthly" (2026-11-15; the design's "Yearly Access" and "Monthly Access"): the short titles keep the
+      // "Save 50%" chip beside the title from 375 wide up, where the long one dropped it under and made the card 30 taller.
+      title: { annual: "Yearly", monthly: "Monthly" },
       // Under the price: "$59.99" over "/ year".
       perPeriod: (period: string) => `/ ${period}`,
       perMonth: (price: string) => `${price} / month, billed yearly`,

@@ -22,9 +22,17 @@ type BenefitListProps = {
   items: readonly BenefitItem[];
   // Whether the icons may move: the cover passes whether the screen is in front. Default true.
   active?: boolean;
+  // The Welcome's rows (a 36 tile with an 18 icon, 10 apart), or the Paywall's compact ones (a 30 tile with a 16 icon,
+  // 8 apart: 30 points less for four rows, so both plans fit above the pinned button on a 6.1-inch iPhone; 2026-11-15).
+  size?: "default" | "compact";
 };
 
-const ICON = 18;
+// The icon's size in the Welcome's rows, which the page turn's geometry is drawn in (PAGE); a compact row scales it.
+const BASE_ICON = 18;
+const SIZES = {
+  default: { tile: "size-9", icon: 18, gap: "gap-2.5" },
+  compact: { tile: "size-[30px]", icon: 16, gap: "gap-2" },
+} as const;
 // The rows arrive one after another, like the Reflection screen's sections but shorter: the eye follows them down the
 // list once, and under Reduce Motion they are simply there (FadeIn).
 const FIRST_DELAY_MS = 120;
@@ -57,7 +65,7 @@ function isIconMotion(value: string): value is IconMotion {
 
 // The transform of a moving icon, from its 0-to-1 progress. Small on purpose: nothing bounces. The book is not here: its
 // glyph never moves, a page over it does (pageTransforms).
-function motionTransforms(motion: Exclude<IconMotion, "flip">, value: Animated.Value) {
+function motionTransforms(motion: Exclude<IconMotion, "flip">, value: Animated.Value, icon: number) {
   switch (motion) {
     case "pulse":
       // One soft beat; the turn plays it twice.
@@ -65,14 +73,14 @@ function motionTransforms(motion: Exclude<IconMotion, "flip">, value: Animated.V
     case "ring":
       // Pivot at the bell's top: move the centre up, swing, move it back.
       return [
-        { translateY: -ICON / 2 },
+        { translateY: -icon / 2 },
         {
           rotateZ: value.interpolate({
             inputRange: [0, 0.15, 0.35, 0.55, 0.75, 0.9, 1],
             outputRange: ["0deg", "14deg", "-11deg", "8deg", "-5deg", "2deg", "0deg"],
           }),
         },
-        { translateY: ICON / 2 },
+        { translateY: icon / 2 },
       ];
   }
 }
@@ -83,14 +91,21 @@ function motionTransforms(motion: Exclude<IconMotion, "flip">, value: Animated.V
 // onto the spine, turn, move it back), lands on the left half, and goes, so the next play begins from the right again
 // with nothing popping into view. The book's own glyph never moves.
 const PAGE = { left: 10.5, top: 5.5, width: 5, height: 7 };
-const PAGE_PIVOT = PAGE.left + PAGE.width / 2 - ICON / 2;
 
-function pageTransforms(value: Animated.Value) {
+// The page's box in a glyph of `icon` points: the 18-point geometry, scaled.
+function pageBox(icon: number) {
+  const k = icon / BASE_ICON;
+  return { left: PAGE.left * k, top: PAGE.top * k, width: PAGE.width * k, height: PAGE.height * k };
+}
+
+function pageTransforms(value: Animated.Value, icon: number) {
+  const box = pageBox(icon);
+  const pivot = box.left + box.width / 2 - icon / 2;
   return [
     { perspective: 300 },
-    { translateX: -PAGE_PIVOT },
+    { translateX: -pivot },
     { rotateY: value.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "-180deg"] }) },
-    { translateX: PAGE_PIVOT },
+    { translateX: pivot },
   ];
 }
 
@@ -105,7 +120,8 @@ function pageOpacity(value: Animated.Value) {
 // a line longer than the column never wrapped and the rows ran off both edges of the phone; the maximum clamps the
 // block to the column, and a clamped width is definite, so a long line wraps. The caller's wrapper must stretch, or the
 // percentage has nothing definite to resolve against.
-export function BenefitList({ items, active = true }: BenefitListProps) {
+export function BenefitList({ items, active = true, size = "default" }: BenefitListProps) {
+  const { tile, icon: iconSize, gap } = SIZES[size];
   const reduceMotion = useReduceMotion();
   // One progress value per row, 0 at rest; only a row with a motion ever moves it.
   const [motionValues] = useState(() => items.map(() => new Animated.Value(0)));
@@ -153,27 +169,31 @@ export function BenefitList({ items, active = true }: BenefitListProps) {
   }, [active, reduceMotion, motionKey, motionValues]);
 
   return (
-    <View className="max-w-full gap-2.5 self-center">
+    <View className={`max-w-full ${gap} self-center`}>
       {items.map(({ icon, text, motion }, index) => {
         const value = motionValues[index];
         return (
           <FadeIn key={text} delay={FIRST_DELAY_MS + index * STAGGER_MS} rise={RISE} duration={DURATION_MS}>
             <View className="flex-row items-center gap-3">
               {/* Decorative: the line beside it says what the row is. */}
-              <View className="size-9 items-center justify-center rounded-full border border-petal bg-blush">
+              <View className={`${tile} items-center justify-center rounded-full border border-petal bg-blush`}>
                 {!motion || !value ? (
-                  <Icon name={icon} size={ICON} color={colors.plum} />
+                  <Icon name={icon} size={iconSize} color={colors.plum} />
                 ) : motion === "flip" ? (
                   <View>
-                    <Icon name={icon} size={ICON} color={colors.plum} />
+                    <Icon name={icon} size={iconSize} color={colors.plum} />
                     <Animated.View
                       pointerEvents="none"
-                      style={[styles.page, { opacity: pageOpacity(value), transform: pageTransforms(value) }]}
+                      style={[
+                        styles.page,
+                        pageBox(iconSize),
+                        { opacity: pageOpacity(value), transform: pageTransforms(value, iconSize) },
+                      ]}
                     />
                   </View>
                 ) : (
-                  <Animated.View style={{ transform: motionTransforms(motion, value) }}>
-                    <Icon name={icon} size={ICON} color={colors.plum} />
+                  <Animated.View style={{ transform: motionTransforms(motion, value, iconSize) }}>
+                    <Icon name={icon} size={iconSize} color={colors.plum} />
                   </Animated.View>
                 )}
               </View>
@@ -186,15 +206,11 @@ export function BenefitList({ items, active = true }: BenefitListProps) {
   );
 }
 
-// The page's geometry and look: an absolute overlay inside the icon's box with an animated transform, which no class
-// can express (Style Exception Rules).
+// The page's look: an absolute overlay inside the icon's box, its box from the icon's size (pageBox) and its transform
+// animated, which no class can express (Style Exception Rules).
 const styles = StyleSheet.create({
   page: {
     position: "absolute",
-    left: PAGE.left,
-    top: PAGE.top,
-    width: PAGE.width,
-    height: PAGE.height,
     borderRadius: 1,
     borderWidth: 1,
     borderColor: colors.plum,

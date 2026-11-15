@@ -1,4 +1,4 @@
-import { Image } from "expo-image";
+import { useIsFocused } from "@react-navigation/native";
 import type { SymbolViewProps } from "expo-symbols";
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import {
@@ -10,17 +10,18 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { BenefitList, type BenefitItem } from "@/components/BenefitList";
 import { Icon } from "@/components/Icon";
 import { PaywallFooter, PaywallLinks } from "@/components/paywall/PaywallFooter";
 import { PlanOption } from "@/components/paywall/PlanOption";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { Skeleton } from "@/components/Skeleton";
-import { FREE_DEVOTIONALS_PER_WEEK } from "@/constants/app";
+import { WelcomeScenes } from "@/components/WelcomeScenes";
 import { copy } from "@/constants/copy";
-import { images } from "@/constants/images";
-import { colors, shadows } from "@/constants/theme";
+import { paywallScenes } from "@/constants/images";
+import { colors } from "@/constants/theme";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { usePaywall, type PaywallNotice, type PaywallState } from "@/hooks/usePaywall";
 import type { RootStackScreenProps } from "@/navigation/types";
@@ -35,16 +36,51 @@ const { paywall } = copy;
 // The button and the renewal terms under it are pinned under the scrolling page only where that leaves room for the
 // page: a tall window at normal or moderately large text. Otherwise they are the end of the page, above the links.
 // Either way they are one block. "Maybe later" and the two policy pages are always the last rows of the scrolling
-// page, so the pinned block stays short and both plans fit above it.
+// page, so the pinned block stays short.
 const PIN_MIN_HEIGHT = 700;
 const PIN_MAX_FONT_SCALE = 1.3;
+
+// The cover (2026-11-15, the owner's request for a paywall that feels premium): the page takes the shape of the Welcome
+// and the Sign In cover, so the person asked to pay meets the page they met on day one. Everything between the scene and
+// the plans is what a person needs to decide, and nothing else (the owner's second request the same day, when the
+// second plan sat under the fold): the title on the scene's fade, four compact rows, the two plans. The scene takes what
+// they leave (`flex: 1`), never less than SCENE_MIN: 240, the Sign In cover's, so that on a 6.1-inch iPhone at the
+// default text size both plans sit above the pinned button (worked out from the font files: 390 and 393 wide fit by
+// about 10 points, the XR at the owner's text size by about 100; a 375-wide phone scrolls by about 20, and the free
+// limit's banner adds a scroll on every phone). At the floor the man's chin is just inside the bottom fade (his eyes and
+// smile in the clear band), and on a taller phone the picture grows. The top fade follows the top inset as the covers'
+// do; in the iOS sheet that inset is 0, so the fade is 72 alone, and the X and "Restore purchases" sit over it. The
+// title overlaps the bottom fade by 48, where the lockup sat on the Welcome: a headline on the picture's fade, as the
+// reference paywall draws it.
+const SCENE_MIN = 240;
+const SCENE_FADE_BELOW_INSET = 72;
+const SCENE_FADE_BOTTOM = 100;
+const TITLE_OVERLAP = 48;
+
+// One of the two scenes per launch (a woman on a sofa at golden hour, a man at a balcony railing at sunrise, each
+// listening with headphones), drawn at import and not in render, which must stay pure; the Sign In cover shuffles its
+// four the same way. One scene, so the stack only breathes and never cross-fades: nothing competes with the decision.
+const sceneSources = [paywallScenes[Math.random() < 0.5 ? 0 : 1]] as const;
 
 const PLATFORM = Platform.OS === "ios" ? "ios" : "android";
 
 const icons = {
   close: { android: "close", ios: "xmark" },
-  check: { android: "check", ios: "checkmark" },
+  devotionals: { android: "headphones", ios: "headphones" },
+  scholar: { android: "forum", ios: "bubble.left.and.bubble.right" },
+  listen: { android: "volume_up", ios: "speaker.wave.2" },
+  talk: { android: "graphic_eq", ios: "waveform" },
 } satisfies Record<string, SymbolViewProps["name"]>;
+
+// The four rows under the title: every feature that AGENTS.md defines as a Pro gate (Subscription Rules), in the order a
+// person meets them in the app. The Welcome's rows in their compact size, so the two ends of the funnel share one shape;
+// no icon moves here.
+const benefits: readonly BenefitItem[] = [
+  { icon: icons.devotionals, text: paywall.features.devotionals },
+  { icon: icons.scholar, text: paywall.features.scholarMessages },
+  { icon: icons.listen, text: paywall.features.scholarListen },
+  { icon: icons.talk, text: paywall.features.scholarTalk },
+];
 
 type ReadyState = Extract<PaywallState, { status: "ready" }>;
 // A link that could not be opened: the terms and the privacy policy, or the store's subscriptions page.
@@ -77,38 +113,35 @@ function PurchaseNotice({ notice }: { notice: PaywallNotice }) {
   );
 }
 
-// The shape of the page: the mark, the title, the benefits, two plans and the button.
+// The shape of the page: the scene's place, the title, the four rows, two plans and the button. The scene itself comes
+// with the plans, so the heavy-moment redirect (the crisis status draws this too) shows nothing of the paywall
+// meanwhile.
 function PaywallLoading() {
   return (
     <ScrollView contentContainerStyle={styles.scrollContent}>
-      <View
-        accessible
-        accessibilityLabel={paywall.loading}
-        accessibilityState={{ busy: true }}
-        className="screen__content pt-2"
-      >
-        <View
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          className="items-center gap-4"
-        >
-          <Skeleton width={80} height={80} radius={40} />
-          <View className="w-full items-center gap-2">
-            <Skeleton width="85%" height={30} radius={8} />
-            <Skeleton width="60%" height={30} radius={8} />
+      <View accessible accessibilityLabel={paywall.loading} accessibilityState={{ busy: true }}>
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <Skeleton height={SCENE_MIN} radius={0} />
+          <View className="screen__content items-center gap-3" style={styles.coverBody}>
+            <Skeleton width="70%" height={34} radius={8} />
+            <View className="w-full gap-2">
+              <Skeleton height={30} radius={15} />
+              <Skeleton height={30} radius={15} />
+              <Skeleton height={30} radius={15} />
+              <Skeleton height={30} radius={15} />
+            </View>
+            <Skeleton height={85} />
+            <Skeleton height={85} />
+            <Skeleton height={56} radius={28} />
           </View>
-          <Skeleton height={88} />
-          <Skeleton height={88} />
-          <Skeleton height={88} />
-          <Skeleton height={56} radius={28} />
         </View>
       </View>
     </ScrollView>
   );
 }
 
-// The page: a limit banner when the free limit sent the user here, the mark and title, what Pro includes, and the
-// plans. Every price, percentage and trial length comes from the offering through utils/pricing.
+// The page: the scene and the title on its fade, a banner when the free limit or Scholar sent the user here, what Pro
+// includes, and the plans. Every price, percentage and trial length comes from the offering through utils/pricing.
 function PaywallReady({
   state,
   source,
@@ -116,6 +149,8 @@ function PaywallReady({
   hasEntry,
   pinned,
   linkNotice,
+  topInset,
+  active,
   onClose,
   onPurchase,
   onOpenPage,
@@ -126,6 +161,8 @@ function PaywallReady({
   hasEntry: boolean;
   pinned: boolean;
   linkNotice: LinkNotice | null;
+  topInset: number;
+  active: boolean;
   onClose: () => void;
   onPurchase: () => void;
   onOpenPage: (url: string) => void;
@@ -155,89 +192,52 @@ function PaywallReady({
       onPurchase={onPurchase}
     />
   );
+  // What sent the person here, under the title and above the rows.
+  const banner =
+    source === "limit" && usage.limit !== null ? (
+      <View className="card card--blush mt-3 gap-1">
+        <Text className="text-label-lg text-ink">{paywall.limit.used(usage.limit)}</Text>
+        <Text className="text-body-sm text-mauve">
+          {paywall.limit.resets(formatResetDay(usage.resetsAt))}
+        </Text>
+        {hasEntry ? <Text className="text-body-sm text-mauve">{paywall.limit.saved}</Text> : null}
+      </View>
+    ) : source === "scholar" ? (
+      <View className="card card--blush mt-3">
+        <Text className="text-label-lg text-ink">{paywall.scholar[reason ?? "messages"]}</Text>
+      </View>
+    ) : null;
 
   return (
     <>
-      <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent}>
-        <View className="screen__content pt-2">
-          {source === "limit" && usage.limit !== null ? (
-            <View className="card card--blush mb-4 gap-1">
-              <Text className="text-label-lg text-ink">{paywall.limit.used(usage.limit)}</Text>
-              <Text className="text-body-sm text-mauve">
-                {paywall.limit.resets(formatResetDay(usage.resetsAt))}
-              </Text>
-              {hasEntry ? <Text className="text-body-sm text-mauve">{paywall.limit.saved}</Text> : null}
-            </View>
-          ) : null}
-          {source === "scholar" ? (
-            <View className="card card--blush mb-4">
-              <Text className="text-label-lg text-ink">{paywall.scholar[reason ?? "messages"]}</Text>
-            </View>
-          ) : null}
-
-          <View className="mb-6 items-center">
-            <View
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              className="size-20 items-center justify-center rounded-full border border-petal bg-card"
-              style={shadows.card}
-            >
-              <Image
-                source={images.logoMark}
-                contentFit="contain"
-                style={styles.logo}
-              />
-            </View>
-            <Text accessibilityRole="header" className="mt-4 text-center text-title text-plum-deep">
-              {paywall.hero.title}
-            </Text>
-            <Text className="mt-2 max-w-xs text-center text-body text-mauve">
-              {paywall.hero.subtitle}
-            </Text>
-          </View>
-
-          <View className="card mb-6 gap-3" style={shadows.card}>
-            {paywall.features.map((feature) => (
-              <View key={feature.title} className="flex-row items-start gap-3">
-                <View
-                  accessibilityElementsHidden
-                  importantForAccessibility="no-hide-descendants"
-                  className="mt-0.5 size-6 items-center justify-center rounded-full bg-sage/15"
-                >
-                  <Icon name={icons.check} size={16} color={colors.sage} />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-body text-ink">{feature.title}</Text>
-                  {feature.helper ? (
-                    <Text className="text-body-sm text-mauve">
-                      {feature.helper(FREE_DEVOTIONALS_PER_WEEK)}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-            ))}
-            {source === "scholar"
-              ? paywall.scholar.features.map((title) => (
-                <View key={title} className="flex-row items-start gap-3">
-                  <View
-                    accessibilityElementsHidden
-                    importantForAccessibility="no-hide-descendants"
-                    className="mt-0.5 size-6 items-center justify-center rounded-full bg-sage/15"
-                  >
-                    <Icon name={icons.check} size={16} color={colors.sage} />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-body text-ink">{title}</Text>
-                  </View>
-                </View>
-              ))
-              : null}
+      <ScrollView style={styles.flex} contentContainerStyle={styles.coverContent}>
+        <WelcomeScenes
+          sources={sceneSources}
+          minHeight={SCENE_MIN}
+          active={active}
+          fadeTop={topInset + SCENE_FADE_BELOW_INSET}
+          fadeBottom={SCENE_FADE_BOTTOM}
+        />
+        <View className="screen__content" style={styles.coverBody}>
+          {/* One line on every iPhone at the default text size; at a large size it breaks with no word alone. */}
+          <Text
+            accessibilityRole="header"
+            className="text-center text-title text-plum-deep"
+            lineBreakStrategyIOS="push-out"
+            textBreakStrategy="balanced"
+          >
+            {paywall.hero.title}
+          </Text>
+          {banner}
+          {/* The wrapper stretches so the list's bound has a definite width (BenefitList). */}
+          <View className="mt-3 self-stretch">
+            <BenefitList items={benefits} active={active} size="compact" />
           </View>
 
           <View
             accessibilityRole="radiogroup"
             accessibilityLabel={paywall.plan.groupLabel}
-            className="gap-3"
+            className="mt-3 gap-3"
           >
             {packages.map((pkg) => (
               <PlanOption
@@ -276,6 +276,9 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
   const { source, entryId, reason } = route.params;
   const state = usePaywall(entryId);
   const { height, fontScale } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  // The scene's motion and the rows' arrival run only while this screen is in front.
+  const focused = useIsFocused();
   const [linkNotice, setLinkNotice] = useState<LinkNotice | null>(null);
   useAnnounce(state.status === "done" ? paywall.done.title : null);
   // Sent once per screen, when the plans (or "Plans aren’t available") first show: never for the crisis redirect, which
@@ -321,6 +324,9 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
   const showRestore = state.status === "loading" || restorable !== null;
   const restoreDisabled = restorable === null || restoring || purchasing;
   const pinned = height >= PIN_MIN_HEIGHT && fontScale <= PIN_MAX_FONT_SCALE;
+  // The cover states: the header floats over the scene (or its place while the plans load) and applies the top inset
+  // itself; the message states keep it in flow under the safe area, as before.
+  const cover = state.status === "loading" || state.status === "crisis" || state.status === "ready";
 
   function restore() {
     setLinkNotice(null);
@@ -391,6 +397,8 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
           hasEntry={entryId !== undefined}
           pinned={pinned}
           linkNotice={linkNotice}
+          topInset={insets.top}
+          active={focused}
           onClose={close}
           onPurchase={purchase}
           onOpenPage={openPage}
@@ -399,36 +407,54 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
       break;
   }
 
-  return (
-    <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
-      {/* Drawn from the first frame in every state, and never disabled: nobody is trapped on a paywall. */}
-      <View className="screen__content flex-row items-center justify-between pb-1 pt-2">
+  // Drawn from the first frame in every state, and never disabled: nobody is trapped on a paywall. Over the scene the
+  // Restore label takes the covers' on-image tone: mauve measured 4.40:1 over the woman's curtain under the fade, plum-deep
+  // 10.3:1 (the X in ink reads 12:1 there).
+  const header = (
+    <View
+      pointerEvents="box-none"
+      className="screen__content flex-row items-center justify-between pb-1 pt-2"
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={copy.common.close}
+        onPress={close}
+        style={({ pressed }) => pressed && styles.pressed}
+      >
+        <View className="size-11 items-center justify-center">
+          <Icon name={icons.close} size={24} color={colors.ink} />
+        </View>
+      </Pressable>
+      {showRestore ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={copy.common.close}
-          onPress={close}
-          style={({ pressed }) => pressed && styles.pressed}
+          accessibilityLabel={paywall.restore}
+          accessibilityState={{ disabled: restoreDisabled }}
+          disabled={restoreDisabled}
+          onPress={restore}
+          style={({ pressed }) => [pressed && styles.pressed, restoreDisabled && styles.disabled]}
         >
-          <View className="size-11 items-center justify-center">
-            <Icon name={icons.close} size={24} color={colors.ink} />
+          <View className="-mr-3 min-h-11 justify-center px-3">
+            <Text className={cover ? "text-label-md text-plum-deep" : "text-label-md text-mauve"}>
+              {paywall.restore}
+            </Text>
           </View>
         </Pressable>
-        {showRestore ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={paywall.restore}
-            accessibilityState={{ disabled: restoreDisabled }}
-            disabled={restoreDisabled}
-            onPress={restore}
-            style={({ pressed }) => [pressed && styles.pressed, restoreDisabled && styles.disabled]}
-          >
-            <View className="-mr-3 min-h-11 justify-center px-3">
-              <Text className="text-label-md text-mauve">{paywall.restore}</Text>
-            </View>
-          </Pressable>
-        ) : null}
-      </View>
+      ) : null}
+    </View>
+  );
+
+  return (
+    // On the cover the scene runs under the top edge (the header applies the top inset itself); the message states keep
+    // the safe area on every side.
+    <SafeAreaView edges={cover ? ["bottom"] : ["top", "bottom"]} style={styles.screen}>
+      {cover ? null : header}
       {body}
+      {cover ? (
+        <View pointerEvents="box-none" style={[styles.coverHeader, { paddingTop: insets.top }]}>
+          {header}
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -436,8 +462,11 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.linen },
   flex: { flex: 1 },
-  scrollContent: { paddingBottom: 16 },
-  logo: { width: 40, height: 40 },
+  scrollContent: { paddingBottom: 12 },
+  // The cover's content fills the viewport, so the scene (flex 1) takes what the page leaves, never less than SCENE_MIN.
+  coverContent: { flexGrow: 1, paddingBottom: 12 },
+  coverBody: { marginTop: -TITLE_OVERLAP },
+  coverHeader: { position: "absolute", top: 0, left: 0, right: 0 },
   pressed: { opacity: 0.7 },
   disabled: { opacity: 0.5 },
 });
