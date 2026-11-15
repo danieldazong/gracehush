@@ -15,7 +15,7 @@ import { deleteUserRows, removeUserFiles } from "./lifecycle.ts";
 
 const USER = "user_test";
 
-// One Scholar conversation of the person's (step 38), with one message, and a day of usage.
+// One Scholar conversation of the person's (step 38), with one message, a day of usage and (step 39) the record of one live talk.
 function seedScholar(world: World, userId: string): void {
   world.seedUser(userId);
   const conversation = crypto.randomUUID();
@@ -43,6 +43,19 @@ function seedScholar(world: World, userId: string): void {
     created_at: world.now(),
   });
   world.scholarUsage.push({ user_id: userId, day: "2026-11-11", messages: 2, listens: 1 });
+  world.voiceSessions.push({
+    id: crypto.randomUUID(),
+    user_id: userId,
+    conversation_id: conversation,
+    voice: "warm",
+    started_at: world.now(),
+    last_turn_at: null,
+    ended_at: world.now(),
+    cap_seconds: 600,
+    seconds: 95,
+    turns: 3,
+    is_heavy: false,
+  });
 }
 
 function flow(work: (world: World) => Promise<void>) {
@@ -96,6 +109,8 @@ Deno.test(
     assertEquals(world.conversations.map((row) => row.user_id), ["user_other"]);
     assertEquals(world.messages.map((row) => row.user_id), ["user_other"]);
     assertEquals(world.scholarUsage.map((row) => row.user_id), ["user_other"]);
+    // Live talk (step 39): the record of the person's talks goes with the account, and nobody else's.
+    assertEquals(world.voiceSessions.map((row) => row.user_id), ["user_other"]);
     assertEquals(await deleteUserRows(createAdmin(), USER), { profiles: 0, leftover: 0 });
     assertEquals(unscopedRequests(world, USER), []);
   }),
@@ -120,9 +135,10 @@ Deno.test(
     seedDeletedDevotional(world, USER, world.now());
     seedScholar(world, USER);
     world.cascade = false;
-    assertEquals(await deleteUserRows(createAdmin(), USER), { profiles: 1, leftover: 6 });
+    assertEquals(await deleteUserRows(createAdmin(), USER), { profiles: 1, leftover: 7 });
     assertEquals([world.entries.length, world.affirmations.length, world.deletedDevotionals.length], [0, 0, 0]);
     assertEquals([world.conversations.length, world.messages.length, world.scholarUsage.length], [0, 0, 0]);
+    assertEquals(world.voiceSessions.length, 0);
     // A message goes before its conversation, and an affirmation before its entry.
     const deletes = world.requests.filter((request) => request.method === "DELETE").map((request) =>
       request.url.pathname.replace("/rest/v1/", "")
@@ -132,6 +148,7 @@ Deno.test(
       "scholar_messages",
       "scholar_conversations",
       "scholar_usage",
+      "scholar_voice_sessions",
       "daily_affirmations",
       "journal_entries",
       "deleted_devotionals",
