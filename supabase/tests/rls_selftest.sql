@@ -28,6 +28,10 @@
 --
 -- 2026-11-11 (supabase/migrations/20261111130000_help_lines.sql): checks 86 to 88 prove a heavy moment's help line and the column
 -- that closes Scholar for an account under 18. Run it after that migration.
+--
+-- 2026-11-13 (step 39, supabase/migrations/20261113120000_scholar_voice.sql): checks 89 to 92 prove the server-only record of
+-- live talks: its rules, that no app role can touch it, that it goes with the account and that it outlives its conversation. Run
+-- it after that migration.
 
 drop table if exists pg_temp.rls_results;
 create temp table rls_results (position integer, check_name text, passed boolean);
@@ -223,6 +227,9 @@ declare
   moved boolean;
   cascade_ok boolean := false;
   record_ok boolean := false;
+  -- Step 39.
+  voice_cascade boolean := false;
+  voice_outlives boolean := false;
   -- Step 33.
   claims_s constant text := '{"sub":"selftest_s","role":"authenticated"}';
   streak_zone constant text := 'Pacific/Kiritimati';
@@ -1297,7 +1304,85 @@ begin
     and (select count(*) from pg_constraint
           where conrelid = 'public.journal_entries'::regclass and conname in ('help_line_kind', 'help_line_crisis')) = 2);
 
-  -- Leave nothing behind: the fixtures go, and with them (cascade) their entries, affirmations and Scholar's rows.
+  -- ===== Voice sessions (supabase/migrations/20261113120000_scholar_voice.sql) =====
+  -- The server's own record of each live talk: whose it is, its cap, how long it ran and how many turns it had.
+  insert into rls_results values (89, 'the server records a talk, within the table''s rules',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice, cap_seconds)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'warm', 600)$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice, cap_seconds, seconds, turns, is_heavy)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'storyteller', null, 1900, 80, true)$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice, seconds)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'warm', 1901)$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice, seconds)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'warm', -1)$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice, turns)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'warm', -1)$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice, cap_seconds)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'warm', 29)$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice, cap_seconds)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'warm', 601)$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), '')$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), repeat('v', 25))$q$) = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice)
+         values (gen_random_uuid(), 'selftest_nobody', gen_random_uuid(), 'warm')$q$) = '23503'
+    and pg_temp.try_as('service_role', no_claims,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice)
+         values ('f0000000-0000-4000-8000-0000000000b1', 'selftest_a', gen_random_uuid(), 'warm')$q$,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice)
+         values ('f0000000-0000-4000-8000-0000000000b1', 'selftest_a', gen_random_uuid(), 'warm')$q$) = '23505');
+
+  insert into rls_results values (90, 'the app and a visitor can neither read nor write a talk''s record',
+    pg_temp.try_as('authenticated', claims_a, null, 'select * from public.scholar_voice_sessions') = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'warm')$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$update public.scholar_voice_sessions set seconds = 0$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a, null, 'delete from public.scholar_voice_sessions') = '42501'
+    and pg_temp.try_as('anon', no_claims, null, 'select * from public.scholar_voice_sessions') = '42501'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice)
+         values (gen_random_uuid(), 'selftest_a', gen_random_uuid(), 'warm')$q$) = '42501'
+    and exists (select 1 from pg_class where oid = 'public.scholar_voice_sessions'::regclass and relrowsecurity)
+    and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'scholar_voice_sessions'));
+
+  -- A talk's record follows its account, and it outlives its conversation: deleting a conversation gives no talk time back.
+  begin
+    insert into public.users_profile (id) values ('selftest_v');
+    insert into public.scholar_conversations (id, user_id) values ('f0000000-0000-4000-8000-000000000001', 'selftest_v');
+    insert into public.scholar_voice_sessions (id, user_id, conversation_id, voice, seconds)
+      values ('f0000000-0000-4000-8000-0000000000a1', 'selftest_v', 'f0000000-0000-4000-8000-000000000001', 'warm', 120);
+    delete from public.scholar_conversations where id = 'f0000000-0000-4000-8000-000000000001';
+    select count(*) into n1 from public.scholar_voice_sessions where id = 'f0000000-0000-4000-8000-0000000000a1';
+    voice_outlives := n1 = 1;
+    delete from public.users_profile where id = 'selftest_v';
+    select count(*) into n2 from public.scholar_voice_sessions where user_id = 'selftest_v';
+    voice_cascade := n2 = 0;
+    raise exception 'rollback' using errcode = 'P0001';
+  exception when others then
+    -- The block always ends here: by its own rollback, or by a rule that refused a step (what it had not proven stays false).
+    null;
+  end;
+  insert into rls_results values (91, 'a talk''s record goes with its account', voice_cascade);
+  insert into rls_results values (92, 'a talk''s record outlives its conversation: no foreign key ties them',
+    voice_outlives
+    and not exists (select 1 from pg_constraint
+                     where conrelid = 'public.scholar_voice_sessions'::regclass and contype = 'f'
+                       and confrelid = 'public.scholar_conversations'::regclass));
+
+  -- Leave nothing behind: the fixtures go, and with them (cascade) their entries, affirmations, Scholar's rows and talks.
   delete from public.users_profile where id like 'selftest\_%';
   -- The fixtures fired the broadcast triggers (step 33). Their messages went to self-test topics that no account can join; they go
   -- too where this role may delete them (a hosted project's editor may not: they stay until Supabase drops the day's table).

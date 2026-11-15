@@ -152,6 +152,18 @@ from (
                || case when exists (select 1 from information_schema.columns
                                     where table_schema = 'public' and table_name = 'users_profile'
                                       and column_name = 'scholar_closed_at') then 'exists' else 'absent' end
+        end),
+    (22, 'record of live talks (step 39)',
+        case
+          when to_regclass('public.scholar_voice_sessions') is null then 'absent'
+          else 'exists, row level security '
+               || case when (select relrowsecurity from pg_class where oid = to_regclass('public.scholar_voice_sessions'))
+                       then 'on' else 'OFF' end
+               || ', the app roles can touch: '
+               || coalesce(nullif((select string_agg(r.name, ', ' order by r.name)
+                                   from (values ('anon'), ('authenticated')) as r (name)
+                                   where has_table_privilege(r.name, 'public.scholar_voice_sessions',
+                                                             'select, insert, update, delete')), ''), 'nothing')
         end)
 ) as checks (position, item, found)
 order by position;

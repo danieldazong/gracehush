@@ -44,6 +44,7 @@ const VERSES = migrations.find((name) => name.includes("affirmation_verses"));
 const MORE = migrations.find((name) => name.includes("more_affirmations"));
 const SCHOLAR = migrations.find((name) => name.includes("scholar_conversations"));
 const HELP = migrations.find((name) => name.includes("help_lines"));
+const VOICE = migrations.find((name) => name.includes("scholar_voice"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -226,7 +227,8 @@ for (const model of MODELS) {
             (select count(*) from public.scholar_conversations)::int as scholar_conversations,
             (select count(*) from public.scholar_messages)::int as scholar_messages,
             (select count(*) from public.scholar_usage)::int as scholar_usage,
-            (select count(*) from public.scholar_safety_daily)::int as scholar_safety_daily`,
+            (select count(*) from public.scholar_safety_daily)::int as scholar_safety_daily,
+            (select count(*) from public.scholar_voice_sessions)::int as scholar_voice_sessions`,
   );
   console.log("rows left behind by the tests:", JSON.stringify(left.rows[0]));
   if (Object.values(left.rows[0]).some((count) => count !== 0)) failures += 1;
@@ -358,6 +360,12 @@ if (process.argv.includes("--negative")) {
     ["the app may write a help line", "off", (sql) => sql + "\ngrant update (help_line) on public.journal_entries to authenticated;", [87], HELP],
     ["the app may reopen Scholar (write its closing time)", "off", (sql) => sql + "\ngrant update (scholar_closed_at) on public.users_profile to authenticated;", [87], HELP],
     ["Scholar's closing time is required", "off", (sql) => sql.replace("add column if not exists scholar_closed_at timestamptz;", "add column if not exists scholar_closed_at timestamptz not null default now();"), [88], HELP],
+    // The record of live talks (step 39, its own migration).
+    ["the app may read the record of talks (grant and policy)", "off", (sql) => sql + "\ngrant select on public.scholar_voice_sessions to authenticated;\ncreate policy scholar_voice_sessions_read_all on public.scholar_voice_sessions for select to authenticated using (true);", [90], VOICE],
+    ["row level security off on the record of talks", "off", (sql) => sql.replace("enable row level security", "disable row level security"), [90], VOICE],
+    ["the record of talks does not follow the account", "off", (sql) => sql.replace("references public.users_profile (id) on delete cascade", "references public.users_profile (id)"), [91], VOICE],
+    ["a talk's record is tied to its conversation (deleting one gives time back)", "off", (sql) => sql + "\nalter table public.scholar_voice_sessions add constraint scholar_voice_sessions_conversation_fkey foreign key (conversation_id) references public.scholar_conversations (id) on delete cascade;", [92], VOICE],
+    ["ON: the record of talks keeps the API roles' default grants", "on", dropLine("revoke all on public.scholar_voice_sessions from anon, authenticated;"), [90], VOICE],
     // Not a broken migration: the hosted project before the day's first Realtime connection. Nothing may fail, the checks that need
     // a message table say skipped, and a change is still saved (59).
     ["no message table today (nobody has connected yet)", "off", null, { skipped: [60, 61, 62], passed: [59, 63, 64] }, REALTIME, { stub: NO_MESSAGE_TABLE_TODAY }],

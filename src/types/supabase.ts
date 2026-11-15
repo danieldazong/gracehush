@@ -415,6 +415,56 @@ export type Database = {
           },
         ]
       }
+      scholar_voice_sessions: {
+        Row: {
+          cap_seconds: number | null
+          conversation_id: string
+          ended_at: string | null
+          id: string
+          is_heavy: boolean
+          last_turn_at: string | null
+          seconds: number
+          started_at: string
+          turns: number
+          user_id: string
+          voice: string
+        }
+        Insert: {
+          cap_seconds?: number | null
+          conversation_id: string
+          ended_at?: string | null
+          id: string
+          is_heavy?: boolean
+          last_turn_at?: string | null
+          seconds?: number
+          started_at?: string
+          turns?: number
+          user_id: string
+          voice: string
+        }
+        Update: {
+          cap_seconds?: number | null
+          conversation_id?: string
+          ended_at?: string | null
+          id?: string
+          is_heavy?: boolean
+          last_turn_at?: string | null
+          seconds?: number
+          started_at?: string
+          turns?: number
+          user_id?: string
+          voice?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scholar_voice_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users_profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       users_profile: {
         Row: {
           affirmations_enabled: boolean
