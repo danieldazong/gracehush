@@ -19,7 +19,8 @@ export function rawAudioPath(userId: string, clientEntryId: string): string {
 }
 
 // Reads at most `maxBytes` (MAX_BODY_BYTES unless a caller asks for less), so a huge or endless body never sits in memory.
-async function readLimited(req: Request, maxBytes: number): Promise<string> {
+// Exported for scholar-voice-llm (step 39), whose caller is ElevenLabs and whose body is read whatever its content type says.
+export async function readLimited(req: Request, maxBytes: number): Promise<string> {
   if (!req.body) return "";
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];

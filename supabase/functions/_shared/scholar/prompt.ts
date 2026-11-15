@@ -14,6 +14,18 @@ import { HARD_PASSAGE_KEYS, HEAVY_CHAT_SECTION } from "./heavyChat.ts";
 // local time and what the conversation has already had, and says_under_18 in both schemas.
 export const SCHOLAR_PROMPT_VERSION = "scholar-v2";
 
+// A live talk (step 39): an everyday turn that is spoken carries the <spoken> block (SPOKEN_BLOCK below), and its log line says
+// "scholar-v2/spoken-v4". The instruction is the same for a typed message and a spoken turn. A change of the
+// block's text bumps this version, and the evaluation's --spoken sets are run again. spoken-v2 (2026-11-14, the owner's
+// walk-through): shorter answers, one passage read before the answer, a last sentence that hands the turn back, and a recap
+// when the person comes back after stopping Scholar (SPOKEN_RESUME). spoken-v3 (the same day, the retest): a passage only when
+// the person asks about one or asks for a verse, because a reading before every answer made each answer about 28 seconds.
+// spoken-v4 (the same day, the owner's own talk: 3 to 4 seconds before an answer felt slow): the everyday writer thinks
+// "minimal" (voice/constants.ts VOICE_WRITER_THINKING), its schema carries spoken descriptions (buildScholarSchema spoken), and
+// the supporting passage is dropped in a talk (turn.ts).
+export const SCHOLAR_SPOKEN_VERSION = "spoken-v4";
+export const SCHOLAR_SPOKEN_PROMPT_VERSION = `${SCHOLAR_PROMPT_VERSION}/${SCHOLAR_SPOKEN_VERSION}`;
+
 type JsonSchema = Record<string, unknown>;
 
 // One "## " section of the reflection's instruction, exactly as it is written there (its heading line and its lines). Faith and
@@ -135,7 +147,13 @@ const PRAYER_FIELD = {
 // come before the reply, because Gemini writes the properties in this order and the reply names them; the heavy flag comes
 // first, because it decides how everything after it is written. A heavy answer (scholar-v2) names its one passage by its key on
 // the hard-moment list, or none: it has no lead passage, and no title.
-export function buildScholarSchema(options: { heavy: boolean } = { heavy: false }): JsonSchema {
+//
+// A live talk's everyday writer (spoken: true, spoken-v4) gets the same fields with spoken descriptions. It writes with
+// "minimal" thinking (voice/constants.ts VOICE_WRITER_THINKING), and measured on 2026-11-14 it then followed the field
+// descriptions over the <spoken> block: with the written ones it wrote a median of 61 words (four answers over 90), named a
+// reading in 18 of 20 answers, read a second passage after five, and folded a prayer into the reply once. So the descriptions say
+// what the block says. The supporting passage is never used in a talk (turn.ts drops it), and its description says so.
+export function buildScholarSchema(options: { heavy: boolean; spoken?: boolean } = { heavy: false }): JsonSchema {
   if (options.heavy) {
     return {
       type: "object",
@@ -151,6 +169,34 @@ export function buildScholarSchema(options: { heavy: boolean } = { heavy: false 
         says_under_18: SAYS_UNDER_18,
       },
       required: ["is_heavy", "passage_key", "reply", "prayer", "says_under_18"],
+    };
+  }
+  if (options.spoken === true) {
+    return {
+      type: "object",
+      properties: {
+        is_heavy: IS_HEAVY,
+        title: {
+          type: ["string", "null"],
+          description: "Only when the turn asks for one: 2 to 6 words in Title Case. Otherwise null.",
+        },
+        lead_passage: passageSchema(
+          "Only when the person asks about a passage or asks for a verse: that passage, one or two verses, read aloud before the reply. Otherwise null.",
+        ),
+        passage: passageSchema("Always null in a spoken answer."),
+        reply: {
+          type: "string",
+          description:
+            "Two or three short sentences, 20 to 50 words, as one paragraph, ending with one short sentence that hands the turn back. When they ask you to pray, the reply is instead one short sentence that leads into the prayer, never a question, and the prayer itself is written in prayer.",
+        },
+        prayer: {
+          type: ["string", "null"],
+          description:
+            "When the person asks you to pray or asks for a prayer: the prayer itself, in their own voice (I, me, my), 50 to 75 words, without Amen; never null when they asked. Otherwise null.",
+        },
+        says_under_18: SAYS_UNDER_18,
+      },
+      required: ["is_heavy", "title", "lead_passage", "passage", "reply", "prayer", "says_under_18"],
     };
   }
   return {
@@ -208,9 +254,40 @@ export type ScholarTurnInput = {
   heavyBlock: string | null;
   // What the handler's own retry is told to fix (a typed verse found after the passages were read). Never the person's words.
   correction?: string | null;
+  // An everyday turn of a live talk (step 39): the <spoken> block follows the message. A heavy turn never carries it: its
+  // <heavy_moment> block has a spoken form of its own (heavyChat.ts buildHeavyBlock).
+  spoken?: boolean;
+  // A turn of a live talk that comes right after the person stopped Scholar with a stop word: the <spoken> block also carries
+  // SPOKEN_RESUME. Read only with `spoken`.
+  resumed?: boolean;
 };
 
 export const TITLE_REQUEST = "This is the first answer of the conversation: write title.";
+
+// What an everyday answer is asked for when it is spoken in a live talk (step 39, decision 13). The block comes from the app, as
+// the <heavy_moment> block does, and says so itself, because the instruction does not name it. A draft for the readers.
+export const SPOKEN_BLOCK = [
+  "<spoken>",
+  "This block comes from the app, not from the person. This turn is part of a live spoken talk: they spoke their message, your answer is read aloud to them, and nothing is shown.",
+  "- Answer in two or three short sentences, 20 to 50 words in all, as one paragraph. This takes the place of the usual length.",
+  "- Name a passage only when they ask about one or ask for a verse; otherwise name none. When you name one, it is one passage of one or two verses, as lead_passage: it is read aloud before your answer, so your last sentence is the last thing they hear. passage is null.",
+  "- End with one short sentence that hands the turn back to them, such as a brief question or an invitation to go on. Word it freshly each time, and ask no more than one question.",
+  "- Write nothing that depends on being seen: no list, no heading, and nothing about what is above or below.",
+  "- Speak of what they said, never of what they wrote or typed.",
+  "- Write a prayer only when they ask for one.",
+  "</spoken>",
+].join("\n");
+
+// The paragraph the <spoken> block gains when the person stopped Scholar partway through its last answer and has now spoken
+// again (step 39, the owner's walk-through of 2026-11-14): the saved answer is whole, so the writer is told they did not hear
+// all of it. A draft for the readers.
+export const SPOKEN_RESUME =
+  "- They stopped you partway through your last answer and are back now, and they may not remember where you were. Name no passage in this answer. If they ask you to go on, begin with one short sentence that sums up what you were saying, such as “I was saying that …”, then finish that answer in two or three sentences. If they ask something new, answer that instead.";
+
+// The <spoken> block, with SPOKEN_RESUME when the turn comes right after the person stopped Scholar.
+export function spokenBlock(resumed: boolean): string {
+  return resumed ? SPOKEN_BLOCK.replace("\n</spoken>", `\n${SPOKEN_RESUME}\n</spoken>`) : SPOKEN_BLOCK;
+}
 
 // A value of the reflection block, on one line, with no tag the person could have typed into it.
 const field = (text: string | null, max: number) => text === null ? "" : cutText(stripChatTags(text), max);
@@ -244,12 +321,14 @@ function conversationBlock(history: readonly ScholarHistoryMessage[]): string {
   return lines.length === 0 ? "" : ["<conversation>", ...lines, "</conversation>"].join("\n");
 }
 
-// The order (step 38, section 3): the reflection, the conversation, the message, the title line, the heavy block, a correction.
+// The order (step 38, section 3): the reflection, the conversation, the message, the spoken block of a live talk's everyday turn
+// (step 39), the title line, the heavy block, a correction.
 export function buildScholarTurn(input: ScholarTurnInput): string {
   const parts = [
     input.reflection === null ? "" : reflectionBlock(input.reflection),
     conversationBlock(input.history),
     ["<message>", stripChatTags(input.message).trim(), "</message>"].join("\n"),
+    input.spoken === true && input.heavyBlock === null ? spokenBlock(input.resumed === true) : "",
     input.askTitle ? TITLE_REQUEST : "",
     input.heavyBlock ?? "",
     input.correction ? ["<correction>", input.correction, "</correction>"].join("\n") : "",

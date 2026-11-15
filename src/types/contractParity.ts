@@ -74,4 +74,15 @@ export type ContractParity = [
   Expect<Same<App.ScholarSpeakResponse, Server.ScholarSpeakResponse>>,
   Expect<Same<App.ScholarSpeakErrorCode, Server.ScholarSpeakErrorCode>>,
   Expect<Same<App.ScholarSpeakError, Server.ScholarSpeakError>>,
+  // Live talk (step 39).
+  Expect<Same<App.ScholarVoiceLimits, Server.ScholarVoiceLimits>>,
+  Expect<Same<App.ScholarVoiceStartRequest, Server.ScholarVoiceStartRequest>>,
+  Expect<Same<App.ScholarVoiceStartResponse, Server.ScholarVoiceStartResponse>>,
+  Expect<Same<App.ScholarVoiceStartErrorCode, Server.ScholarVoiceStartErrorCode>>,
+  Expect<Same<App.ScholarVoiceStartError, Server.ScholarVoiceStartError>>,
+  Expect<Same<App.ScholarVoiceLimitError, Server.ScholarVoiceLimitError>>,
+  Expect<Same<App.ScholarVoiceEndRequest, Server.ScholarVoiceEndRequest>>,
+  Expect<Same<App.ScholarVoiceEndResponse, Server.ScholarVoiceEndResponse>>,
+  Expect<Same<App.ScholarVoiceEndErrorCode, Server.ScholarVoiceEndErrorCode>>,
+  Expect<Same<App.ScholarVoiceEndError, Server.ScholarVoiceEndError>>,
 ];

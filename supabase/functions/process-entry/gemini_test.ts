@@ -342,6 +342,28 @@ Deno.test("with a fallback model, every second attempt goes to it, with the same
   });
 });
 
+Deno.test("an attempt on the fallback model carries its own thinking level, and the main model's keep theirs", async () => {
+  const levelOf = (index: number, world: { geminiCalls: { json: unknown }[] }) =>
+    (world.geminiCalls[index].json as { generation_config: { thinking_level: string } }).generation_config
+      .thinking_level;
+  await withWorld(everyAttempt(geminiError(503)), async (world) => {
+    await expectAppError(
+      () =>
+        generate(
+          args({ thinkingLevel: "minimal", fallbackModel: "gemini-fallback-model", fallbackThinkingLevel: "low" }),
+          newStats(),
+        ),
+      "AI_UNAVAILABLE",
+    );
+    assertEquals([0, 1, 2, 3].map((index) => levelOf(index, world)), ["minimal", "low", "minimal", "low"]);
+  });
+  // Unset, the fallback attempt has the main thinking level.
+  await withWorld([geminiError(503), geminiOk(readyOutput())], async (world) => {
+    await generate(args({ thinkingLevel: "medium", fallbackModel: "gemini-fallback-model" }), newStats());
+    assertEquals([levelOf(0, world), levelOf(1, world)], ["medium", "medium"]);
+  });
+});
+
 Deno.test("no fallback model, or one that is the main model, sends every attempt to the main model", async () => {
   for (const fallbackModel of [undefined, "gemini-test-model"]) {
     await withWorld([geminiError(503), geminiOk(readyOutput())], async (world) => {

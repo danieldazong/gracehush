@@ -4,6 +4,7 @@ import { bibleTiming, clearChapterCache } from "../../_shared/bible/helloao.ts";
 import { clearTokenCache } from "../../_shared/tts/googleAuth.ts";
 import { ttsTiming } from "../../_shared/tts/synthesize.ts";
 import { makeServiceAccount, synthOk, tokenOk } from "../../_shared/tts/testing.ts";
+import { VOICE_KEYS, type VoiceKey } from "../../_shared/voice/voices.ts";
 import { speechTiming } from "../constants.ts";
 import type { EntryRow } from "../lifecycle.ts";
 
@@ -24,6 +25,7 @@ export const GOOGLE_TTS_HOST = "texttospeech.googleapis.com";
 export const REVENUECAT_HOST = "api.revenuecat.com";
 export const CLERK_API_HOST = "api.clerk.com";
 export const APPLE_HOST = "appleid.apple.com";
+export const ELEVENLABS_HOST = "api.elevenlabs.io";
 
 type Row = Record<string, unknown>;
 
@@ -69,6 +71,22 @@ export const APPLE_TEST_TEAM_ID = "TESTTEAM01";
 export const APPLE_TEST_KEY_ID = "TESTKEY001";
 // The app's bundle ID: the fake refuses a client secret or a request for any other.
 const APPLE_TEST_CLIENT_ID = "com.gracehush.app";
+
+// The live-talk secrets of the test world (step 39). They are off in a fresh world: voiceOn(world) sets them. Every value is
+// made up, in the shape the real one has; each voice has an agent of its own.
+const VOICE_NAMES = [
+  "SCHOLAR_VOICE_ENABLED",
+  "ELEVENLABS_API_KEY",
+  "ELEVENLABS_AGENTS",
+  "SCHOLAR_VOICE_SESSION_SECRET",
+  "ELEVENLABS_LLM_SECRET",
+];
+export const VOICE_TEST = {
+  apiKey: "sk_testvoiceworkspacekey000000",
+  sessionSecret: "test-voice-session-secret-0123456789abcdef",
+  llmSecret: "test-llm-shared-secret-0123456789abcdef0123",
+  agents: Object.fromEntries(VOICE_KEYS.map((key) => [key, `agent_test_${key}`])) as Record<VoiceKey, string>,
+};
 
 // What the Bible API answers for one chapter, keyed "PHP/4". A chapter with no entry is served from the real chapters in
 // _shared/bible/fixtures (404 when there is no fixture for it).
@@ -187,6 +205,20 @@ const COLUMNS: Record<string, string[]> = {
     "screen_failed",
     "free_answered",
   ],
+  // Step 39 (supabase/migrations/20261113120000_scholar_voice.sql): the server's record of each live talk.
+  scholar_voice_sessions: [
+    "id",
+    "user_id",
+    "conversation_id",
+    "voice",
+    "started_at",
+    "last_turn_at",
+    "ended_at",
+    "cap_seconds",
+    "seconds",
+    "turns",
+    "is_heavy",
+  ],
 };
 
 // Step 38: the nine anonymous counters of scholar_safety_daily (bump_scholar_safety takes only these names).
@@ -259,6 +291,8 @@ export type World = {
     recentRead: number;
     // Step 38: a call of either Scholar counter that fails.
     bump: number;
+    // Step 39: a read of scholar_voice_sessions that fails.
+    talksRead: number;
   };
   // RevenueCat (step 30): GET /v1/subscribers/{id} with a secret key. A queued reply answers first; otherwise the customer
   // stored here for that app user id (200), or, as the real API does for an id it has never seen, a new empty customer (201).
@@ -299,9 +333,25 @@ export type World = {
   messages: Row[];
   scholarUsage: Row[];
   safetyDaily: Row[];
+  // Live talk (step 39): the server's record of each talk. Its conversation_id has no foreign key, so a row outlives its
+  // conversation, and it goes with its account.
+  voiceSessions: Row[];
+  // ElevenLabs (step 39): the three calls the voice functions make, each with the workspace's API key in xi-api-key (anything
+  // else is a 401). GET /v1/convai/conversation/token?agent_id= answers a fresh one-time token for an agent the workspace has
+  // (elevenAgents) and 404 for any other; GET /v1/convai/conversations?agent_id= lists that agent's talks from elevenTalks, in
+  // ElevenLabs' own row shape; DELETE /v1/convai/conversations/{id} removes a talk (204), answers 404 for one that is not
+  // there, and 500 for one a test named in elevenDeleteFails. A queued reply answers first, whatever the call.
+  elevenAgents: Set<string>;
+  elevenTalks: Row[];
+  elevenDeleteFails: Set<string>;
+  elevenQueue: GeminiReply[];
+  elevenCalls: Recorded[];
   rpcCalls: { name: string; args: Row }[];
   storageTimes: Map<string, string>;
   beforeReply: (() => void) | null;
+  // A table whose inserts are answered only after a delay (POST /rest/v1/<table>), so a test can hold a save open: what a caller
+  // does before the save has ended (a talk speaks its answer while it is saved, step 39) can then be seen.
+  slowInsert: { table: string; ms: number } | null;
   // False makes deleting a profile leave its entries, affirmations and records behind: a cascade that did not happen.
   cascade: boolean;
   logs: string[];
@@ -445,6 +495,24 @@ function check(table: string, row: Row, world: World, inserting = true): void {
       );
       if (answered) fail("23505", "scholar_messages_reply_to_key");
     }
+  }
+  if (table === "scholar_voice_sessions") {
+    for (const column of ["id", "user_id", "conversation_id", "voice"]) {
+      if (typeof row[column] !== "string") fail("23502", `${column} is null`);
+    }
+    if (inserting && world.voiceSessions.some((other) => other.id === row.id)) {
+      fail("23505", "scholar_voice_sessions_pkey");
+    }
+    if (!world.users.some((user) => user.id === row.user_id)) fail("23503", "scholar_voice_sessions_user_id_fkey");
+    const whole = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value);
+    if (!whole(row.seconds) || row.seconds < 0 || row.seconds > 1900) {
+      fail("23514", "scholar_voice_sessions_seconds_range");
+    }
+    if (!whole(row.turns) || row.turns < 0) fail("23514", "scholar_voice_sessions_turns_min");
+    const cap = row.cap_seconds ?? null;
+    if (cap !== null && (!whole(cap) || cap < 30 || cap > 600)) fail("23514", "scholar_voice_sessions_cap_range");
+    const voice = String(row.voice);
+    if (voice.length < 1 || voice.length > 24) fail("23514", "scholar_voice_sessions_voice_length");
   }
   if (table === "deleted_devotionals") {
     for (const column of ["entry_id", "user_id", "made_at"]) {
@@ -609,6 +677,8 @@ function rest(world: World, table: string, request: Recorded): Response {
     ? world.scholarUsage
     : table === "scholar_safety_daily"
     ? world.safetyDaily
+    : table === "scholar_voice_sessions"
+    ? world.voiceSessions
     : world.affirmations;
   const filters = filtersOf(request.url);
   const wants = prefer(request);
@@ -636,6 +706,10 @@ function rest(world: World, table: string, request: Recorded): Response {
     ) {
       world.fail.recentRead -= 1;
       throw new PgError(500, "XX000", "the recent reflections could not be read");
+    }
+    if (request.method === "GET" && world.fail.talksRead > 0 && table === "scholar_voice_sessions") {
+      world.fail.talksRead -= 1;
+      throw new PgError(500, "XX000", "the talks could not be read");
     }
     for (const { column } of filters) {
       if (!columns.includes(column)) throw new PgError(400, "42703", `column ${table}.${column} does not exist`);
@@ -706,6 +780,17 @@ function rest(world: World, table: string, request: Recorded): Response {
         };
       } else if (table === "scholar_usage" || table === "scholar_safety_daily") {
         throw new PgError(403, "42501", `only the counters write ${table}`);
+      } else if (table === "scholar_voice_sessions") {
+        row = {
+          started_at: now,
+          last_turn_at: null,
+          ended_at: null,
+          cap_seconds: null,
+          seconds: 0,
+          turns: 0,
+          is_heavy: false,
+          ...record,
+        };
       } else {
         row = {
           id: crypto.randomUUID(),
@@ -781,6 +866,7 @@ function rest(world: World, table: string, request: Recorded): Response {
           world.conversations,
           world.messages,
           world.scholarUsage,
+          world.voiceSessions,
         ]
       ) {
         const kept = list.filter((row) => !gone.has(row.user_id));
@@ -851,6 +937,42 @@ function defaultScreenReply(json: unknown): GeminiReply {
 
 // Plays one queued reply as the network would: a connection that fails, a call that never answers (it ends when the
 // request's own timeout aborts it), or an answer, after its delay if it has one.
+let elevenTokens = 0;
+
+async function elevenLabsApi(world: World, request: Request, recorded: Recorded): Promise<Response> {
+  world.elevenCalls.push(recorded);
+  // The workspace's own key is the world's, whatever a test has put in the environment since.
+  if (request.headers.get("xi-api-key") !== VOICE_TEST.apiKey) {
+    return jsonResponse(401, { detail: { status: "invalid_api_key", message: "Invalid API key" } });
+  }
+  const queued = world.elevenQueue.shift();
+  if (queued) return await play(queued, request);
+  const { pathname, searchParams } = recorded.url;
+  if (request.method === "GET" && pathname === "/v1/convai/conversation/token") {
+    const agent = searchParams.get("agent_id") ?? "";
+    if (!world.elevenAgents.has(agent)) {
+      return jsonResponse(404, { detail: { status: "agent_not_found", message: "Agent not found" } });
+    }
+    elevenTokens += 1;
+    return jsonResponse(200, { token: `el-test-token-${String(elevenTokens).padStart(8, "0")}` });
+  }
+  if (request.method === "GET" && pathname === "/v1/convai/conversations") {
+    const agent = searchParams.get("agent_id");
+    const rows = world.elevenTalks.filter((talk) => agent === null || talk.agent_id === agent);
+    return jsonResponse(200, { conversations: rows.map((row) => ({ ...row })), has_more: false, next_cursor: null });
+  }
+  const one = /^\/v1\/convai\/conversations\/([^/]+)$/.exec(pathname);
+  if (one && request.method === "DELETE") {
+    const id = decodeURIComponent(one[1]);
+    if (world.elevenDeleteFails.has(id)) return jsonResponse(500, { detail: { status: "internal_error" } });
+    const index = world.elevenTalks.findIndex((talk) => talk.conversation_id === id);
+    if (index < 0) return jsonResponse(404, { detail: { status: "conversation_not_found" } });
+    world.elevenTalks.splice(index, 1);
+    return new Response(null, { status: 204 });
+  }
+  throw new Error(`the test world has no ElevenLabs route for ${request.method} ${pathname}`);
+}
+
 async function play(reply: GeminiReply, request: Request): Promise<Response> {
   if (reply.kind === "network") throw new TypeError("network down");
   if (reply.kind === "hang") {
@@ -1114,8 +1236,9 @@ export function installWorld(): World {
     saved[name] = Deno.env.get(name);
     Deno.env.set(name, value);
   }
-  // Speech is off in a fresh world, whatever the shell running the tests holds: speechOn(world) turns it on.
-  for (const name of [...SPEECH_NAMES, ...APPLE_NAMES]) {
+  // Speech is off in a fresh world, whatever the shell running the tests holds: speechOn(world) turns it on. So are Sign in
+  // with Apple (appleOn) and live talk (voiceOn).
+  for (const name of [...SPEECH_NAMES, ...APPLE_NAMES, ...VOICE_NAMES]) {
     saved[name] = Deno.env.get(name);
     Deno.env.delete(name);
   }
@@ -1167,6 +1290,7 @@ export function installWorld(): World {
       rowsRead: 0,
       recentRead: 0,
       bump: 0,
+      talksRead: 0,
     },
     revenuecat: new Map(),
     revenuecatQueue: [],
@@ -1191,9 +1315,16 @@ export function installWorld(): World {
     messages: [],
     scholarUsage: [],
     safetyDaily: [],
+    voiceSessions: [],
+    elevenAgents: new Set(),
+    elevenTalks: [],
+    elevenDeleteFails: new Set(),
+    elevenQueue: [],
+    elevenCalls: [],
     rpcCalls: [],
     storageTimes: new Map(),
     beforeReply: null,
+    slowInsert: null,
     cascade: true,
     logs: [],
     background: [],
@@ -1314,6 +1445,8 @@ export function installWorld(): World {
 
     if (url.host === APPLE_HOST) return await appleApi(world, request, recorded);
 
+    if (url.host === ELEVENLABS_HOST) return await elevenLabsApi(world, request, recorded);
+
     if (url.host === REVENUECAT_HOST) {
       world.revenuecatCalls.push(recorded);
       // The real API refuses a request without a secret key (a public SDK key cannot read a customer).
@@ -1357,7 +1490,14 @@ export function installWorld(): World {
         if (url.pathname === "/rest/v1/rpc/feature_affirmation") return featureAffirmation(world, recorded);
         const counter = /^\/rest\/v1\/rpc\/(bump_scholar_usage|bump_scholar_safety)$/.exec(url.pathname);
         if (counter) return bumpCounter(world, counter[1], recorded);
-        if (url.pathname.startsWith("/rest/v1/")) return rest(world, url.pathname.slice("/rest/v1/".length), recorded);
+        if (url.pathname.startsWith("/rest/v1/")) {
+          const table = url.pathname.slice("/rest/v1/".length);
+          const slow = world.slowInsert;
+          if (slow !== null && slow.table === table && request.method === "POST") {
+            await new Promise((resolve) => setTimeout(resolve, slow.ms));
+          }
+          return rest(world, table, recorded);
+        }
         const removal = /^\/storage\/v1\/object\/(journal_media|exports)$/.exec(url.pathname);
         if (removal && request.method === "DELETE") return removeObjects(world, removal[1], recorded);
         const listing = /^\/storage\/v1\/object\/list\/(journal_media|exports)$/.exec(url.pathname);
@@ -1490,6 +1630,17 @@ export const crisisOutput = heavyOutput;
 
 // Turns speech on in the world's environment: the test service account (a real RSA key) and a Chirp 3 HD voice.
 // world.restore() puts the environment back. The Google counters start again from here.
+// Turns live talk on in the world's environment (step 39): the switch, the workspace's key, an agent for each voice (which the
+// fake workspace then has), and the two secrets of a talk's session.
+export function voiceOn(world: World): void {
+  Deno.env.set("SCHOLAR_VOICE_ENABLED", "true");
+  Deno.env.set("ELEVENLABS_API_KEY", VOICE_TEST.apiKey);
+  Deno.env.set("ELEVENLABS_AGENTS", JSON.stringify(VOICE_TEST.agents));
+  Deno.env.set("SCHOLAR_VOICE_SESSION_SECRET", VOICE_TEST.sessionSecret);
+  Deno.env.set("ELEVENLABS_LLM_SECRET", VOICE_TEST.llmSecret);
+  for (const agent of Object.values(VOICE_TEST.agents)) world.elevenAgents.add(agent);
+}
+
 export function speechOn(world: World): void {
   Deno.env.set("GOOGLE_TTS_CREDENTIALS_B64", SPEECH_ACCOUNT.encoded);
   Deno.env.set("TTS_VOICE_NAME", SPEECH_VOICE);
@@ -1553,6 +1704,7 @@ export function unscopedRequests(world: World, userId: string): string[] {
       "scholar_conversations",
       "scholar_messages",
       "scholar_usage",
+      "scholar_voice_sessions",
     ];
     if (!scoped.includes(table)) continue;
     if (request.method === "POST") {

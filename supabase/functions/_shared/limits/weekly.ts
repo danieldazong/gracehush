@@ -143,6 +143,38 @@ export function dayWindow(now: Date, timeZone: string): DayWindow {
   };
 }
 
+// ---- Live talk's month (step 39) -------------------------------------------------------------------------------------------
+
+// The calendar month of the person's time zone that holds `now`: from the first instant of its first day to the first instant of
+// the next month's, and the month itself as YYYY-MM. The same zone handling as dayWindow. A month's talk time is counted in it.
+export type MonthWindow = {
+  start: Date; // the first instant of the month, inclusive
+  end: Date; // the first instant of the next month: when the month's talk time returns
+  month: string; // YYYY-MM on the zone's calendar
+  zone: string; // the zone that was used
+  zoneFallback: boolean; // true when the zone was not valid and UTC was used instead
+};
+
+export function monthWindow(now: Date, timeZone: string): MonthWindow {
+  let zone = timeZone;
+  let zoneFallback = false;
+  try {
+    formatter(zone);
+  } catch {
+    zone = "UTC";
+    zoneFallback = true;
+  }
+  const here = wall(now.getTime(), zone);
+  const next = here.month === 12 ? { year: here.year + 1, month: 1 } : { year: here.year, month: here.month + 1 };
+  return {
+    start: new Date(startOfDay(here.year, here.month, 1, zone)),
+    end: new Date(startOfDay(next.year, next.month, 1, zone)),
+    month: `${here.year}-${String(here.month).padStart(2, "0")}`,
+    zone,
+    zoneFallback,
+  };
+}
+
 // ---- The check itself (step 22) ----------------------------------------------------------------------------------------
 
 export type LimitProfile = { tier: "free" | "trial" | "pro"; timezone: string };

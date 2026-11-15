@@ -28,6 +28,7 @@ import {
   localTime,
   plainNamingPhrases,
   SPOKEN_HELP_LINE,
+  spokenFallback,
   spokenHelpLine,
   usedPassageKeys,
 } from "./heavyChat.ts";
@@ -283,4 +284,90 @@ Deno.test("the spoken help lines are the app's own lines, with the app's numbers
   }
   assertEquals(spokenHelpLine("emergency", "other"), nowElsewhere);
   assertEquals(spell(helpline), "nine eight eight");
+});
+
+// ---- A live talk (step 39, decision 14) ------------------------------------------------------------------------------------
+
+Deno.test("a live talk: only the block's sentence about the help line changes, and it says where the line is", () => {
+  const cases: HeavyFacts[] = [
+    FACTS,
+    {
+      ...FACTS,
+      help: "abuse",
+      region: "other",
+      firstAnswer: false,
+      answersBefore: 2,
+      plainNaming: "life",
+      usedPassages: ["PSA_46_1"],
+    },
+    { ...FACTS, help: "emergency", time: { label: "3:12 AM", part: "night" } },
+    { ...FACTS, help: "harm_others", region: "other", plainNaming: "suicide" },
+  ];
+  const WRITTEN = "The help line under your answer: ";
+  for (const facts of cases) {
+    const written = buildHeavyBlock(facts).split("\n");
+    assertEquals(buildHeavyBlock({ ...facts, spoken: false }).split("\n"), written);
+    const spoken = buildHeavyBlock({ ...facts, spoken: true }).split("\n");
+    assertEquals(spoken.length, written.length);
+    const changed = written.map((line, index) => line === spoken[index] ? -1 : index).filter((index) => index >= 0);
+    assertEquals(changed, [2], "the one sentence about the help line");
+    assert(written[2].startsWith(WRITTEN), written[2]);
+    // The same help line, in the same words, and where it is in a talk.
+    const line = written[2].slice(WRITTEN.length, -1);
+    assert(spoken[2].includes(`is on their screen and is read aloud after your answer: ${line}.`), spoken[2]);
+    assert(spoken[2].startsWith("This is a live spoken talk, and they spoke to you."));
+    assert(spoken[2].includes("point to the help line on their screen"));
+    assert(spoken[2].includes("never of what they wrote"));
+    assert(!spoken[2].includes("under your answer"));
+  }
+});
+
+Deno.test("a live talk: the written answers say the line is on the screen and that the person spoke, and nothing else changes", () => {
+  for (const region of ["us", "other"] as const) {
+    for (const variant of VARIANTS) {
+      const written = heavyChatFallback(variant, { help: "crisis", region, usedPassages: [] }).reply;
+      const spoken = spokenFallback(written);
+      const label = `${variant}/${region}`;
+      assert(!spoken.includes("under this message"), label);
+      assert(!/\bwrote\b/.test(spoken), label);
+      // Putting the two written phrases back gives the readers' words again: nothing else was touched.
+      assertEquals(
+        spoken.replaceAll("on your screen", "under this message").replaceAll(
+          "since you last spoke",
+          "since you last wrote",
+        ),
+        written,
+        label,
+      );
+      // The spoken form passes the same checks as the written one.
+      assertEquals(firstHeavyNeverSay(spoken), null, label);
+      assertEquals(firstNeverSay(spoken), null, label);
+      assertEquals(hasQuotation(spoken), false, label);
+      assertEquals(hasVerseReference(spoken), false, label);
+      assertEquals(hurtProblem([spoken]), null, label);
+      const words = countWords(spoken);
+      assert(words >= ANSWER_WORDS.min && words <= ANSWER_WORDS.askMax, `${label}: ${words} words`);
+    }
+  }
+  const said = (variant: FallbackVariant, region: "us" | "other") =>
+    spokenFallback(heavyChatFallback(variant, { help: "crisis", region, usedPassages: [] }).reply);
+  assert(said("general", "us").includes("or call or text the line on your screen."));
+  assert(said("abuse", "us").includes("The people at the line on your screen help with exactly this"));
+  assert(said("repeat", "us").includes("God has not moved away from you since you last spoke."));
+  assert(said("repeat", "us").includes("or call or text the line on your screen."));
+  assert(said("general", "other").includes("through the link on your screen."));
+  assert(said("abuse", "other").includes("the link on your screen finds one"));
+  assert(said("repeat", "other").includes("through the link on your screen."));
+  // The emergency answer names nothing under the message, so it is spoken as it is written.
+  for (const region of ["us", "other"] as const) {
+    const emergency = heavyChatFallback("emergency", { help: "emergency", region, usedPassages: [] }).reply;
+    assertEquals(spokenFallback(emergency), emergency);
+  }
+  // A text with neither phrase is left alone, and so is the written answer itself: heavyChatFallback has no spoken form.
+  assertEquals(spokenFallback("God is near to you."), "God is near to you.");
+  assert(
+    heavyChatFallback("general", { help: "crisis", region: "us", usedPassages: [] }).reply.includes(
+      "the line under this message",
+    ),
+  );
 });

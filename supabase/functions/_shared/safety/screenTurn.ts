@@ -43,7 +43,7 @@ export type ChatScreenConfig = {
 // again and again until none is left, so a tag hidden inside another cannot be put back together. The words between two of them
 // are kept.
 const CHAT_TAGS =
-  /<\s*\/?\s*(?:message|conversation|reflection|heavy_moment|correction|answer|previous_answer)[^>]*>/gi;
+  /<\s*\/?\s*(?:message|conversation|reflection|heavy_moment|spoken|correction|answer|previous_answer)[^>]*>/gi;
 
 export function stripChatTags(text: string): string {
   let current = text;

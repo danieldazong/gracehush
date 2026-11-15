@@ -263,6 +263,9 @@ export type GenerateArgs<T> = {
   // GEMINI_FALLBACK_MODEL, when it is set: every second attempt goes to it. Under heavy demand one model answers 503s
   // while another answers (seen on the free tier on 2026-10-23), so a retry on a second model gets through more often.
   fallbackModel?: string;
+  // The thinking level of an attempt on fallbackModel, when it must differ from thinkingLevel: a live talk's everyday writer
+  // asks for "minimal", which gemini-3.8-flash refuses with HTTP 400 (measured, 2026-11-14). Unset, it is thinkingLevel.
+  fallbackThinkingLevel?: string;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -314,7 +317,16 @@ export async function generate<T>(args: GenerateArgs<T>, stats: GeminiStats): Pr
       try {
         const result = await callOnce(
           args.apiKey,
-          onFallback ? (fallbackBody ??= JSON.stringify(buildRequestBody({ ...args, input, model }))) : body,
+          onFallback
+            ? (fallbackBody ??= JSON.stringify(
+              buildRequestBody({
+                ...args,
+                input,
+                model,
+                thinkingLevel: args.fallbackThinkingLevel ?? args.thinkingLevel,
+              }),
+            ))
+            : body,
           Math.min(args.attemptTimeoutMs ?? timing.attemptTimeoutMs, remaining),
         );
         stats.usage.input += result.usage.input;

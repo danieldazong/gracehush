@@ -356,6 +356,21 @@ Deno.test("scholar-v2: a stock phrase said twice, a run of six words said before
     ),
     false,
   );
+  // Nor is pointing to it the way a live talk does (step 39): on the person's screen, by calling or texting.
+  assertEquals(
+    repeatsEarlier(
+      "Please connect with the help line on your screen right now by calling or texting them.",
+      ["You can reach the help line on your screen right now by calling or texting tonight."],
+    ),
+    false,
+  );
+  assertEquals(
+    repeatsEarlier(
+      "Please reach them by phone or text right now if you can.",
+      ["You can reach them by phone or text right now, tonight."],
+    ),
+    false,
+  );
   assertEquals(repeatsEarlier("He is near to you in the dark tonight.", ["God is near to you in the dark."]), true);
 
   const short =

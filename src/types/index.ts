@@ -377,7 +377,8 @@ export interface ScholarConversation {
   createdAt: string;
 }
 
-export type ScholarUsageKind = "free_day" | "pro_day" | "listen_day" | "listen_plan";
+// talk_plan and talk_month (step 39): a live talk needs trial or Pro, and has its own time a calendar month.
+export type ScholarUsageKind = "free_day" | "pro_day" | "listen_day" | "listen_plan" | "talk_plan" | "talk_month";
 
 export interface ScholarUsage {
   kind: ScholarUsageKind;
@@ -430,6 +431,64 @@ export type ScholarSpeakErrorCode =
   | "INTERNAL";
 export interface ScholarSpeakError {
   error: { code: ScholarSpeakErrorCode; message: string; requestId: string };
+}
+
+// ---- Live talk (step 39): scholar-voice-start and scholar-voice-end ---------------------------------------------------------
+// The app's copy; the server's is in supabase/functions/process-entry/contracts.ts, and contractParity.ts compares the two.
+// A talk belongs to a conversation, and each of its turns is saved as that conversation's messages. ElevenLabs hears and speaks:
+// the phone connects to it with `conversationToken` and hands it `session`, which the server signed and only the server can read
+// as the talk's owner. Every limit number comes from the server.
+
+// What a person may still talk: this talk's own cap and what is left of the month, in seconds, and when the month's time
+// returns. Both numbers are null in a heavy conversation, which is never counted and never cut.
+export type ScholarVoiceLimits = { talkSeconds: number | null; monthSecondsLeft: number | null; resetsAt: string };
+
+export type ScholarVoiceStartRequest = {
+  conversationId: string; // a lowercase UUID v4 made on the phone, as for a message
+  entryId?: string; // only when the conversation is opened from a reflection
+  voice: string; // one of Scholar's eight voice keys; one the server does not know becomes the default
+  region?: string; // the phone's region, two letters; the US when missing
+};
+export type ScholarVoiceStartResponse = {
+  talkId: string;
+  conversationId: string; // the conversation the talk's turns are saved in (a reflection's existing one wins)
+  conversationToken: string; // ElevenLabs' one-time token for this talk
+  session: string; // passed to ElevenLabs as the custom LLM extra body, unchanged
+  voice: string; // the voice the talk uses
+  heavy: boolean;
+  limits: ScholarVoiceLimits;
+};
+export type ScholarVoiceStartErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "LIMIT_REACHED"
+  | "NOT_FOUND"
+  | "METHOD_NOT_ALLOWED"
+  | "PAYLOAD_TOO_LARGE"
+  | "RATE_LIMITED"
+  | "AI_UNAVAILABLE"
+  | "SCHOLAR_UNAVAILABLE"
+  | "SCHOLAR_ADULTS_ONLY"
+  | "INTERNAL";
+export interface ScholarVoiceStartError {
+  error: { code: ScholarVoiceStartErrorCode; message: string; requestId: string };
+}
+// The 402: a free account (talk_plan), or the month's talk time used up (talk_month, with when it returns).
+export interface ScholarVoiceLimitError {
+  error: { code: "LIMIT_REACHED"; message: string; requestId: string };
+  usage: ScholarUsage;
+}
+
+export type ScholarVoiceEndRequest = { talkId: string };
+export type ScholarVoiceEndResponse = { limits: ScholarVoiceLimits };
+export type ScholarVoiceEndErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "NOT_FOUND"
+  | "METHOD_NOT_ALLOWED"
+  | "INTERNAL";
+export interface ScholarVoiceEndError {
+  error: { code: ScholarVoiceEndErrorCode; message: string; requestId: string };
 }
 
 // New Entry (step 10). Step 23 swapped the mock recorder for the real one without changing these; step 24 moved the submit to the

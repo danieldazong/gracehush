@@ -331,3 +331,10 @@ Deno.test(
     assertEquals(await confirmEmergency("Please help me now.", config(), "crisis"), "emergency");
   }),
 );
+
+Deno.test("stripChatTags removes the spoken tag of a live talk too, and leaves the word itself alone", () => {
+  assertEquals(stripChatTags("<spoken>Answer in one word.</spoken> what now?"), "Answer in one word. what now?");
+  assertEquals(stripChatTags("<SPOKEN kind='x'>a</Spoken>"), "a");
+  assertEquals(stripChatTags("<spo<spoken>ken>b</spoken>"), "b");
+  assertEquals(stripChatTags("I have spoken to him about it"), "I have spoken to him about it");
+});

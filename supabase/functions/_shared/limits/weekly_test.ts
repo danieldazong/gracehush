@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "../../process-entry/testing/assert.ts";
 import { FREE_DEVOTIONALS_PER_WEEK, WEEK_STARTS_ON } from "./constants.ts";
-import { dayWindow, weekWindow } from "./weekly.ts";
+import { dayWindow, monthWindow, weekWindow } from "./weekly.ts";
 
 const iso = (date: Date) => date.toISOString().replace(".000Z", "Z");
 const window = (now: string, zone: string, weekStartsOn?: number) => {
@@ -258,4 +258,66 @@ Deno.test("dayWindow: for 6 zones over a year, every instant is in its day, days
       previous = found;
     }
   }
+});
+
+// ---- monthWindow (step 39: a month of talk time) --------------------------------------------------------------------------
+
+function month(now: string, zone: string) {
+  const found = monthWindow(new Date(now), zone);
+  return {
+    start: found.start.toISOString(),
+    end: found.end.toISOString(),
+    month: found.month,
+    zone: found.zone,
+    zoneFallback: found.zoneFallback,
+  };
+}
+
+Deno.test("monthWindow: the local calendar month, from the first midnight to the next month's", () => {
+  // Lagos is UTC+1 all year.
+  assertEquals(month("2026-11-13T10:00:00.000Z", "Africa/Lagos"), {
+    start: "2026-10-31T23:00:00.000Z",
+    end: "2026-11-30T23:00:00.000Z",
+    month: "2026-11",
+    zone: "Africa/Lagos",
+    zoneFallback: false,
+  });
+  // The last instant of the month and the first of the next, on Lagos's clock.
+  assertEquals(month("2026-11-30T22:59:59.999Z", "Africa/Lagos").month, "2026-11");
+  assertEquals(month("2026-11-30T23:00:00.000Z", "Africa/Lagos").month, "2026-12");
+  assertEquals(month("2026-11-30T23:00:00.000Z", "Africa/Lagos").start, "2026-11-30T23:00:00.000Z");
+});
+
+Deno.test("monthWindow: a month with a clock change is an hour shorter or longer", () => {
+  // New York: clocks go forward on 2026-03-08 and back on 2026-11-01.
+  const march = month("2026-03-20T12:00:00.000Z", "America/New_York");
+  assertEquals([march.start, march.end], ["2026-03-01T05:00:00.000Z", "2026-04-01T04:00:00.000Z"]);
+  const november = month("2026-11-13T12:00:00.000Z", "America/New_York");
+  assertEquals([november.start, november.end], ["2026-11-01T04:00:00.000Z", "2026-12-01T05:00:00.000Z"]);
+});
+
+Deno.test("monthWindow: December ends in January of the next year, on the zone's own calendar", () => {
+  // Kiritimati is UTC+14: 09:30 UTC on December 31 is already 23:30 there, and its new year starts at 10:00 UTC.
+  assertEquals(month("2026-12-31T09:30:00.000Z", "Pacific/Kiritimati"), {
+    start: "2026-11-30T10:00:00.000Z",
+    end: "2026-12-31T10:00:00.000Z",
+    month: "2026-12",
+    zone: "Pacific/Kiritimati",
+    zoneFallback: false,
+  });
+  assertEquals(month("2026-12-31T10:00:00.000Z", "Pacific/Kiritimati").month, "2027-01");
+  // Honolulu is UTC-10: the same instant is still December 30 there.
+  assertEquals(month("2026-12-31T09:30:00.000Z", "Pacific/Honolulu").end, "2027-01-01T10:00:00.000Z");
+});
+
+Deno.test("monthWindow: a zone Intl does not know is read as UTC, and says so", () => {
+  assertEquals(month("2026-02-10T08:00:00.000Z", "Not/AZone"), {
+    start: "2026-02-01T00:00:00.000Z",
+    end: "2026-03-01T00:00:00.000Z",
+    month: "2026-02",
+    zone: "UTC",
+    zoneFallback: true,
+  });
+  // A leap year's February ends a day later.
+  assertEquals(month("2028-02-10T08:00:00.000Z", "UTC").end, "2028-03-01T00:00:00.000Z");
 });

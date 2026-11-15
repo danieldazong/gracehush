@@ -237,6 +237,10 @@ const SHARED_WAYS = [
   "hotline",
   "local emergency number",
   "help line",
+  // The same in a live talk (step 39), where the help line is on the person's screen and is read aloud after the answer.
+  "on your screen",
+  "calling or texting",
+  "phone or text",
 ];
 
 function runs(text: string, size: number): Set<string> {

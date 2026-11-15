@@ -105,6 +105,21 @@ export async function countRecentMessages(
   return count ?? 0;
 }
 
+// When the person's spoken messages since a moment were made, newest first: the rate limit sets a live talk's turns aside
+// (step 39). It is read only when the count above has reached the limit.
+export async function listSpokenTimes(
+  admin: SupabaseClient,
+  userId: string,
+  sinceIso: string,
+  excludeId: string,
+): Promise<string[]> {
+  const { data, error } = await admin.from("scholar_messages").select("created_at")
+    .eq("user_id", userId).eq("role", "user").eq("input_type", "audio").gte("created_at", sinceIso).neq("id", excludeId)
+    .order("created_at", { ascending: false }).limit(200);
+  if (error) throw dbFailure("scholar_rate_spoken", error);
+  return (data as { created_at: string }[]).map((row) => row.created_at);
+}
+
 // The last `limit` ready messages of a conversation, oldest first: what the writer and the screening see.
 export async function listHistory(
   admin: SupabaseClient,

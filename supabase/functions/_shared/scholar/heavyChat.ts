@@ -286,7 +286,18 @@ export type HeavyFacts = {
   plainNaming: PlainNaming;
   usedPassages: readonly HardPassageKey[];
   time: LocalTime | null;
+  // A live talk (step 39): nothing is shown under the answer, so the sentence about the help line takes its spoken form.
+  spoken?: boolean;
 };
+
+// The sentence about the help line for a live talk (step 39, decision 14): nothing is shown under a spoken answer, so the writer
+// is told where the help line is and that the person spoke. The heavy rules still say "the help line under the message": this
+// sentence says how to read them in a talk. A draft for the readers (the voice pack).
+function spokenHelpSentence(help: HelpKind, region: Region): string {
+  return `This is a live spoken talk, and they spoke to you. The help line is on their screen and is read aloud after your answer: ${
+    helpLineWords(help, region)
+  }. Where a rule says the help line under the message, point to the help line on their screen, and speak of what they said, never of what they wrote.`;
+}
 
 // The block that follows the message for a heavy answer (prompt.ts buildScholarTurn): what the help line under the answer is,
 // what to do in danger now, the person's local time, whether this is a later turn, whether plain naming is allowed, and which
@@ -298,7 +309,9 @@ export function buildHeavyBlock(facts: HeavyFacts): string {
   );
   const lines = [
     "The app’s own check found signs of a risk to this person. Write by “A heavy moment”.",
-    `The help line under your answer: ${helpLineWords(facts.help, facts.region)}.`,
+    facts.spoken === true
+      ? spokenHelpSentence(facts.help, facts.region)
+      : `The help line under your answer: ${helpLineWords(facts.help, facts.region)}.`,
     `If they are in danger right now: ${emergencyWords(facts.region)}.`,
     facts.help === "abuse"
       ? "Someone may be hurting them: write by the rules for when someone is hurting them, and never tell them not to be afraid."
@@ -402,6 +415,18 @@ export function heavyChatFallback(
     reply: FALLBACK_TEXTS[options.region][variant].join("\n\n"),
     passageKey: firstAllowed(preferred, options.help, options.usedPassages),
   };
+}
+
+// The written answers as they are spoken in a live talk (step 39, decision 14), where nothing is "under this message": the line
+// or the link is on the person's screen, and they spoke rather than wrote. These two phrases and nothing else; the readers
+// approve them with the voice pack. The emergency answer has neither phrase, so it is spoken as it is written.
+const SPOKEN_FORMS: readonly (readonly [string, string])[] = [
+  ["under this message", "on your screen"],
+  ["since you last wrote", "since you last spoke"],
+];
+
+export function spokenFallback(text: string): string {
+  return SPOKEN_FORMS.reduce((spoken, [written, said]) => spoken.replaceAll(written, said), text);
 }
 
 // The answer a person who says they are under 18 gets in an everyday conversation, after which Scholar closes for the account
