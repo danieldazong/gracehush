@@ -52,6 +52,17 @@ A message like this never counts toward your daily limit and never brings up a p
 - If you speak a message, Google’s AI (Gemini) turns the recording into text, and the recording is then deleted.
 - Your conversations stay in your account until you delete them. Anyone who can open your phone can read them. You can delete a conversation in Scholar at any time, and deleting your account deletes them all.
 
+## Talking with Scholar out loud
+
+On a paid plan you can also talk with Scholar out loud, in a live talk. ElevenLabs, a voice company, hears what you say and speaks Scholar’s answers, and only after you say yes in the app. The answers are still written by Google’s AI under GraceHush’s rules, and the check does not change:
+
+- Everything you say is checked in the same way before Scholar speaks a word of its answer. A hard moment in a talk is answered with the same care as a written one.
+- In a hard moment, the help line stays on your screen for the rest of the talk, and Scholar reads it aloud after its answer, with the numbers said one digit at a time.
+- If an answer in a hard moment takes a little longer, Scholar tells you it is still with you. It never leaves you in silence and never asks you to try again.
+- A talk in a conversation about a hard moment is never cut short and never counts toward your monthly talk time.
+- A talk ends when you end it, when you leave GraceHush or lock your phone, when its time runs out, or if the connection drops. It never ends the conversation: what you said and what Scholar answered are saved there, and you can go on writing or talking.
+- ElevenLabs keeps no recording of your voice. GraceHush deletes each talk’s record at ElevenLabs soon after the talk ends, and its use of your talks to train its models is switched off.
+
 ## The check can miss
 
 The check is automatic. It can miss a message from someone in danger, and it can flag a message from someone who is not. If you are in danger, don’t wait for an answer from Scholar. Use the numbers at the top of this page.

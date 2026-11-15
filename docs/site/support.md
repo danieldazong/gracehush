@@ -20,6 +20,10 @@ GraceHush is not a crisis service. If you are in danger, call 911. In the US, yo
 
 **How do I stop my words going to Google’s AI?** Open Profile and turn off Share with Google’s AI. GraceHush can’t prepare new reflections or answer messages to Scholar while it is off.
 
+**How do I talk with Scholar out loud?** Live talks are part of GraceHush Pro. In a conversation with Scholar, tap the plum Talk button beside the microphone. The first time, GraceHush asks you to let ElevenLabs hear and speak for Scholar, and to choose Scholar’s voice. You can change the voice later in Profile, under Scholar’s Voice.
+
+**How do I stop my voice going to ElevenLabs?** Open Profile and turn off Share Your Voice with ElevenLabs. GraceHush asks again before your next live talk.
+
 **How do I delete a conversation with Scholar?** Open the conversation, tap ⋯ at the top and choose Delete conversation. Deleting a reflection also deletes any conversation with Scholar about it.
 
 **How do I turn off reminders?** Open Profile and turn off Daily Affirmations, or change the notifications for GraceHush in your iPhone’s Settings.

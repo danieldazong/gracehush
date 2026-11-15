@@ -16,9 +16,9 @@ You must be at least 18 and able to enter a binding contract where you live. The
 
 ## 2. What GraceHush is, and is not
 
-GraceHush is a private audio prayer journal. You speak or write a prayer, and GraceHush creates a reflection for you: a Bible passage from the Berean Standard Bible, a short spoken devotional, a closing prayer and three affirmations, each with a Bible verse. GraceHush also includes Scholar, an AI Bible companion you can ask, by typing or speaking, about Scripture and your day.
+GraceHush is a private audio prayer journal. You speak or write a prayer, and GraceHush creates a reflection for you: a Bible passage from the Berean Standard Bible, a short spoken devotional, a closing prayer and three affirmations, each with a Bible verse. GraceHush also includes Scholar, an AI Bible companion you can ask, by typing or speaking, about Scripture and your day, and, on a paid plan, talk with out loud in a live voice talk.
 
-Scholar is a computer program, not a person, and it can be wrong. GraceHush, Scholar included, is **not** pastoral counseling, therapy, medical advice or an emergency or crisis service, and it is not a substitute for a pastor, a counselor, a doctor or emergency services. If you are in danger or thinking about harming yourself, contact your local emergency number; in the US you can call or text 988.
+Scholar is a computer program, not a person, and it can be wrong, in a live talk as in writing. GraceHush, Scholar included, is **not** pastoral counseling, therapy, medical advice or an emergency or crisis service, and it is not a substitute for a pastor, a counselor, a doctor or emergency services. If you are in danger or thinking about harming yourself, contact your local emergency number; in the US you can call or text 988.
 
 ## 3. Your account
 
@@ -44,7 +44,7 @@ You agree not to: break the law; try to get into another person’s account or i
 
 - **Free plan.** The free plan includes a limited number of audio devotionals each week (currently three; the app shows your count). The count starts again each Monday.
 - **Scholar.** The free plan includes a limited number of messages to Scholar each day (currently five). The count starts again at midnight where you are, and the app shows how many are left when only a few remain. A message in a conversation about a hard moment is never counted.
-- **GraceHush Pro.** Pro includes unlimited audio devotionals, more messages to Scholar each day (currently 40), and Scholar reading its answers aloud (currently up to five answers a day). There is a monthly plan and a yearly plan. The price, in your currency and including any taxes that apply, is shown in the app before you buy, and the App Store charges it, not us.
+- **GraceHush Pro.** Pro includes unlimited audio devotionals, more messages to Scholar each day (currently 40), Scholar reading its answers aloud (currently up to five answers a day), and live voice talks with Scholar (currently 30 minutes a month, at most 10 minutes a talk; the minutes start again on the first of each month where you are). A live talk in a conversation about a hard moment is never counted or cut short. There is a monthly plan and a yearly plan. The price, in your currency and including any taxes that apply, is shown in the app before you buy, and the App Store charges it, not us.
 - **Free trial.** The yearly plan may include a free trial (currently 7 days), only if the App Store tells us you are eligible. If you do not cancel in time, the App Store charges the yearly price when the trial ends: cancel at least 24 hours before the trial ends in your App Store subscription settings.
 - **Renewal.** Plans renew automatically until you cancel. Cancel at least 24 hours before the current period ends, in your App Store subscription settings, which the app links to. Deleting the app or your GraceHush account does not cancel a subscription.
 - **Refunds.** Apple handles refunds under its own policies; we cannot issue refunds for purchases made through the App Store, so please ask Apple.
@@ -54,7 +54,7 @@ You agree not to: break the law; try to get into another person’s account or i
 
 ## 8. Changes to GraceHush
 
-We may add, change or remove features, and we may change the free limits and Scholar’s daily limits. If a change reduces what a paid plan includes, we will tell you in the app before it takes effect.
+We may add, change or remove features, and we may change the free limits, Scholar’s daily limits and the monthly talk time. If a change reduces what a paid plan includes, we will tell you in the app before it takes effect.
 
 ## 9. Reminders and notifications
 

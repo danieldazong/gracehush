@@ -77,11 +77,29 @@ Facts, from the code (AGENTS.md has the rules):
 3. The adults-only answer's words (`ADULTS_ONLY_TEXT` on the server, and the app's notice).
 4. Whether the help line chosen by situation, saved with the answer as one word, needs more than the Privacy Policy says.
 
+## 6b. Live talks with Scholar (step 39, 2026-11-13)
+
+Facts, from the code (AGENTS.md has the rules):
+
+- **What it is.** On a trial or Pro plan, a live voice conversation with Scholar inside one of its conversations. ElevenLabs (its Agents product) hears the person and speaks; every answer is written by GraceHush's server with Scholar's engine (Google's Gemini), checked for danger before a word of it is spoken. 30 minutes a calendar month in the profile's time zone, at most 10 minutes a talk; a talk in a conversation about a hard moment is never counted or cut.
+- **The permission.** A second permission, asked before the first talk, per account and on the phone only (like the AI permission): "Allow ElevenLabs to hear and speak for Scholar?", "In a live talk, your voice goes to ElevenLabs, which turns it into text and speaks Scholar’s answers. Google’s AI still writes the answers, as it does when you type.", "ElevenLabs keeps no recording. It holds a talk’s words and a short summary until GraceHush deletes them there, soon after the talk ends, and its use of your talks to train its models is switched off.", "Nothing is sent until you tap Allow." Profile's switch "Share Your Voice with ElevenLabs" takes it back. These words are drafts for the owner and the lawyer.
+- **What goes to ElevenLabs.** The person's voice while a talk runs, and the text of Scholar's answers, which it speaks. The phone sends ElevenLabs only a one-time token and a session the server signed; the voice is one of eight ready-made ElevenLabs voices, chosen by a key the server maps to a private agent.
+- **What ElevenLabs keeps** (measured 2026-11-12 and 2026-11-13, with the agents' settings `record_voice` false and `retention_days` 0): no audio; the transcript of what was said and a summary and title written by ElevenLabs' own model, until the talk is deleted; and a record of the talk (time, length, cost, status). GraceHush deletes each finished talk through ElevenLabs' API after every start and end of a talk, after which ElevenLabs answers that it does not exist. The account's "improve the models" sharing is off. ElevenLabs' Zero Retention Mode is for Enterprise accounts only.
+- **What GraceHush stores.** What was said is saved as the conversation's messages (the person's words as spoken messages, Scholar's answers as written ones). A server-only record of each talk (start, end, length, turns, voice, heavy or not), with no words, runs the monthly time and is deleted with the account.
+- **Nothing of a talk is kept on the phone**, and the talk ends when the app leaves the screen (the lock or the Home Screen), so the microphone is never open on a locked phone.
+
+**TODO for the lawyer:**
+
+1. ElevenLabs' terms for a business customer, its data processing agreement, and where it processes data (the pages say the United States; confirm it for the account's plan).
+2. Whether the permission's words, and the Privacy Policy's ElevenLabs row and paragraphs, say enough about a voice going to a second AI company.
+3. Whether a voice in a live talk is biometric data under any state law GraceHush is subject to (ElevenLabs turns it into text and keeps no recording; GraceHush does not identify anyone by voice).
+
 ## 7. Store forms the owner fills in
 
 - **Apple:** the Privacy Policy URL, the App Privacy answers (contact info, user content, identifiers, purchases, usage data if analytics is on, and whether prayers count as sensitive info), and the review note for account deletion (Profile, Privacy & Data, Delete account).
 - **Google Play:** the Privacy Policy URL, the Data safety form, the account deletion web URL (`ACCOUNT_DELETION_URL`, added in step 31), and whether the health-apps declaration applies. **TODO:** ask, because the app is not medical but handles mental-health-adjacent entries.
 - The exact analytics answers for both forms are in AGENTS.md, "Before a store build" (step 34). Step 35 checks the privacy manifest.
+- **Live talks (step 39):** the microphone's purpose now names a live talk; ElevenLabs is a third party that receives audio (user content) for app functionality, not used for tracking; the review note says how to reach Talk (a Scholar conversation, the Talk button, on a trial or Pro account) and that it needs a development or store build, not the web.
 
 ## 8. Questions only the owner can answer
 
