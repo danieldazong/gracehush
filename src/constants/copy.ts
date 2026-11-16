@@ -1306,16 +1306,20 @@ export const copy = {
       button: "Talk with Scholar",
       hint: "Starts a live voice talk",
       title: "Scholar",
-      close: "Close",
+      // Under the title: the voice the person chose, by its name ("Warm voice").
+      voice: (name: string) => `${name} voice`,
       status: {
         connecting: "Connecting…",
         listening: "Listening",
         thinking: "Scholar is thinking…",
         speaking: "Scholar is speaking",
         muted: "Muted",
+        held: "On hold",
         ending: "Ending the talk…",
       },
       warning: "30 seconds left",
+      hold: "Hold",
+      resume: "Resume",
       mute: "Mute",
       unmute: "Unmute",
       end: "End talk",
@@ -1335,6 +1339,9 @@ export const copy = {
       low: (minutes: number) =>
         minutes === 1 ? "About 1 minute of talk left this month." : `About ${minutes} minutes of talk left this month.`,
       monthUsed: (day: string) => `You’ve used this month’s talk time. It returns on ${day}.`,
+      // The switch in the header that shows or hides the talk's words on screen (2026-11-16); on unless turned off.
+      captions: "Captions",
+      captionsHint: "Shows the words of the talk on screen",
       a11y: {
         status: (status: string) => `Talk status: ${status}`,
       },

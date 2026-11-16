@@ -112,6 +112,11 @@ export const gradients = {
     colors: [`${colors.linen}00`, `${colors.linen}B3`, colors.linen],
     locations: [0, 0.5, 1],
   },
+  // The live talk's captions (2026-11-16): Scholar's older lines fade into the linen as they go up out of the window.
+  captionTop: {
+    colors: [colors.linen, `${colors.linen}00`],
+    locations: [0, 1],
+  },
 } as const;
 
 // iOS shadowRadius is half the CSS blur. iOS has no spread and Android has no offset, so both approximate the CSS shadow.

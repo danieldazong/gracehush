@@ -53,6 +53,19 @@ export function useScholarVoice() {
   return { voice, setVoice };
 }
 
+// Whether the live talk shows its captions (2026-11-16): on unless this account turned them off on this phone.
+export function useTalkCaptions() {
+  const { userId } = useAuth();
+  const on = useProfilePrefsStore((state) => (userId != null ? state.byUser[userId]?.talkCaptions !== false : true));
+  const setOn = useCallback(
+    (next: boolean) => {
+      if (userId) useProfilePrefsStore.getState().setTalkCaptions(userId, next);
+    },
+    [userId],
+  );
+  return { on, setOn };
+}
+
 // The one-time note (step 38): an account that allowed under the first words, which named only the devotionals, is told once
 // that Scholar uses the same AI. The answer is read when the screen opens, so the note stays for the visit, and `seen` records
 // the current words, so it never shows again.

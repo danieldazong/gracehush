@@ -6,8 +6,8 @@ import { useReduceMotion } from "@/hooks/useReduceMotion";
 const HALF_CYCLE_MS = 1000;
 
 // A slow 2s pulse from 1 to `to` and back, for an opacity or a scale. It rests at 1 while `active` is
-// false and while Reduce Motion is on, so the caller never needs a second code path for either. `halfCycleMs` makes it
-// quicker (the Talk screen's halo while Scholar speaks, step 39).
+// false and while Reduce Motion is on, so the caller never needs a second code path for either. `halfCycleMs` sets the pace
+// (the voice orb's slower breath while Scholar listens, 2026-11-15).
 export function usePulse(to: number, active: boolean, halfCycleMs: number = HALF_CYCLE_MS): Animated.Value {
   const reduceMotion = useReduceMotion();
   const [value] = useState(() => new Animated.Value(1));

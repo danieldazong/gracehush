@@ -1009,13 +1009,17 @@ function allowTalk(w, { ai = true, voice = true, voiceKey = null } = {}) {
 
 const paid = (w, sub = "user_a") => void (w.server.state.serverPlans[sub] = "pro");
 
-// The Talk screen's side: ElevenLabs' three calls, recorded.
+// The Talk screen's side: ElevenLabs' four calls, recorded. A typed turn can be made to fail.
 function fakeControls(talk) {
-  const controls = { starts: [], ends: 0, mutes: [] };
+  const controls = { starts: [], ends: 0, mutes: [], texts: [], failText: false };
   controls.detach = talk.attachTalkControls({
     start: (token, session) => void controls.starts.push({ token, session }),
     end: () => void (controls.ends += 1),
     setMuted: (muted) => void controls.mutes.push(muted),
+    sendText: (words) => {
+      controls.texts.push(words);
+      return controls.failText ? Promise.reject(new Error("no connection")) : undefined;
+    },
   });
   return controls;
 }
@@ -1398,6 +1402,419 @@ async function talkChecks() {
     assert.equal(calls(w, "scholar-voice-end").length, 1, "its end is told while the session still works");
   }, { permission: true });
 
+  await test("talk: Hold mutes the microphone and tells Scholar to wait, Resume unmutes and says go on; only while live, and the talk's clock runs on", async (w) => {
+    paid(w);
+    allowTalk(w);
+    const talk = talkOf(w);
+    const controls = fakeControls(talk);
+    const { TALK_HOLD_WORDS, TALK_RESUME_WORDS } = w.use("@/constants/app");
+    await talk.beginTalk({ conversationId: CONV, entryId: null });
+    talk.setTalkHeld(true);
+    assert.deepEqual([controls.mutes, controls.texts], [[], []], "nothing before the talk is live");
+    await settle(3);
+    talk.talkEvent({ type: "connected" });
+    await advance(10_000);
+    talk.setTalkHeld(true);
+    let state = talk.getTalkState();
+    assert.equal(state.held, true);
+    assert.equal(state.muted, true, "holding mutes the microphone");
+    assert.deepEqual(controls.mutes, [true]);
+    assert.deepEqual(controls.texts, [TALK_HOLD_WORDS], "Scholar is told to wait, as a typed turn");
+    talk.setTalkHeld(true);
+    assert.equal(controls.texts.length, 1, "holding twice sends nothing more");
+    talk.setTalkMuted(false);
+    assert.equal(talk.getTalkState().muted, true, "the microphone button does nothing while the talk is held");
+    assert.deepEqual(controls.mutes, [true]);
+    await advance(20_000);
+    assert.equal(talk.getTalkState().secondsLeft, 570, "the talk's clock runs on while it is held: the time is the server's");
+    talk.setTalkHeld(false);
+    state = talk.getTalkState();
+    assert.deepEqual([state.held, state.muted], [false, false]);
+    assert.deepEqual(controls.mutes, [true, false]);
+    assert.deepEqual(controls.texts, [TALK_HOLD_WORDS, TALK_RESUME_WORDS], "Scholar is asked to go on");
+    // A typed turn that cannot be sent changes nothing: the talk goes on, and the person can speak instead.
+    controls.failText = true;
+    talk.setTalkHeld(true);
+    await settle(2);
+    assert.equal(talk.getTalkState().held, true);
+    assert.equal(talk.getTalkState().phase, "live");
+    // Ending a held talk clears the hold, and nothing is sent once the talk is over.
+    await talk.endTalk();
+    state = talk.getTalkState();
+    assert.deepEqual([state.held, state.muted], [false, false]);
+    talk.setTalkHeld(true);
+    assert.equal(controls.texts.length, 3, "no hold once the talk is over");
+    await talk.talkClosing();
+  }, { permission: true });
+
+  await test("talk orb: a quiet room is nothing, a full voice is one, the orb rises at once and settles over about a second", async (w) => {
+    const { orbLevel, settleLevel, LEVEL_FLOOR, LEVEL_CEILING, LEVEL_RELEASE } = w.use("@/utils/orbLevel");
+    assert.equal(orbLevel([]), 0);
+    assert.equal(orbLevel([0.03, 0.02, 0.02, 0.01, 0.01]), 0, "the room's own noise is under the floor");
+    assert.ok(orbLevel([LEVEL_FLOOR, LEVEL_FLOOR, LEVEL_FLOOR]) < 1e-9, "the floor is nothing");
+    assert.ok(orbLevel([LEVEL_CEILING, LEVEL_CEILING, LEVEL_CEILING]) > 1 - 1e-9, "the ceiling is a full voice");
+    assert.equal(orbLevel([1, 1, 1, 1, 1]), 1);
+    const some = orbLevel([0.5, 0.5, 0.1, 0.05, 0.02]);
+    const more = orbLevel([0.7, 0.7, 0.2, 0.1, 0.05]);
+    assert.ok(some > 0.2 && some < 0.8, "a voice in a few of the bands is in between: " + some);
+    assert.ok(more > some, "a louder voice is a higher level");
+    for (const odd of [[Number.NaN, Number.POSITIVE_INFINITY, -5], [3, 3, 3], [Number.NaN]]) {
+      const level = orbLevel(odd);
+      assert.ok(Number.isFinite(level) && level >= 0 && level <= 1, "whatever the processor sends is a level: " + level);
+    }
+    assert.equal(orbLevel([Number.NaN, Number.POSITIVE_INFINITY, -5]), 0, "what is not a number counts as nothing");
+    assert.equal(settleLevel(0, 0.8), 0.8, "a louder report is taken at once");
+    assert.equal(settleLevel(0.8, 0.9), 0.9);
+    assert.ok(Math.abs(settleLevel(0.8, 0) - 0.8 * LEVEL_RELEASE) < 1e-9, "a quieter one only lets the level fall by a share");
+    let held = 1;
+    let reports = 0;
+    while (held > 0) {
+      held = settleLevel(held, 0);
+      reports += 1;
+      assert.ok(reports < 100, "the orb comes to rest");
+    }
+    // Reports come every 40 ms: it is at rest in 0.8 to 1.6 seconds, and below a half in under a quarter of a second.
+    assert.ok(reports >= 20 && reports <= 40, "reports until rest: " + reports);
+    let half = 1;
+    let toHalf = 0;
+    while (half > 0.5) {
+      half = settleLevel(half, 0);
+      toHalf += 1;
+    }
+    assert.ok(toHalf * 40 < 250, "it is under half in under a quarter of a second: " + toHalf * 40 + " ms");
+  });
+
+  await test("talk orb: the outline is round at rest and changes shape with the voice, fast up and slower down, and sleeps when muted", async (w) => {
+    const shape = w.use("@/utils/orbShape");
+    const { LEVEL_FLOOR, LEVEL_CEILING } = w.use("@/utils/orbLevel");
+    const sum = (values) => values.reduce((total, value) => total + value, 0);
+    // The bands: each stretched like the level, low the first two, mid the third, high the last two.
+    assert.equal(shape.bandLevel(LEVEL_FLOOR), 0);
+    assert.equal(shape.bandLevel(LEVEL_CEILING), 1);
+    assert.equal(shape.bandLevel(Number.NaN), 0);
+    assert.deepEqual(shape.voiceBands([LEVEL_CEILING, 0, LEVEL_CEILING, 0, LEVEL_CEILING]), [0.5, 1, 0.5]);
+    assert.deepEqual(shape.voiceBands([]), [0, 0, 0], "a report with no bands is silence");
+    // The waves: about 1.5% of the radius at rest, at most about 11% with a full voice, nothing when still and silent.
+    const rest = shape.lobeAmplitudes(0, 0, 0, 1);
+    assert.ok(Math.abs(sum(rest) - 0.015) < 1e-9, "at rest: " + sum(rest));
+    const full = shape.lobeAmplitudes(1, 1, 1, 1);
+    assert.ok(sum(full) > 0.1 && sum(full) < 0.12, "a full voice: " + sum(full));
+    assert.deepEqual(shape.lobeAmplitudes(0, 0, 0, 0), [0, 0, 0, 0]);
+    const deep = shape.lobeAmplitudes(1, 0, 0, 0);
+    const bright = shape.lobeAmplitudes(0, 0, 1, 0);
+    assert.ok(deep[0] > deep[3] && bright[3] > bright[0], "a deep voice moves the broad lobes and a bright one the fine ones");
+    // The goals.
+    const goal = (state, still = false) => shape.orbGoal(state, still);
+    assert.deepEqual([goal("speaking").agent, goal("speaking").mic], [1, 0], "Scholar's voice while Scholar speaks");
+    assert.deepEqual([goal("listening").agent, goal("listening").mic, goal("listening").breath], [0, 1, 1]);
+    for (const state of ["muted", "held", "ended"]) {
+      assert.equal(goal(state).motion, 0, state + " is a still circle");
+      assert.equal(goal(state).glowOn, 0, state + " has no glow");
+      assert.ok(goal(state).alpha < 1, state + " is dimmer");
+    }
+    assert.equal(goal("ended").spin, 0, "the ribbons rest when the talk is over");
+    assert.equal(goal("muted").spin, 1, "and turn while muted or held");
+    assert.deepEqual(["connecting", "thinking", "listening", "speaking"].map((state) => goal(state).ripple), [true, true, false, false]);
+    // A frame at a time, as the UI thread steps it.
+    const run = (sim, state, agent, mic, ms, still = false) => {
+      for (let t = 0; t < ms; t += 16) shape.stepOrb(sim, goal(state, still), agent, mic, 16);
+      return sim;
+    };
+    const loud = [1, 1, 1, 1];
+    const quiet = [0, 0, 0, 0];
+    const uniforms = (sim, still = false) => shape.orbUniforms(sim, 200, 320, 1 / 3, still);
+    let sim = run(shape.createOrbSim(), "speaking", quiet, quiet, 1000);
+    const before = uniforms(sim);
+    assert.ok(sum(before.amp) < 0.016, "quiet: a breath of an outline");
+    run(sim, "speaking", loud, quiet, 160);
+    const rising = uniforms(sim);
+    assert.ok(rising.level > 0.85, "a voice is taken within about a tenth of a second: " + rising.level);
+    assert.ok(sum(rising.amp) > 0.08, "and the outline bulges with it: " + sum(rising.amp));
+    assert.ok(rising.swell > before.swell, "the sphere swells a little");
+    assert.ok(rising.glow > before.glow, "and glows");
+    run(sim, "speaking", quiet, quiet, 160);
+    assert.ok(uniforms(sim).level > 0.2, "it falls slower than it rises");
+    run(sim, "speaking", quiet, quiet, 1000);
+    assert.ok(uniforms(sim).level < 0.01, "and comes to rest");
+    // The person's voice does not move the orb while Scholar speaks.
+    sim = run(shape.createOrbSim(), "speaking", quiet, loud, 1000);
+    assert.ok(uniforms(sim).level < 0.01, "only the voice the orb follows counts");
+    // The waves travel faster with the voice.
+    const travel = (agent) => {
+      const one = run(shape.createOrbSim(), "speaking", agent, quiet, 400);
+      const start = one.phase[0];
+      run(one, "speaking", agent, quiet, 500);
+      return Math.abs(one.phase[0] - start);
+    };
+    assert.ok(travel(loud) > travel(quiet) * 2, "a full voice runs the waves about three times as fast");
+    // Muted: a still circle, its waves stopped, the ribbons still turning.
+    sim = run(shape.createOrbSim(), "muted", quiet, quiet, 1500);
+    const muted = uniforms(sim);
+    assert.ok(sum(muted.amp) < 0.0005, "muted is round: " + sum(muted.amp));
+    assert.equal(muted.glow, 0);
+    assert.ok(Math.abs(muted.alpha - 0.7) < 0.01);
+    const phase = sim.phase[0];
+    const turn = sim.turn[0];
+    run(sim, "muted", quiet, quiet, 500);
+    assert.ok(Math.abs(sim.phase[0] - phase) < 1e-3, "its waves are still");
+    assert.ok(sim.turn[0] !== turn, "its ribbons turn");
+    // Reduce Motion: round, no swell, nothing turns or travels, no ring; the voice only brightens the light and the glow.
+    sim = run(shape.createOrbSim(), "thinking", quiet, quiet, 300, true);
+    const still = { phase: [...sim.phase], turn: [...sim.turn], warp: [...sim.warp] };
+    run(sim, "speaking", loud, quiet, 1000, true);
+    const calm = uniforms(sim, true);
+    assert.deepEqual(calm.amp, [0, 0, 0, 0]);
+    assert.equal(calm.swell, 1);
+    assert.equal(calm.ring, 1, "no ring");
+    assert.deepEqual([sim.phase, sim.turn, sim.warp], [still.phase, still.turn, still.warp], "nothing moves");
+    assert.ok(calm.level > 0.9 && calm.glow > 0.5, "the voice still brightens it");
+    // Rings: one every 1.4 s while thinking; the one that is out finishes when thinking ends, and no new one starts.
+    sim = run(shape.createOrbSim(), "thinking", quiet, quiet, 50);
+    assert.ok(uniforms(sim).ring < 0.2, "a ring leaves the sphere");
+    run(sim, "thinking", quiet, quiet, 1400);
+    assert.ok(uniforms(sim).ring < 0.2, "and another 1.4 s later");
+    run(sim, "speaking", quiet, quiet, 700);
+    assert.ok(uniforms(sim).ring < 1, "the ring that is out finishes");
+    run(sim, "speaking", quiet, quiet, 1400);
+    assert.equal(uniforms(sim).ring, 1, "and no new one starts");
+    // A long frame (the app was busy) moves the orb only a little; a frame never goes back.
+    const jump = shape.createOrbSim();
+    shape.stepOrb(jump, goal("speaking"), loud, quiet, 2000);
+    assert.ok(jump.agent[0] < 0.8, "one long frame is not a jump to the voice");
+    shape.stepOrb(jump, goal("speaking"), loud, quiet, -50);
+    // The uniforms' geometry, and every angle kept in one turn.
+    const shown = uniforms(run(shape.createOrbSim(), "listening", loud, loud, 30_000));
+    assert.deepEqual([shown.center, shown.radius, shown.pixel], [[160, 160], 100, 1 / 3]);
+    for (const angle of [...shown.phase, ...shown.turn, ...shown.warp]) {
+      assert.ok(angle >= 0 && angle < Math.PI * 2, "an angle stays within one turn: " + angle);
+    }
+  });
+
+  await test("talk orb: the shader's uniforms are the model's, by name, order and size", async (w) => {
+    const shape = w.use("@/utils/orbShape");
+    const { ORB_SHADER } = w.use("@/components/scholar/orbShader");
+    const declared = [...ORB_SHADER.matchAll(/^uniform float(\d?) (\w+);$/gm)].map((match) => [match[2], Number(match[1] || 1)]);
+    const model = shape.orbUniforms(shape.createOrbSim(), 200, 320, 1 / 3, false);
+    assert.deepEqual(
+      declared.map(([name]) => name),
+      Object.keys(model),
+      "the same uniforms, in the order the shader declares them",
+    );
+    for (const [name, floats] of declared) {
+      const value = model[name];
+      assert.equal(Array.isArray(value) ? value.length : 1, floats, name + " has the shader's size");
+    }
+    assert.match(ORB_SHADER, /half4 main\(float2 p\)/);
+    assert.match(ORB_SHADER, /return half4\(float4\(col \* a, a\) \+ back \* \(1\.0 - a\)\);/, "premultiplied, the sphere over the glow");
+    assert.match(ORB_SHADER, /float fade = 1\.0 - smoothstep\(center\.x \* 0\.8, center\.x \* 0\.97, r\);/, "the glow is gone before the canvas's edge");
+    const tokens = { PLUM: "#5B3A5E", PLUM_DEEP: "#3E2741", ROSE: "#D4A5A5" };
+    for (const [name, hex] of Object.entries(tokens)) {
+      const rgb = new RegExp("const float3 " + name + " = float3\\(([\\d.]+), ([\\d.]+), ([\\d.]+)\\);").exec(ORB_SHADER);
+      assert.ok(rgb, name + " is declared");
+      const channels = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255);
+      channels.forEach((channel, index) => assert.ok(Math.abs(Number(rgb[index + 1]) - channel) < 0.002, name + " is the brand token"));
+    }
+  });
+
+  // ElevenLabs' timing of what Scholar is about to say, 100 ms a character unless said otherwise.
+  const piece = (words, step = 100) => {
+    const chars = [...words];
+    return { chars, char_start_times_ms: chars.map((_, i) => i * step), char_durations_ms: chars.map(() => step) };
+  };
+
+  await test("talk captions: Scholar's words come a phrase ahead of the voice and light as they are said; the pad is no word, a word split across pieces is one, and the block goes after its last word", async (w) => {
+    const c = w.use("@/services/talkCaptions");
+    c.resetCaptions();
+    let notified = 0;
+    const stop = c.subscribeCaptions(() => (notified += 1));
+    const shown = () => (c.getCaptions().scholar?.words ?? []).map((word) => (word.lit ? word.text.toUpperCase() : word.text));
+    const t0 = clock.now;
+    // "Hi Sch" then "olar" and the server's invisible pad before "here".
+    c.captionsScholarAlignment(piece("Hi Sch"));
+    assert.deepEqual(shown(), [], "nothing before the voice starts");
+    await advance(c.CAPTION_DELAY_MS - 1);
+    assert.deepEqual(shown(), []);
+    await advance(1);
+    assert.deepEqual(shown(), ["HI", "Sch"], "the first word lights as the voice starts, the next waits dim");
+    c.captionsScholarAlignment(piece("olar​ ​ here"));
+    assert.deepEqual(shown(), ["HI", "Scholar"], "a word the last piece left open grows in place");
+    await advance(300);
+    assert.deepEqual(shown(), ["HI", "SCHOLAR"]);
+    await advance(300);
+    assert.deepEqual(shown(), ["HI", "SCHOLAR", "here"], "the next piece starts where the last one ends");
+    await advance(800);
+    assert.deepEqual(shown(), ["HI", "SCHOLAR", "HERE"], "and the pad between them is no word");
+    assert.ok(notified > 0, "the screen is told of each change");
+    // The last word is said at 2.0 s; the block stays two seconds, then fades and goes.
+    await advance(t0 + 4_000 - clock.now - 1);
+    assert.equal(c.getCaptions().scholar.leaving, null, "it stays two seconds after its last word");
+    await advance(1);
+    assert.equal(c.getCaptions().scholar.leaving, "fade");
+    await advance(c.CAPTION_FADE_MS);
+    assert.equal(c.getCaptions().scholar, null);
+    stop();
+
+    // A long piece: each word shows at most a second and a half before it is said, never the whole answer at once.
+    c.resetCaptions();
+    c.captionsScholarAlignment(piece("a b c d e f", 400));
+    await advance(c.CAPTION_DELAY_MS);
+    assert.deepEqual(shown(), ["A", "b"], "a lights now and b, 0.8 s away, waits dim");
+    await advance(100);
+    assert.deepEqual(shown(), ["A", "b", "c"], "c shows 1.5 s before it is said");
+    await advance(700);
+    assert.deepEqual(shown(), ["A", "B", "c"], "d is still more than 1.5 s away");
+    await advance(100);
+    assert.deepEqual(shown(), ["A", "B", "c", "d"]);
+
+    // Timing that is not what ElevenLabs sends is not used.
+    c.resetCaptions();
+    for (const bad of [
+      null,
+      { chars: [], char_start_times_ms: [], char_durations_ms: [] },
+      { chars: ["a"], char_start_times_ms: [0, 1], char_durations_ms: [1] },
+      { chars: ["a"], char_start_times_ms: [-1], char_durations_ms: [1] },
+      { chars: ["a"], char_start_times_ms: [Number.NaN], char_durations_ms: [1] },
+      { chars: [1], char_start_times_ms: [0], char_durations_ms: [1] },
+      { chars: "a", char_start_times_ms: [0], char_durations_ms: [1] },
+    ]) {
+      assert.equal(c.readAlignment(bad), null);
+      c.captionsScholarAlignment(bad);
+    }
+    assert.deepEqual(c.getCaptions(), { person: null, scholar: null });
+    assert.equal(c.cleanCaptionText("  Wait.​ ​ ⁠ "), "Wait.");
+
+    // A very long answer keeps its newest words: older ones have long gone up out of sight.
+    c.captionsScholarAlignment(piece("x ".repeat(c.CAPTION_MAX_WORDS + 1), 10));
+    await advance(5_000);
+    assert.equal(shown().length, c.CAPTION_MAX_WORDS + 1 - 60);
+  });
+
+  await test("talk captions: the person's sentence shows once heard and goes three seconds after Scholar starts, or eight; a new turn clears what was said but keeps an answer on its way; speaking over Scholar cuts it; reset forgets all", async (w) => {
+    const c = w.use("@/services/talkCaptions");
+    const person = () => c.getCaptions().person;
+    const scholar = () => c.getCaptions().scholar;
+    c.resetCaptions();
+    c.captionsPersonWords("  How do I​ rest?  ", true);
+    assert.deepEqual([person().text, person().final, person().leaving], ["How do I rest?", true, false]);
+    c.captionsScholarAlignment(piece("Rest comes."));
+    await advance(c.CAPTION_DELAY_MS + c.CAPTION_PERSON_AFTER_MS - 1);
+    assert.equal(person().leaving, false);
+    await advance(1);
+    assert.equal(person().leaving, true, "it fades three seconds after Scholar's first word");
+    await advance(c.CAPTION_FADE_MS);
+    assert.equal(person(), null);
+
+    c.resetCaptions();
+    c.captionsPersonWords("Are you there?", true);
+    await advance(c.CAPTION_PERSON_MAX_MS - 1);
+    assert.equal(person().leaving, false);
+    await advance(1);
+    assert.equal(person().leaving, true, "with no answer it goes after eight seconds");
+
+    // While they are still speaking (if ElevenLabs ever sends it), the same line fills in.
+    c.resetCaptions();
+    c.captionsPersonWords("​ ", false);
+    assert.equal(person(), null, "nothing to show is nothing");
+    c.captionsPersonWords("How do", false);
+    const key = person().key;
+    c.captionsPersonWords("How do I rest", false);
+    assert.deepEqual([person().key, person().text, person().final], [key, "How do I rest", false]);
+    c.captionsPersonWords("How do I rest?", true);
+    assert.deepEqual([person().key, person().final], [key, true], "and is the same line once heard");
+
+    // A new turn: what Scholar had finished saying fades.
+    c.resetCaptions();
+    c.captionsScholarAlignment(piece("Peace."));
+    await advance(1_000);
+    assert.equal(scholar().leaving, null);
+    c.captionsPersonWords("Tell me more.", true);
+    assert.equal(scholar().leaving, "fade");
+    assert.equal(person().text, "Tell me more.");
+
+    // An answer whose timing came a moment before the sentence stays, and the sentence goes three seconds after it starts.
+    c.resetCaptions();
+    c.captionsScholarAlignment(piece("Here is a thought."));
+    c.captionsPersonWords("Is it enough?", true);
+    assert.equal(scholar().leaving, null, "an answer on its way stays");
+    await advance(c.CAPTION_DELAY_MS + c.CAPTION_PERSON_AFTER_MS);
+    assert.equal(person().leaving, true);
+    c.resetCaptions();
+    c.captionsScholarAlignment(piece("A longer answer goes on and on."));
+    await advance(500);
+    c.captionsPersonWords("Is it enough?", true);
+    assert.equal(scholar().leaving, null, "an answer already speaking stays");
+    await advance(c.CAPTION_PERSON_AFTER_MS - 1);
+    assert.equal(person().leaving, false);
+    await advance(1);
+    assert.equal(person().leaving, true, "the sentence stays its usual time from when it was heard");
+
+    // Speaking over Scholar: its words go at once, and none of its later words comes back.
+    c.resetCaptions();
+    c.captionsScholarAlignment(piece("One two three four five six seven", 300));
+    await advance(c.CAPTION_DELAY_MS);
+    assert.ok(scholar().words.length > 0);
+    c.captionsInterrupt();
+    assert.equal(scholar().leaving, "cut");
+    await advance(c.CAPTION_CUT_MS);
+    assert.equal(scholar(), null);
+    await advance(20_000);
+    assert.equal(scholar(), null);
+    c.captionsScholarAlignment(piece("New."));
+    await advance(c.CAPTION_DELAY_MS);
+    assert.deepEqual(scholar().words.map((word) => word.text), ["New."], "the next answer is a new block");
+
+    // The timers of an answer that was cut, or of a talk that was reset, never touch what comes after: the person’s next
+    // sentence keeps its whole time, because no old word marks a new answer as started.
+    for (const end of ["cut", "reset"]) {
+      c.resetCaptions();
+      c.captionsScholarAlignment(piece("One two three four five six seven", 300));
+      await advance(c.CAPTION_DELAY_MS);
+      if (end === "cut") c.captionsInterrupt();
+      else c.resetCaptions();
+      await advance(c.CAPTION_CUT_MS);
+      c.captionsPersonWords("Wait, one more thing.", true);
+      await advance(c.CAPTION_PERSON_MAX_MS - 1);
+      assert.equal(person().leaving, false, end + ": an old word never marks the next answer as started");
+      await advance(1);
+      assert.equal(person().leaving, true);
+    }
+
+    // A talk that ends forgets everything, and nothing scheduled comes back.
+    c.captionsPersonWords("Hello.", true);
+    c.captionsScholarAlignment(piece("Hi there."));
+    c.resetCaptions();
+    assert.deepEqual(c.getCaptions(), { person: null, scholar: null });
+    await advance(30_000);
+    assert.deepEqual(c.getCaptions(), { person: null, scholar: null });
+  });
+
+  await test("talk captions: the switch is kept per account on this phone, and only off is stored", async (w) => {
+    const prefs = w.use("@/store/profilePrefsStore");
+    const store = prefs.useProfilePrefsStore;
+    const { useTalkCaptions } = w.use("@/hooks/useAiPermission");
+    const handle = w.renderHook(useTalkCaptions);
+    assert.equal(handle.result.current.on, true, "on by default");
+    handle.result.current.setOn(false);
+    await settle(2);
+    assert.equal(store.getState().byUser.user_a.talkCaptions, false);
+    assert.equal(handle.result.current.on, false);
+    handle.result.current.setOn(true);
+    await settle(2);
+    assert.ok(!("talkCaptions" in store.getState().byUser.user_a), "on is the default, not a stored value");
+    assert.equal(handle.result.current.on, true);
+    assert.equal(store.getState().byUser.user_b, undefined, "another account is untouched");
+    handle.unmount();
+    const merged = store.persist.getOptions().merge(
+      { byUser: { a: { talkCaptions: false }, b: { talkCaptions: "off" }, c: { talkCaptions: true } } },
+      store.getState(),
+    );
+    assert.deepEqual(
+      ["a", "b", "c"].map((id) => merged.byUser[id].talkCaptions),
+      [false, undefined, undefined],
+      "only an explicit false turns them off",
+    );
+  });
+
   await test("talk: a failed talk turn is a spoken message with its words, and Try again sends it under the same id with no upload", async (w) => {
     seedConversation(w, {
       messages: [
@@ -1437,6 +1854,17 @@ async function talkChecks() {
     assert.equal(calls(w, "scholar-turn").length, 0, "reading is not sending");
     handle.unmount();
   });
+}
+
+// A server module with no imports, run in Node: the app's checks can then hold what it sends to what the server answers.
+function loadPure(rel) {
+  const ts = require(path.join(REPO, "node_modules", "typescript"));
+  const out = ts.transpileModule(fs.readFileSync(path.join(REPO, rel), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const module = { exports: {} };
+  new Function("module", "exports", out)(module, module.exports);
+  return module.exports;
 }
 
 function talkSourceChecks() {
@@ -1496,13 +1924,165 @@ function talkSourceChecks() {
 
   sourceCheck("talk: the Talk screen draws our saved words, never ElevenLabs' text, and knows no limit number", () => {
     const screen = read("src/screens/scholar/ScholarTalkScreen.tsx");
-    assert.match(screen, /onMessage=\{\(\{ role \}\) =>/, "ElevenLabs' text is never read: only who spoke");
+    assert.match(screen, /onMessage=\{\(\{ role, message \}\) =>/, "the person's heard words only: Scholar's text is never read");
     assert.ok(!/\b600\b|\b1800\b|\b30 \* 60\b/.test(screen), "the cap is the server's");
     assert.ok(!/console\./.test(screen), "nothing is logged");
     const service = read("src/services/scholarTalk.ts");
     assert.ok(!/console\./.test(service));
     assert.match(service, /if \(next === "background"\) void finish\("left_app"\);/, "only the background ends a talk");
     assert.match(read("src/services/account.ts"), /await endLiveTalk\(\);/, "sign-out ends a talk first");
+  });
+
+  sourceCheck("talk: Hold says the server's stop word, and Resume is an ordinary turn the server answers with a recap", () => {
+    const app = read("src/constants/app.ts");
+    const hold = /TALK_HOLD_WORDS = "([^"]+)"/.exec(app)[1];
+    const resume = /TALK_RESUME_WORDS = "([^"]+)"/.exec(app)[1];
+    const { isStopOnly } = loadPure("supabase/functions/_shared/voice/stop.ts");
+    assert.equal(isStopOnly(hold), true, "Scholar stops and says its stop line, with no model call and nothing saved");
+    assert.equal(isStopOnly(resume), false, "an ordinary turn: the server writes the recap (SPOKEN_RESUME)");
+    const service = read("src/services/scholarTalk.ts");
+    assert.match(service, /controls\.sendText\(held \? TALK_HOLD_WORDS : TALK_RESUME_WORDS\)/, "the two words are the two turns");
+    assert.match(service, /if \(state\.phase !== "live" \|\| controls === null \|\| state\.held\) return;/, "the microphone button waits while held");
+  });
+
+  sourceCheck("talk screen: the voice orb, three controls and nothing red; the orb follows the talk's state and its two tracks", () => {
+    const screen = read("src/screens/scholar/ScholarTalkScreen.tsx");
+    assert.equal((screen.match(/<ControlButton\b/g) ?? []).length, 3, "Hold, the microphone and End");
+    assert.match(screen, /onPress=\{\(\) => setTalkHeld\(!state\.held\)\}/);
+    assert.match(screen, /onPress=\{\(\) => setTalkMuted\(!state\.muted\)\}/);
+    assert.match(screen, /onPress=\{leave\}/, "End leaves the talk");
+    assert.match(screen, /large\s+filled=\{live && !state\.muted\}/, "the microphone is the large control, plum while it is on");
+    assert.match(screen, /disabled=\{!live \|\| state\.held\}/, "the microphone waits while the talk is held");
+    assert.ok(!/crisis/.test(screen), "End is not red: nothing is wrong when a talk ends");
+    assert.ok(!/images\.logoMark|ActivityIndicator|usePulse/.test(screen), "the orb replaced the mark, the spinner and the halo");
+    assert.match(screen, /<VoiceOrb size=\{orbSize\} state=\{orbState\(state\)\} agentTrack=\{tracks\.agent\} micTrack=\{tracks\.mic\} \/>/);
+    assert.match(screen, /sendText: \(text\) => latest\.current\.sendUserMessage\(text\)/, "Hold and Resume are typed turns");
+    assert.match(screen, /const conversation = useRawConversation\(\);/, "the room is reached through ElevenLabs' conversation");
+    assert.match(screen, /const ROOM_EVENTS = \["trackSubscribed", "trackUnsubscribed", "localTrackPublished", "localTrackUnpublished"\] as const;/);
+    assert.match(screen, /ROOM_EVENTS\.forEach\(\(event\) => room\.off\(event, update\)\)/, "the room's listeners go with the last subscriber");
+    assert.match(screen, /if \(state\.phase === "ending" \|\| state\.phase === "ended" \|\| state\.phase === "failed"\) return "ended";/);
+    assert.match(screen, /if \(state\.held\) return "held";/);
+    assert.match(screen, /if \(state\.held\) return talk\.status\.held;/);
+    assert.match(screen, /const orbSize = Math\.min\(state\.heavy \? ORB_HEAVY_MAX : ORB_MAX, Math\.round\(width \* 0\.56\)\);/, "smaller beside a help line");
+    assert.match(screen, /\{state\.heavy \? <HelpLine kind=\{state\.help\} \/> : null\}/, "a heavy talk keeps its help line on screen");
+    assert.match(screen, /<ScrollView\b/, "large text scrolls the middle, and the controls stay pinned");
+    assert.ok(!/\bcloseLabel\b|talk\.close\b/.test(screen), "no X in the header: End is the way out");
+  });
+
+  sourceCheck("talk orb: its ears are LiveKit's native volume processor, read through react-native, a report costing no render", () => {
+    const levels = read("src/components/scholar/voiceLevels.ts");
+    for (const file of ["voiceLevels.ts", "VoiceOrb.tsx", "VoiceOrbSkia.tsx", "orbShader.ts"]) {
+      const source = read("src/components/scholar/" + file);
+      assert.ok(!/from "@livekit|from "@elevenlabs|from "livekit-client/.test(source), file + " imports nothing from LiveKit or ElevenLabs");
+      assert.ok(!/console\./.test(source), file + " logs nothing");
+    }
+    assert.match(levels, /NativeModules\.LivekitReactNativeModule/);
+    assert.match(levels, /native\.createMultibandVolumeProcessor\(PROCESSOR, peerConnectionId, trackId\)/);
+    assert.match(levels, /native\.deleteMultibandVolumeProcessor\(processor, peerConnectionId, trackId\)/, "the processor goes with the track");
+    assert.match(levels, /const LEVEL_EVENT = "LK_MULTIBAND_PROCESSED";/);
+    assert.match(levels, /readBands\(event, processor\)/, "a report for another processor is not ours");
+    assert.match(levels, /const reported: VoiceDrive = \[orbLevel\(bands\), low, mid, high\];/);
+    assert.match(levels, /held = settleDrive\(held, reported\);/, "it rises at once and settles");
+    assert.match(levels, /sink\.set\(held\);/);
+    assert.match(levels, /subscription\.remove\(\);/, "the listener goes with the track");
+    assert.match(levels, /sink\.clear\(\);/, "the voice is set back to silence");
+    assert.ok(!/useState\(/.test(levels), "no React state");
+    assert.match(levels, /export function getOrbLevelDebug\(\)/, "the walk-through reads what the processors report");
+    assert.equal((levels.match(/if \(__DEV__\)/g) ?? []).length, 3, "the read-out is collected in development only");
+  });
+
+  sourceCheck("talk orb: the shader orb where the build has Skia, the image orb otherwise, and Skia never loaded without it", () => {
+    const orb = read("src/components/scholar/VoiceOrb.tsx");
+    assert.match(orb, /if \(TurboModuleRegistry\.get\("RNSkiaModule"\) === null\) return null;/, "no Skia module, no shader orb");
+    assert.match(orb, /const loaded = require\("\.\/VoiceOrbSkia"\) as ShaderOrbModule;/, "Skia is required only then");
+    assert.match(orb, /return loaded\.orbShaderReady \? loaded\.VoiceOrbSkia : null;/, "a shader that does not compile falls back");
+    assert.match(orb, /\} catch \{\s+return null;/, "and so does anything that throws");
+    assert.match(orb, /return ShaderOrb === null \? <ImageOrb \{\.\.\.props\} \/> : <ShaderOrb \{\.\.\.props\} \/>;/);
+    assert.ok(!/@shopify\/react-native-skia|react-native-reanimated/.test(orb), "the entry imports neither Skia nor Reanimated");
+    for (const file of ["src/screens/scholar/ScholarTalkScreen.tsx", "src/components/scholar/voiceLevels.ts", "src/utils/orbShape.ts", "src/components/scholar/orbShader.ts"]) {
+      assert.ok(!/@shopify\/react-native-skia/.test(read(file)), file + " does not import Skia");
+    }
+    // The image orb, as built before the shader.
+    assert.match(orb, /useTrackLevel\(agentTrack, "agent", nodes\.agentSink\);/);
+    assert.match(orb, /useTrackLevel\(micTrack, "mic", nodes\.micSink\);/);
+    assert.ok(!/useNativeDriver: false/.test(orb), "every animation runs on the native driver");
+    assert.equal((orb.match(/useState\(/g) ?? []).length, 1, "the only state is the animated values, made once");
+    assert.match(orb, /mixBlendMode: "screen"/);
+    for (const layer of ["orbGlow", "orbCore", "orbRibbonRose", "orbRibbonLight", "orbSheen"]) {
+      assert.match(orb, new RegExp("images\\." + layer + "\\b"), layer);
+    }
+    assert.match(orb, /fade\(nodes\.agentWeight, state === "speaking" \? 1 : 0, SOURCE_FADE_MS\)/, "Scholar's voice while Scholar speaks");
+    assert.match(orb, /fade\(nodes\.micWeight, state === "listening" \? 1 : 0, SOURCE_FADE_MS\)/, "the person's voice while they speak");
+    assert.match(orb, /fade\(nodes\.dim, ORB_ALPHA\[state\], DIM_MS\)/, "a sleeping orb is dimmer");
+    assert.match(orb, /const turning = !reduceMotion && state !== "ended";/);
+    assert.match(orb, /const rippling = !reduceMotion && \(state === "connecting" \|\| state === "thinking"\);/);
+    assert.match(orb, /usePulse\(BREATH_TO, state === "listening", BREATH_HALF_MS\)/, "listening breathes");
+    assert.match(orb, /transform: reduceMotion\s*\? \[\{ rotate: ROSE_START \}\]/, "the ribbons sit still under Reduce Motion");
+    assert.match(orb, /pointerEvents="none"/);
+    assert.match(orb, /accessibilityElementsHidden/);
+    assert.match(orb, /importantForAccessibility="no-hide-descendants"/);
+  });
+
+  sourceCheck("talk orb: the shader orb runs its model on the UI thread once a frame and is a decoration", () => {
+    const orb = read("src/components/scholar/VoiceOrbSkia.tsx");
+    assert.match(orb, /const effect = Skia\.RuntimeEffect\.Make\(ORB_SHADER\);/, "the shader is compiled once");
+    assert.match(orb, /export const orbShaderReady = effect !== null;/);
+    assert.match(orb, /useFrameCallback\(\(frame\) => \{\s+"worklet";/, "the model steps on the UI thread");
+    assert.match(orb, /return stepOrb\(value, now, voiceOfAgent, voiceOfMic, elapsed\);/);
+    assert.match(orb, /uniforms\.set\(orbUniforms\(sim\.get\(\), size, canvas, pixel, now\.still\)\);/);
+    assert.match(orb, /goal\.set\(orbGoal\(state, reduceMotion\)\);/, "the state and Reduce Motion set the goal");
+    assert.match(orb, /<Shader source=\{effect\} uniforms=\{uniforms\} \/>/, "the shader reads the uniforms as a shared value");
+    assert.match(orb, /useTrackLevel\(agentTrack, "agent", sinks\.agent\);/);
+    assert.match(orb, /useTrackLevel\(micTrack, "mic", sinks\.mic\);/);
+    assert.equal((orb.match(/useState\(/g) ?? []).length, 1, "the only React state is the two sinks, made once: a report or a frame renders nothing");
+    assert.ok(!/\.value\b/.test(orb), "shared values through get and set, as the React Compiler needs");
+    assert.match(orb, /const CANVAS_RATIO = 1\.6;/, "room for the glow and a ring");
+    assert.match(orb, /pointerEvents="none"/);
+    assert.match(orb, /accessibilityElementsHidden/);
+    assert.match(orb, /importantForAccessibility="no-hide-descendants"/);
+    const shape = read("src/utils/orbShape.ts");
+    const worklets = [...shape.matchAll(/export function (\w+)\([^)]*\)[^{]*\{\n  "worklet";/g)].map((match) => match[1]);
+    for (const name of ["approach", "lobeAmplitudes", "orbGoal", "orbVoice", "stepOrb", "orbUniforms"]) {
+      assert.ok(worklets.includes(name), name + " is a worklet");
+    }
+    for (const name of ["bandLevel", "voiceBands", "settleDrive"]) {
+      assert.ok(!worklets.includes(name), name + " runs where the reports arrive, not in the frame");
+    }
+  });
+
+  sourceCheck("talk captions: the screen reads the person's heard words and Scholar's timing, never ElevenLabs' text of Scholar, and shows only four statuses", () => {
+    const screen = read("src/screens/scholar/ScholarTalkScreen.tsx");
+    assert.match(screen, /onMessage=\{\(\{ role, message \}\) => \{\s+if \(role !== "user"\) return;/, "Scholar's message text is never read");
+    assert.match(screen, /captionsPersonWords\(message, true\);/);
+    assert.match(screen, /if \(value\?\.type !== "tentative_user_transcript"\) return null;/, "the person's words while they speak, if they ever come");
+    assert.match(screen, /onAudioAlignment=\{\(alignment\) => captionsScholarAlignment\(alignment\)\}/);
+    assert.match(screen, /onInterruption=\{\(\) => captionsInterrupt\(\)\}/);
+    assert.match(screen, /if \(!live\) resetCaptions\(\);/, "they go when the talk stops being live");
+    assert.match(screen, /useEffect\(\(\) => \(\) => resetCaptions\(\), \[\]\);/, "and when the page goes");
+    assert.match(screen, /\{captions\.on \? <TalkCaptions heavy=\{state\.heavy\} \/> : null\}/);
+    const label = screen.slice(screen.indexOf("function labelText("), screen.indexOf("function endedText("));
+    const shownStatuses = [...label.matchAll(/talk\.status\.(\w+)/g)].map((match) => match[1]).sort();
+    assert.deepEqual(shownStatuses, ["connecting", "ending", "held", "muted"], "listening, thinking and speaking are not drawn");
+    assert.match(label, /return null;/);
+    assert.match(screen, /useAnnounce\(ended \?\? status\);/, "iOS still hears every status");
+    assert.match(screen, /Platform\.OS === "android" \? \(\s+<Text accessibilityLiveRegion="polite" style=\{styles\.spoken\}>\s+\{talk\.a11y\.status\(status\)\}/, "and so does Android");
+    assert.match(screen, /accessibilityRole="switch"\s+accessibilityLabel=\{talk\.captions\}/);
+    assert.match(screen, /accessibilityState=\{\{ checked: captions\.on \}\}/);
+    assert.match(screen, /onPress=\{\(\) => captions\.setOn\(!captions\.on\)\}/);
+    assert.match(screen, /const ORB_MAX = 200;/);
+    assert.ok(!/haptics/.test(screen), "no haptic");
+    const service = read("src/services/talkCaptions.ts");
+    assert.ok(!/^import /m.test(service), "the captions service imports nothing");
+    assert.ok(!/console\.|AsyncStorage|fetch\(|track\(/.test(service), "nothing is logged, kept, sent or counted");
+    const view = read("src/components/scholar/TalkCaptions.tsx");
+    assert.match(view, /accessibilityElementsHidden/);
+    assert.match(view, /importantForAccessibility="no-hide-descendants"/);
+    assert.match(view, /pointerEvents="none"/);
+    assert.ok(!/useNativeDriver: false|console\.|from "@elevenlabs/.test(view));
+    assert.match(view, /if \(reduceMotion \|\| !grew\) \{\s+offset\.setValue\(target\);/, "under Reduce Motion the words just appear");
+    assert.match(view, /className=\{word\.lit \? "text-ink" : "text-ink\/35"\}/, "dim, then lit");
+    assert.match(view, /className="text-center text-body text-mauve"/, "the person’s sentence is centred");
+    assert.match(view, /className="text-center font-dm-medium text-\[20px\] leading-\[30px\] text-ink"/, "Scholar’s words are centred");
   });
 }
 

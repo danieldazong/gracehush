@@ -21,6 +21,8 @@ import { safeStorage } from "./safeStorage";
 // - `voicePermissionAt` (step 39) is when this account allowed its voice to go to ElevenLabs in a live talk, or missing for not
 //   yet. It lives only on this phone, like the AI permission, and a talk needs both.
 // - `scholarVoice` (step 39) is the voice this account chose for Scholar's live talk, or missing for the default. On this phone only.
+// - `talkCaptions` (2026-11-16) is false when this account turned the live talk's captions off, and missing while they are on
+//   (the default). On this phone only.
 // No journal text is kept here.
 export type Settings = Required<ProfilePatch>;
 
@@ -37,6 +39,7 @@ export type ProfileEntry = {
   aiWording?: number;
   voicePermissionAt?: string;
   scholarVoice?: ScholarVoiceKey;
+  talkCaptions?: false;
 };
 
 // The permission's current words (step 38). The first words, which named only the devotionals, were 1.
@@ -51,6 +54,7 @@ interface ProfilePrefsState {
   markAiWording: (userId: string) => void; // the one-time note was shown
   setVoicePermission: (userId: string, at: string | null) => void;
   setScholarVoice: (userId: string, voice: ScholarVoiceKey) => void;
+  setTalkCaptions: (userId: string, on: boolean) => void;
   forgetUser: (userId: string) => void; // account deletion
 }
 
@@ -164,6 +168,15 @@ export const useProfilePrefsStore = create<ProfilePrefsState>()(
           if (entry.scholarVoice === voice) return state;
           return { byUser: { ...state.byUser, [userId]: { ...entry, scholarVoice: voice } } };
         }),
+      setTalkCaptions: (userId, on) =>
+        set((state) => {
+          const entry = state.byUser[userId] ?? emptyEntry();
+          if ((entry.talkCaptions !== false) === on) return state;
+          const next: ProfileEntry = { ...entry };
+          if (on) delete next.talkCaptions;
+          else next.talkCaptions = false;
+          return { byUser: { ...state.byUser, [userId]: next } };
+        }),
       forgetUser: (userId) =>
         set((state) => ({
           byUser: Object.fromEntries(Object.entries(state.byUser).filter(([id]) => id !== userId)),
@@ -204,6 +217,8 @@ export const useProfilePrefsStore = create<ProfilePrefsState>()(
                   // Missing, or damaged, reads as no voice permission and the default voice (step 39).
                   ...(isTimestamp(entry.voicePermissionAt) ? { voicePermissionAt: entry.voicePermissionAt } : {}),
                   ...(isScholarVoiceKey(entry.scholarVoice) ? { scholarVoice: entry.scholarVoice } : {}),
+                  // Only an explicit false turns the captions off; anything else reads as on (2026-11-16).
+                  ...(entry.talkCaptions === false ? { talkCaptions: false as const } : {}),
                 },
               ],
             ];

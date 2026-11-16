@@ -5,6 +5,8 @@ import {
   SCHOLAR_TALK_END_GRACE_MS,
   SCHOLAR_TALK_REFRESH_MS,
   SCHOLAR_VOICE_END_RETRIES_MS,
+  TALK_HOLD_WORDS,
+  TALK_RESUME_WORDS,
 } from "@/constants/app";
 import type { ScholarVoiceKey } from "@/constants/scholarVoices";
 import { finishTalk, getConversation, startTalk } from "@/data/scholarRepository";
@@ -14,9 +16,9 @@ import type { HelpKind, ScholarUsage, ScholarVoiceLimits } from "@/types";
 import { isHeavyConversation, newestHelpLine } from "@/utils/scholarRows";
 
 // A live talk with Scholar (step 39), as the app sees it: one talk at a time, its phase, who is speaking, its cap and why it
-// ended. The Talk screen owns ElevenLabs' connection and hands this file its three controls (start, end, mute) and its events;
-// nothing here imports ElevenLabs, so the Node checks run it. Every limit is the server's: the talk's own cap arrives with the
-// start, and what is left of the month with the end.
+// ended. The Talk screen owns ElevenLabs' connection and hands this file its four controls (start, end, mute, a typed turn)
+// and its events; nothing here imports ElevenLabs, so the Node checks run it. Every limit is the server's: the talk's own cap
+// arrives with the start, and what is left of the month with the end.
 //
 // - Before a talk the app's own sound stops and the screen stays awake; after it the playback mode comes back.
 // - A talk ends when the person ends it, at its cap (after Scholar finishes its sentence, or 20 seconds later), when GraceHush
@@ -38,6 +40,8 @@ export type TalkState = {
   phase: TalkPhase;
   mode: TalkMode;
   muted: boolean;
+  // On hold (2026-11-15): the microphone is muted and Scholar was told to wait; Resume brings it back with a recap.
+  held: boolean;
   conversationId: string | null;
   talkId: string | null;
   voice: ScholarVoiceKey | null;
@@ -52,11 +56,13 @@ export type TalkState = {
   last: LastTalk | null;
 };
 
-// What the Talk screen gives this file: ElevenLabs' session, behind three calls.
+// What the Talk screen gives this file: ElevenLabs' session, behind four calls. `sendText` is a typed turn, which the server
+// reads like a spoken one (Hold and Resume).
 export type TalkControls = {
   start: (conversationToken: string, session: string) => void | Promise<void>;
   end: () => void | Promise<void>;
   setMuted: (muted: boolean) => void;
+  sendText: (text: string) => void | Promise<void>;
 };
 
 // What the Talk screen tells this file. `user_spoke` is a finished transcript of the person's words (never read here).
@@ -71,6 +77,7 @@ const IDLE: TalkState = {
   phase: "idle",
   mode: "listening",
   muted: false,
+  held: false,
   conversationId: null,
   talkId: null,
   voice: null,
@@ -339,7 +346,7 @@ async function finish(reason: TalkEndedBy, closed = false): Promise<void> {
   const seconds = startedAt === null ? 0 : (Date.now() - startedAt) / 1_000;
   startedAt = null;
   pending = null;
-  set({ phase: "ending", endedBy: reason, mode: "listening", muted: false });
+  set({ phase: "ending", endedBy: reason, mode: "listening", muted: false, held: false });
   if (!closed && phase !== "starting" && controls !== null) {
     try {
       await controls.end();
@@ -384,9 +391,24 @@ export function endTalk(reason: TalkEndedBy = "person"): Promise<void> {
 }
 
 export function setTalkMuted(muted: boolean): void {
-  if (state.phase !== "live" || controls === null) return;
+  if (state.phase !== "live" || controls === null || state.held) return;
   controls.setMuted(muted);
   set({ muted });
+}
+
+// Hold (2026-11-15): the microphone is muted and Scholar hears the server's stop word as a typed turn, so it stops and says its
+// stop line (scholar-voice-llm: no model call, nothing saved). Resume: the microphone is back and the go-on words bring the
+// recap. Only while the talk is live; the talk's clock keeps running, because the time is the server's. A typed turn that
+// cannot be sent changes nothing: the person can speak instead.
+export function setTalkHeld(held: boolean): void {
+  if (state.phase !== "live" || controls === null || state.held === held) return;
+  controls.setMuted(held);
+  set({ held, muted: held });
+  try {
+    void Promise.resolve(controls.sendText(held ? TALK_HOLD_WORDS : TALK_RESUME_WORDS)).catch(() => undefined);
+  } catch {
+    // The talk goes on.
+  }
 }
 
 // The Talk screen has gone: an ended or failed talk goes back to idle, and the last talk stays for the Conversation screen.

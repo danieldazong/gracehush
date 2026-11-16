@@ -157,3 +157,9 @@ export const SCHOLAR_TALK_LOW_S = 300; // after a talk, the line that says how m
 export const SCHOLAR_TALK_CONNECT_TIMEOUT_MS = 20_000; // ElevenLabs' connection, after the token
 export const SCHOLAR_TALK_REFRESH_MS = 1_500; // after an answer, the conversation is read again this long later
 export const KEEP_AWAKE_TALK_TAG = "gracehush-talk";
+// Hold and Resume on the Talk screen (2026-11-15) send these as typed turns. The first is one of the server's stop words
+// (supabase/functions/_shared/voice/stop.ts), so Scholar stops and says its stop line with no model call and nothing saved; the
+// second is an ordinary turn, which the server answers with a recap of where it was (SPOKEN_RESUME). Never shown to anyone; a
+// check keeps the first in the server's list.
+export const TALK_HOLD_WORDS = "Wait.";
+export const TALK_RESUME_WORDS = "Okay, go on.";

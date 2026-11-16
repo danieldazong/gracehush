@@ -7,6 +7,11 @@ import onboardingScene2 from "@/assets/images/onboarding-scene-2.jpg";
 import onboardingScene3 from "@/assets/images/onboarding-scene-3.jpg";
 import onboardingScene4 from "@/assets/images/onboarding-scene-4.jpg";
 import onboardingScene5 from "@/assets/images/onboarding-scene-5.jpg";
+import orbCore from "@/assets/images/orb-core.png";
+import orbGlow from "@/assets/images/orb-glow.png";
+import orbRibbonLight from "@/assets/images/orb-ribbon-light.png";
+import orbRibbonRose from "@/assets/images/orb-ribbon-rose.png";
+import orbSheen from "@/assets/images/orb-sheen.png";
 import paywallScene1 from "@/assets/images/paywall-scene-1.jpg";
 import paywallScene2 from "@/assets/images/paywall-scene-2.jpg";
 import playerSceneSquare1 from "@/assets/images/player-scene-1-square.jpg";
@@ -71,6 +76,16 @@ export const images = {
   // the Sign In cover's, because that scene is as short; the screen draws one of the two per launch.
   paywallScene1,
   paywallScene2,
+  // The voice orb of a live talk with Scholar (2026-11-15): five soft layers drawn from the brand tokens by a script, which
+  // the Talk screen composes and moves with the sound (`VoiceOrb`). The core is a plum sphere that deepens to plum-deep at
+  // the rim (512); two ribbons of light, rose and a warm champagne (terracotta mixed with glass), each off-centre so a
+  // rotation makes it orbit (512); a white sheen at the top-left for the glass look (512); and the rose glow behind the
+  // sphere (640, drawn at 1.6 times the sphere). Plain PNGs with no metadata.
+  orbCore,
+  orbRibbonRose,
+  orbRibbonLight,
+  orbSheen,
+  orbGlow,
 };
 
 export const onboardingScenes = [
