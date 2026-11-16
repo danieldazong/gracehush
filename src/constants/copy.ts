@@ -158,6 +158,18 @@ export const copy = {
       later: "Ask me later",
     },
   },
+  // GraceHush's share panel (2026-11-16): Scholar's answers and Reflection's verse. WhatsApp and Messages open the app itself,
+  // so the person lands in the chat they pick; More is the iPhone's share menu.
+  share: {
+    title: "Share to",
+    whatsApp: "WhatsApp",
+    whatsAppHint: "Opens WhatsApp so you can choose a chat",
+    messages: "Messages",
+    messagesHint: "Opens Messages so you can choose who to send it to",
+    more: "More",
+    moreLabel: "More ways to share",
+    moreHint: "Opens your phone’s share options",
+  },
   common: {
     close: "Close",
     dismiss: "Dismiss",

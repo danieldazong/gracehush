@@ -1,12 +1,13 @@
 import * as WebBrowser from "expo-web-browser";
-import { Linking, Platform } from "react-native";
+import { Linking, Platform, Share } from "react-native";
 
 import { MANAGE_SUBSCRIPTION_URL, SUPPORT_EMAIL } from "@/constants/app";
+import { messagesShareUrl, whatsAppShareUrl } from "@/utils/shareLinks";
 
 export type LinkResult = { ok: true } | { ok: false };
 
 // A result, never a throw, and nothing logged but one development warning. No Linking.canOpenURL: without declared query
-// schemes it answers false for links that would open.
+// schemes it answers false for links that would open (WhatsApp's is the one scheme app.json declares: canOpenWhatsApp).
 async function openUrl(url: string): Promise<LinkResult> {
   try {
     await Linking.openURL(url);
@@ -67,6 +68,41 @@ export async function openWebPage(url: string): Promise<LinkResult> {
   } catch {
     if (__DEV__) console.warn("[links] a web page could not be opened");
     return { ok: false };
+  }
+}
+
+// The apps GraceHush's share panel opens itself (2026-11-16): each with the message typed in, so the person picks the chat
+// there, taps Send and stays in it.
+export type ShareApp = "whatsApp" | "messages";
+
+// Whether the phone has WhatsApp, so the share panel offers it. canOpenURL answers only for a scheme the app declares
+// (LSApplicationQueriesSchemes in app.json), which reaches a phone with a new build, so a development build always offers
+// WhatsApp, and a tap there falls back to the system share sheet when it cannot be opened. Android needs a <queries> entry
+// that no build has, so it answers false there. Messages is on every phone and is not asked about.
+export async function canOpenWhatsApp(): Promise<boolean> {
+  if (__DEV__) return true;
+  try {
+    return await Linking.canOpenURL("whatsapp://send");
+  } catch {
+    return false;
+  }
+}
+
+// The app itself with the message typed in (utils/shareLinks.ts): WhatsApp's chat picker, or a new message in Messages. When
+// the app cannot be opened, the system share sheet opens with the same message, so a tap never does nothing.
+export async function shareToApp(app: ShareApp, message: string): Promise<void> {
+  const url = app === "whatsApp" ? whatsAppShareUrl(message) : messagesShareUrl(message, Platform.OS);
+  const opened = await openUrl(url);
+  if (!opened.ok) await openSystemShare(message);
+}
+
+// The system share sheet: Copy, Mail, AirDrop and every other app on the phone. Each app's panel in it closes back into
+// GraceHush after Send, as iOS does. A sheet that cannot open shares nothing, and there is nothing to show.
+export async function openSystemShare(message: string): Promise<void> {
+  try {
+    await Share.share({ message });
+  } catch {
+    // The share sheet could not open.
   }
 }
 

@@ -773,6 +773,27 @@ async function rowChecks() {
     );
   });
 
+  await test("share: WhatsApp's and Messages' links carry the whole message, encoded, and nothing else", async (w) => {
+    const { whatsAppShareUrl, messagesShareUrl } = w.use("@/utils/shareLinks");
+    const message =
+      "Rest is a gift & a promise? Yes: 100% #1 + more.\n\n“Come to Me, all you who are weary.” — Matthew 11:28 (BSB)\n\nShared from GraceHush";
+    const raw = (encoded) => !/[\s&#?+%]/.test(encoded.replace(/%[0-9A-F]{2}/g, ""));
+    const url = whatsAppShareUrl(message);
+    assert.ok(url.startsWith("whatsapp://send?text="), "WhatsApp's own send link, which opens its chat picker");
+    const query = url.slice("whatsapp://send?".length);
+    assert.deepEqual([...new URLSearchParams(query).keys()], ["text"], "one parameter: the text");
+    assert.equal(new URLSearchParams(query).get("text"), message, "the whole message, every character, comes back out");
+    assert.ok(raw(query.slice("text=".length)), "nothing raw that could end the text");
+    const ios = messagesShareUrl(message, "ios");
+    assert.ok(ios.startsWith("sms:&body="), "iOS: no recipient, the body after &");
+    assert.equal(decodeURIComponent(ios.slice("sms:&body=".length)), message);
+    assert.ok(raw(ios.slice("sms:&body=".length)));
+    const android = messagesShareUrl(message, "android");
+    assert.ok(android.startsWith("sms:?body="), "Android: the body after ?");
+    assert.equal(decodeURIComponent(android.slice("sms:?body=".length)), message);
+    assert.equal(whatsAppShareUrl(""), "whatsapp://send?text=");
+  });
+
   await test("rows: the AI reminder opens every conversation and comes again after three hours; answers follow their messages", async (w) => {
     const { buildConversationRows } = w.use("@/utils/scholarRows");
     assert.deepEqual(buildConversationRows([], null).map((row) => row.kind), ["reminder"], "a new conversation starts with it");
@@ -970,21 +991,83 @@ function sourceChecks() {
     assert.ok(!/ActivityIndicator/.test(screen), "no spinner row any more");
   });
 
-  sourceCheck("chat: Share is the system sheet with the answer's words only, never in a heavy conversation or under a help line", () => {
+  sourceCheck("chat: Share is GraceHush's share panel with the answer's words only, never in a heavy conversation or under a help line", () => {
     const screen = read("src/screens/scholar/ConversationScreen.tsx");
     assert.match(
       screen,
-      /onShare=\{chat\.heavy \|\| item\.message\.helpLine !== null \? null : \(\) => void shareAnswer\(item\.message\)\}/,
+      /onShare=\{chat\.heavy \|\| item\.message\.helpLine !== null \? null : \(\) => shareAnswer\(item\.message\)\}/,
       "offered only outside a heavy conversation and under an answer with no help line",
     );
-    assert.match(screen, /const body = answerShareText\(message\);\s+if \(body === null\) return;/, "what is shared is built from the answer alone");
-    assert.match(screen, /await Share\.share\(\{ message: copy\.scholar\.share\.message\(body\) \}\);/);
+    assert.match(
+      screen,
+      /const body = answerShareText\(message\);\s+return body === null \? null : copy\.scholar\.share\.message\(body\);/,
+      "what is shared is built from the answer alone",
+    );
+    assert.match(screen, /const text = answerShareMessage\(message\);\s+if \(text !== null\) shareSheet\.share\(text\);/);
     assert.ok(!/haptics/.test(screen), "no haptic");
     assert.ok(!/track\(/.test(screen), "no event for a share");
     const rows = read("src/utils/scholarRows.ts");
     const builder = rows.slice(rows.indexOf("export function answerShareText"));
     assert.ok(!/role === "user"|messageText\(/.test(builder), "the builder never reads the person's words");
     assert.match(screen, /numberOfLines=\{1\} className="text-body-sm text-mauve"/, "the title sits under Scholar in the header");
+  });
+
+  sourceCheck("share: both share buttons open GraceHush's panel: WhatsApp and Messages open the app itself, More is the iPhone's menu", () => {
+    for (const rel of ["src/screens/scholar/ConversationScreen.tsx", "src/screens/journal/ReflectionScreen.tsx"]) {
+      const screen = read(rel);
+      assert.match(screen, /const shareSheet = useShareSheet\(\);/, `${rel}: the hook`);
+      assert.match(
+        screen,
+        /<ShareSheet text=\{shareSheet\.text\} whatsApp=\{shareSheet\.whatsApp\} onClose=\{shareSheet\.close\} \/>/,
+        `${rel}: the panel`,
+      );
+      assert.equal((screen.match(/shareSheet\.share\(/g) ?? []).length, 1, `${rel}: one share`);
+      assert.ok(
+        !/Share\.share|\n  Share,\r?\n|activityType|openAppAfterShare|canOpenURL|whatsapp:\/\/|sms:/.test(screen),
+        `${rel}: every share goes through the panel; nothing opened after the iPhone's menu`,
+      );
+    }
+    const reflection = read("src/screens/journal/ReflectionScreen.tsx");
+    assert.match(reflection, /if \(!scripture\.verified \|\| scripture\.text === null\) return null;/, "only a verified verse is shared");
+    const hook = read("src/hooks/useShareSheet.ts");
+    assert.match(hook, /const \[whatsApp, setWhatsApp\] = useState\(false\);/, "no WhatsApp tile until the phone answers");
+    assert.match(hook, /if \(alive\) setWhatsApp\(value\);/, "a late answer after the screen has gone sets nothing");
+    const links = read("src/services/externalLinks.ts");
+    assert.match(links, /export async function canOpenWhatsApp\(\): Promise<boolean> \{\r?\n  if \(__DEV__\) return true;\r?\n  try \{\r?\n    return await Linking\.canOpenURL\("whatsapp:\/\/send"\);\r?\n  \} catch \{\r?\n    return false;/);
+    assert.match(
+      links,
+      /const url = app === "whatsApp" \? whatsAppShareUrl\(message\) : messagesShareUrl\(message, Platform\.OS\);\r?\n  const opened = await openUrl\(url\);\r?\n  if \(!opened\.ok\) await openSystemShare\(message\);/,
+      "an app that cannot be opened falls back to the iPhone's menu",
+    );
+    assert.match(links, /export async function openSystemShare\(message: string\): Promise<void> \{\r?\n  try \{\r?\n    await Share\.share\(\{ message \}\);/);
+    assert.ok(!/openAppAfterShare|shareReturn|activityType/.test(links), "nothing opened after the iPhone's menu");
+    const sheet = read("src/components/ShareSheet.tsx");
+    assert.match(sheet, /<BottomSheet visible=\{text !== null\} onClose=\{onClose\} onDismiss=\{runAfter\}>/, "goes on from the dismissal");
+    assert.match(
+      sheet,
+      /after\.current = \(\) => void send\(message\);\n    onClose\(\);\n    if \(Platform\.OS === "ios"\) setTimeout\(runAfter, MODAL_HANDOFF_FALLBACK_MS\);\n    else runAfter\(\);/,
+      "on iOS after the panel has gone, or the fallback; at once on Android",
+    );
+    assert.match(sheet, /const run = after\.current;\n    after\.current = null;\n    run\?\.\(\);/, "a choice runs once");
+    const order = ["key: \"whatsApp\"", "key: \"messages\"", "key: \"more\""].map((k) => sheet.indexOf(k));
+    assert.ok(order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1])), "WhatsApp, Messages, then More");
+    assert.match(sheet, /\.\.\.\(whatsApp\r?\n?\s*\? \[/, "WhatsApp only on a phone that has it");
+    assert.match(sheet, /send: \(message: string\) => shareToApp\("whatsApp", message\)/);
+    assert.match(sheet, /send: \(message: string\) => shareToApp\("messages", message\)/);
+    assert.match(sheet, /send: openSystemShare,/);
+    assert.ok(!/haptics|track\(|console\./.test(sheet), "no haptic, event or log");
+    const app = JSON.parse(read("app.json"));
+    assert.deepEqual(app.expo.ios.infoPlist.LSApplicationQueriesSchemes, ["whatsapp"], "canOpenURL may ask about WhatsApp");
+    for (const svg of ["assets/images/share-whatsapp.svg", "assets/images/share-messages.svg"]) {
+      const text = read(svg);
+      assert.ok(/<circle cx="28" cy="28" r="28" fill="#[0-9A-F]{6}"\/>/.test(text) && /fill="#FFFFFF"/.test(text), `${svg}: a brand circle with a white mark`);
+      assert.ok(!/<script|xlink|href|<image|<text|<foreignObject/i.test(text), `${svg}: nothing but shapes`);
+    }
+    assert.ok(!/import |console\.|track\(/.test(read("src/utils/shareLinks.ts")), "the link builders are pure");
+    for (const rel of ["src/utils/shareReturn.ts", "src/hooks/useWhatsAppAvailable.ts", "assets/images/whatsapp-logo.svg"]) {
+      assert.ok(!fs.existsSync(path.join(REPO, rel)), `${rel} is gone`);
+    }
+    assert.ok(!/whatsapp|WhatsApp/.test(read("src/components/scholar/ScholarAnswer.tsx")), "no WhatsApp logo in the chat");
   });
 
   sourceCheck("chat: the typing indicator is three dots on the native driver, still under Reduce Motion, and stops with the screen", () => {

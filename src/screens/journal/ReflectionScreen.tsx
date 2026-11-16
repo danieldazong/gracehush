@@ -3,7 +3,6 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import {
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Switch,
   Text,
@@ -22,6 +21,7 @@ import { MiniPlayerCard } from "@/components/MiniPlayerCard";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { ReflectionCarousel, type AddAffirmationFooter } from "@/components/ReflectionCarousel";
 import { ScriptureCard } from "@/components/ScriptureCard";
+import { ShareSheet } from "@/components/ShareSheet";
 import { TranscriptRow } from "@/components/TranscriptRow";
 import { SettingsRow } from "@/components/profile/SettingsRow";
 import { MAX_AFFIRMATIONS } from "@/constants/app";
@@ -31,6 +31,7 @@ import { getPlaybackTrack } from "@/data/selectors";
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useDeleteReflection } from "@/hooks/useDeleteReflection";
 import { useReflection } from "@/hooks/useReflection";
+import { useShareSheet } from "@/hooks/useShareSheet";
 import type { RootStackScreenProps } from "@/navigation/types";
 import { track } from "@/services/analytics";
 import { haptics } from "@/services/haptics";
@@ -203,16 +204,11 @@ function PrayerRequestRow({ entryId, heavy, prayer, onSetTracked }: PrayerReques
   );
 }
 
-// Only the verse and its reference leave the app: never the transcript, the emotion or the devotional.
-async function shareScripture(scripture: Scripture) {
-  if (!scripture.verified || scripture.text === null) return;
-  try {
-    await Share.share({
-      message: copy.reflection.share.message(quoteVerse(scripture.text), scripture.reference),
-    });
-  } catch {
-    // The share sheet could not open. There is nothing to show: nothing was shared.
-  }
+// Only the verse and its reference leave the app: never the transcript, the emotion or the devotional. They go through
+// GraceHush's share panel (2026-11-16, as Scholar's answers do). Null for a verse that is not verified.
+function scriptureShareMessage(scripture: Scripture): string | null {
+  if (!scripture.verified || scripture.text === null) return null;
+  return copy.reflection.share.message(quoteVerse(scripture.text), scripture.reference);
 }
 
 type ReadyViewProps = {
@@ -260,6 +256,12 @@ function ReadyView({
   const isVoice = entry.inputType === "audio";
   // Unverified scripture is never shared.
   const shareable = scripture?.verified && scripture.text !== null ? scripture : null;
+  const shareSheet = useShareSheet();
+
+  function shareScripture(verse: Scripture) {
+    const message = scriptureShareMessage(verse);
+    if (message !== null) shareSheet.share(message);
+  }
 
   return (
     <ScrollView
@@ -371,6 +373,7 @@ function ReadyView({
           <DeleteReflectionLink onPress={onDelete} offline={deleteOffline} />
         </View>
       </FadeIn>
+      <ShareSheet text={shareSheet.text} whatsApp={shareSheet.whatsApp} onClose={shareSheet.close} />
     </ScrollView>
   );
 }

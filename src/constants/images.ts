@@ -25,6 +25,8 @@ import playerScene4 from "@/assets/images/player-scene-4.jpg";
 import signInScene1 from "@/assets/images/sign-in-scene-1.jpg";
 import signInScene2 from "@/assets/images/sign-in-scene-2.jpg";
 import signInScene3 from "@/assets/images/sign-in-scene-3.jpg";
+import shareMessages from "@/assets/images/share-messages.svg";
+import shareWhatsApp from "@/assets/images/share-whatsapp.svg";
 import signInScene4 from "@/assets/images/sign-in-scene-4.jpg";
 
 export const images = {
@@ -34,6 +36,11 @@ export const images = {
   logoMarkLight,
   googleG,
   appleLogo,
+  // The share panel's app tiles (2026-11-16): each brand's colour as a 56-point circle with its mark in white, like the apps'
+  // own icons, so people recognise them at once. WhatsApp's mark and Messages' bubble are Simple Icons glyphs (CC0); brand
+  // logos, like Google's G.
+  shareWhatsApp,
+  shareMessages,
   // The player's four painted scenes (2026-11-02, the user's call: until then the artwork was the brand gradient with the
   // logo mark in a frosted tile, built in code): a person alone with God in an ordinary place, two women and two men of
   // different ages and backgrounds, numbered in the day's order: a woman in her thirties kneeling at her bed at night, a

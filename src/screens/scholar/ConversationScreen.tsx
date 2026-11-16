@@ -7,7 +7,6 @@ import {
   Linking,
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -21,6 +20,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { HelpLine } from "@/components/HelpLine";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
+import { ShareSheet } from "@/components/ShareSheet";
 import { Skeleton } from "@/components/Skeleton";
 import { ConversationNotice } from "@/components/scholar/ConversationNotice";
 import { ScholarAnswer, type ListenView } from "@/components/scholar/ScholarAnswer";
@@ -35,6 +35,7 @@ import { useAiPermission, useAiWordingNote, useScholarVoice, useVoicePermission 
 import { useAnnounce } from "@/hooks/useAnnounce";
 import { useConversation, type ConversationNotice as NoticeKind } from "@/hooks/useConversation";
 import { useEntitlement } from "@/hooks/useEntitlement";
+import { useShareSheet } from "@/hooks/useShareSheet";
 import type { RootStackScreenProps } from "@/navigation/types";
 import { openLegalPage } from "@/services/externalLinks";
 import { getMicPermission, requestMicPermission } from "@/services/recorder";
@@ -106,16 +107,12 @@ function listenView(state: ScholarListenState, messageId: string): ListenView {
   return { phase: state.phase };
 }
 
-// The answer's words and passages go through the system share sheet, which has Copy in it (2026-11-15). Never the person's own
-// message. The sheet failing to open shares nothing, and there is nothing to show.
-async function shareAnswer(message: ScholarMessage) {
+// The answer's words and passages, never the person's own message (2026-11-15). They go through GraceHush's share panel
+// (2026-11-16): WhatsApp and Messages open the app itself, so the person lands in the chat they pick; More is the iPhone's
+// share menu. Null when the answer has nothing to share.
+function answerShareMessage(message: ScholarMessage): string | null {
   const body = answerShareText(message);
-  if (body === null) return;
-  try {
-    await Share.share({ message: copy.scholar.share.message(body) });
-  } catch {
-    // The share sheet could not open.
-  }
+  return body === null ? null : copy.scholar.share.message(body);
 }
 
 // A conversation with Scholar (step 38): the header, the messages and their answers, and the composer pinned above the keyboard.
@@ -129,6 +126,7 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
   const listen = useSyncExternalStore(subscribeScholarListen, getScholarListenState);
   const { isPaid, known } = useEntitlement();
   const online = useOfflineStore(selectIsOnline);
+  const shareSheet = useShareSheet();
   // The screen's side padding: 20, or 16 on a narrow screen (the rule .screen__content applies to views).
   const { width } = useWindowDimensions();
   const side = width < layout.narrowBreakpoint ? layout.screenPaddingNarrow : layout.screenPadding;
@@ -188,6 +186,11 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
   function allow() {
     setAllowed(true);
     chat.sendStarter();
+  }
+
+  function shareAnswer(message: ScholarMessage) {
+    const text = answerShareMessage(message);
+    if (text !== null) shareSheet.share(text);
   }
 
   async function onListen(message: ScholarMessage) {
@@ -329,7 +332,7 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
           listen={listenView(listen, item.message.id)}
           onListen={() => void onListen(item.message)}
           onStopListening={stopScholarAudio}
-          onShare={chat.heavy || item.message.helpLine !== null ? null : () => void shareAnswer(item.message)}
+          onShare={chat.heavy || item.message.helpLine !== null ? null : () => shareAnswer(item.message)}
           onDelete={item.message.helpLine === "abuse" ? openDelete : null}
         />
         {item.newest && !chat.heavy && !chat.sending ? (
@@ -570,6 +573,8 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
           <PrimaryButton label={copy.scholar.help.close} tone="ghost" onPress={() => setHelpOpen(false)} />
         </View>
       </BottomSheet>
+
+      <ShareSheet text={shareSheet.text} whatsApp={shareSheet.whatsApp} onClose={shareSheet.close} />
 
       <ConfirmDialog
         visible={confirmDelete}
