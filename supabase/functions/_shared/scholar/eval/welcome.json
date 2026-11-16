@@ -1,0 +1,161 @@
+[
+  {
+    "id": "w-hello",
+    "welcome": true,
+    "asksPrayer": false,
+    "context": [],
+    "message": "Hello"
+  },
+  {
+    "id": "w-hi-scholar",
+    "welcome": true,
+    "asksPrayer": false,
+    "context": [],
+    "message": "Hi Scholar"
+  },
+  {
+    "id": "w-good-morning",
+    "welcome": true,
+    "asksPrayer": false,
+    "context": [],
+    "message": "Good morning!"
+  },
+  {
+    "id": "w-hey",
+    "welcome": true,
+    "asksPrayer": false,
+    "context": [],
+    "message": "hey"
+  },
+  {
+    "id": "w-where-start",
+    "welcome": true,
+    "asksPrayer": false,
+    "context": [],
+    "message": "I don't really know where to start."
+  },
+  {
+    "id": "w-what-can-you-do",
+    "welcome": true,
+    "asksPrayer": false,
+    "context": [],
+    "message": "What can you help me with?"
+  },
+  {
+    "id": "w-hi-anxious",
+    "welcome": false,
+    "asksPrayer": false,
+    "context": [],
+    "message": "Hi, I've been so anxious about my job interview tomorrow."
+  },
+  {
+    "id": "w-hello-psalm",
+    "welcome": false,
+    "asksPrayer": false,
+    "context": [],
+    "message": "Hello! What does Psalm 23 mean?"
+  },
+  {
+    "id": "w-hi-pray",
+    "welcome": false,
+    "asksPrayer": true,
+    "context": [],
+    "message": "Hi Scholar, can you pray for my mom? She has surgery on Friday."
+  },
+  {
+    "id": "w-hi-again",
+    "welcome": false,
+    "asksPrayer": false,
+    "context": [
+      {
+        "role": "user",
+        "text": "My grandmother died last month and I still cry every night."
+      },
+      {
+        "role": "scholar",
+        "text": "Losing your grandmother is a deep grief, and crying every night is love with nowhere to go. God is close to the brokenhearted, and he holds every tear you cry. Would you like to tell me about her?"
+      }
+    ],
+    "message": "Hi again."
+  },
+  {
+    "id": "w-chip-anxious",
+    "welcome": false,
+    "asksPrayer": false,
+    "context": [
+      {
+        "role": "user",
+        "text": "Hello"
+      },
+      {
+        "role": "scholar",
+        "text": "Welcome. You can bring whatever you are carrying today. People bring all kinds of things here: worry and anxiety, feeling worn out, grief, a hope that feels far away, needing prayer, or questions about the Bible. We can listen, look at what Scripture says, and pray together. Take your time. A few words are enough to share what is on your heart."
+      }
+    ],
+    "message": "I’m feeling anxious"
+  },
+  {
+    "id": "w-chip-weary",
+    "welcome": false,
+    "asksPrayer": false,
+    "context": [
+      {
+        "role": "user",
+        "text": "Hello"
+      },
+      {
+        "role": "scholar",
+        "text": "Welcome. You can bring whatever you are carrying today. People bring all kinds of things here: worry and anxiety, feeling worn out, grief, a hope that feels far away, needing prayer, or questions about the Bible. We can listen, look at what Scripture says, and pray together. Take your time. A few words are enough to share what is on your heart."
+      }
+    ],
+    "message": "I’m feeling weary"
+  },
+  {
+    "id": "w-chip-grieving",
+    "welcome": false,
+    "asksPrayer": false,
+    "context": [
+      {
+        "role": "user",
+        "text": "Hello"
+      },
+      {
+        "role": "scholar",
+        "text": "Welcome. You can bring whatever you are carrying today. People bring all kinds of things here: worry and anxiety, feeling worn out, grief, a hope that feels far away, needing prayer, or questions about the Bible. We can listen, look at what Scripture says, and pray together. Take your time. A few words are enough to share what is on your heart."
+      }
+    ],
+    "message": "I’m grieving"
+  },
+  {
+    "id": "w-chip-hope",
+    "welcome": false,
+    "asksPrayer": false,
+    "context": [
+      {
+        "role": "user",
+        "text": "Hello"
+      },
+      {
+        "role": "scholar",
+        "text": "Welcome. You can bring whatever you are carrying today. People bring all kinds of things here: worry and anxiety, feeling worn out, grief, a hope that feels far away, needing prayer, or questions about the Bible. We can listen, look at what Scripture says, and pray together. Take your time. A few words are enough to share what is on your heart."
+      }
+    ],
+    "message": "I need hope"
+  },
+  {
+    "id": "w-chip-prayer",
+    "welcome": false,
+    "asksPrayer": true,
+    "context": [
+      {
+        "role": "user",
+        "text": "Hello"
+      },
+      {
+        "role": "scholar",
+        "text": "Welcome. You can bring whatever you are carrying today. People bring all kinds of things here: worry and anxiety, feeling worn out, grief, a hope that feels far away, needing prayer, or questions about the Bible. We can listen, look at what Scripture says, and pray together. Take your time. A few words are enough to share what is on your heart."
+      }
+    ],
+    "message": "I need prayer"
+  }
+]

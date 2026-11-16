@@ -340,6 +340,41 @@ async function dataChecks() {
     }
   });
 
+  await test("repository: a welcome is read from a saved answer and from the function's answer; an answer with no field is none", async (w) => {
+    seedConversation(w, {
+      id: CONV,
+      messages: [
+        userRow(1, "Hello"),
+        answerRow(2, 1, { content: { blocks: [{ type: "text", text: "Welcome." }], welcome: true } }),
+        userRow(3, "And then?"),
+        answerRow(4, 3),
+      ],
+    });
+    // A heavy answer is never a welcome, whatever its content says.
+    seedConversation(w, {
+      id: mid(50),
+      heavy: true,
+      messages: [
+        userRow(51, "x"),
+        answerRow(52, 51, { content: { blocks: [{ type: "text", text: "Here." }], welcome: true, help: "crisis" } }),
+      ],
+    });
+    const saved = await repo(w).getConversation(CONV);
+    assert.deepEqual(saved.data.messages.map((message) => message.welcome), [false, true, false, false]);
+    const heavy = await repo(w).getConversation(mid(50));
+    assert.deepEqual(heavy.data.messages.map((message) => message.welcome), [false, false]);
+    const hello = await repo(w).sendTurn(text("HELLO there", 60, { conversationId: mid(61) }));
+    assert.equal(hello.ok, true);
+    assert.equal(hello.data.answer.welcome, true);
+    assert.equal(hello.data.message.welcome, false);
+    assert.equal(hello.data.conversation.title, null, "a welcome leaves the conversation untitled");
+    // The fake sends no field on an ordinary answer, as a function from before scholar-v3: it reads as none, not undefined.
+    const plain = await repo(w).sendTurn(text(QUESTION, 62, { conversationId: mid(61) }));
+    assert.equal(plain.ok, true);
+    assert.equal(plain.data.answer.welcome, false);
+    assert.equal(plain.data.conversation.title, "A question about peace", "the next answer titles it");
+  });
+
   await test("repository: deleting a conversation deletes its messages; offline it sends nothing", async (w) => {
     seedConversation(w, { messages: [userRow(1, "first"), answerRow(2, 1)] });
     offline(w);
@@ -477,6 +512,29 @@ async function conversationChecks() {
     const abuse = await until(handle, (s) => !s.sending && s.messages.length === 4, "the second answer");
     assert.equal(abuse.help, "abuse", "the newest help line is the one the Get help button shows");
     assert.deepEqual(w.analyticsCalls, [], "nothing is sent about a heavy conversation");
+    handle.unmount();
+  });
+
+  await test("conversation: a greeting gets a welcome, the newest answer, until the person says what they need", async (w) => {
+    const handle = renderConversation(w, {});
+    await until(handle, (s) => s.phase === "ready", "ready");
+    handle.result.current.send("HELLO");
+    const welcomed = await until(handle, (s) => !s.sending && s.messages.length === 2, "the welcome");
+    const first = welcomed.rows.find((row) => row.kind === "answer");
+    assert.equal(first.newest, true);
+    assert.equal(first.message.welcome, true, "the screen draws the situations' chips under it (source check below)");
+    const { copy } = w.use("@/constants/copy");
+    assert.deepEqual(copy.scholar.chips.topics, [
+      "I’m feeling anxious",
+      "I’m feeling weary",
+      "I’m grieving",
+      "I need hope",
+      "I need prayer",
+    ]);
+    welcomed.send("I am feeling anxious");
+    const answered = await until(handle, (s) => !s.sending && s.messages.length === 4, "the answer");
+    const answers = answered.rows.filter((row) => row.kind === "answer");
+    assert.deepEqual(answers.map((row) => [row.newest, row.message.welcome]), [[false, true], [true, false]]);
     handle.unmount();
   });
 
@@ -862,6 +920,16 @@ function sourceChecks() {
     assert.match(hook, /if \(!saved\.isHeavy && !answer\.isHeavy\) \{/, "events only outside a heavy conversation");
     const composer = read("src/screens/scholar/ConversationComposer.tsx");
     assert.ok(!/usage|remaining|LIMIT/.test(composer), "the composer knows no limit");
+  });
+
+  sourceCheck("screen: under a welcome the chips are the situations GraceHush is for, under any other answer the ways to go further", () => {
+    const screen = read("src/screens/scholar/ConversationScreen.tsx");
+    assert.match(
+      screen,
+      /chips=\{item\.message\.welcome \? copy\.scholar\.chips\.topics : copy\.scholar\.chips\.after\}/,
+      "the chips follow the newest answer",
+    );
+    assert.equal((screen.match(/copy\.scholar\.chips\.topics/g) ?? []).length, 1, "only under a welcome");
   });
 
   sourceCheck("chat: the person's bubble is plum and the answer's is a rose tint with the small corner on the other side; only what was sent or arrived this visit fades in", () => {

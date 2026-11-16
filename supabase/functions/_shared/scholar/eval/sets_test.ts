@@ -6,10 +6,11 @@ import { matchCrisisPhrase } from "../../safety/phrases.ts";
 import { SCHOLAR_REQUEST, WRITER_CONTEXT } from "../constants.ts";
 import { HARD_PASSAGE_KEYS } from "../heavyChat.ts";
 
-// Scholar's three answer sets (step 38) are data, and these checks keep them honest. They run offline: the model is never
+// Scholar's four answer sets (step 38) are data, and these checks keep them honest. They run offline: the model is never
 // called here. run_scholar_eval.ts answers them: cases.json (20 everyday conversations, graded), adversarial.json (30 attempts
-// at the five failures) and heavy.json (the hard-moment set of scholar-v2: the readers' twelve cases with their own rewrites, which
-// the grader compares with and the writer never sees, and the cases they found missing).
+// at the five failures), heavy.json (the hard-moment set of scholar-v2: the readers' twelve cases with their own rewrites, which
+// the grader compares with and the writer never sees, and the cases they found missing) and welcome.json (scholar-v3: greetings
+// that should get a welcome, and near-misses that should not).
 
 type Message = {
   role: "user" | "scholar";
@@ -35,6 +36,7 @@ type Everyday = {
   message: string;
 };
 type Adversarial = { id: string; target: string; context: Message[]; message: string };
+type Welcome = { id: string; welcome: boolean; asksPrayer: boolean; context: Message[]; message: string };
 type Heavy = {
   id: string;
   force: boolean;
@@ -56,6 +58,7 @@ const read = async <T>(name: string): Promise<T[]> =>
 const everyday = await read<Everyday>("cases.json");
 const adversarial = await read<Adversarial>("adversarial.json");
 const heavy = await read<Heavy>("heavy.json");
+const welcome = await read<Welcome>("welcome.json");
 
 const TARGETS = ["method", "human", "romantic", "medical", "typed_verse"];
 
@@ -237,4 +240,40 @@ Deno.test("no case of the three sets holds a method or a means, and the ids neve
   assert(probe !== "" && holdsMethod(` ${probe} `), "the method check finds nothing");
   const ids = [...everyday, ...adversarial, ...heavy].map((item) => item.id);
   assertEquals(new Set(ids).size, ids.length);
+});
+
+Deno.test("welcome (scholar-v3): greetings that should get a welcome and near-misses that should not, all clear", () => {
+  assertEquals(new Set(welcome.map((item) => item.id)).size, welcome.length);
+  for (const item of welcome) {
+    assertEquals(Object.keys(item).sort(), ["asksPrayer", "context", "id", "message", "welcome"], item.id);
+    assert(typeof item.welcome === "boolean" && typeof item.asksPrayer === "boolean", item.id);
+    checkMessages(item.id, item.message, item.context);
+    // A case that asks for prayer is not a welcome: the prayer stands.
+    if (item.asksPrayer) assert(!item.welcome, item.id);
+    for (const text of textsOf(item)) {
+      assert(!matchCrisisPhrase(text), `${item.id} matches the backstop`);
+      assert(!holdsMethod(text), item.id);
+    }
+  }
+  assert(welcome.filter((item) => item.welcome).length >= 5, "at least five greetings");
+  assert(welcome.filter((item) => !item.welcome).length >= 3, "at least three near-misses");
+  // A greeting after the person already said what they need is not a welcome.
+  assert(welcome.some((item) => !item.welcome && item.context.length > 0), "a near-miss with an earlier conversation");
+});
+
+Deno.test("welcome (scholar-v3): every chip the app shows under a welcome is in the set, sent after a welcome, never welcomed", async () => {
+  // The chips are the app's own messages (copy.scholar.chips.topics): each must get a real answer, and the prayer chip a prayer.
+  const root = new URL("../../../../../", import.meta.url);
+  const copy = (await Deno.readTextFile(new URL("src/constants/copy.ts", root))).replace(/\r\n/g, "\n");
+  const lines = copy.split("\n").filter((line) => line.trimStart().startsWith("topics: ["));
+  assertEquals(lines.length, 1, "copy.scholar.chips.topics");
+  const chips = [...lines[0].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  assertEquals(chips.length, 5);
+  for (const chip of chips) {
+    const item = welcome.find((candidate) => candidate.message === chip);
+    assert(item !== undefined, `the chip "${chip}" is not in the welcome set`);
+    assert(!item.welcome, chip);
+    assert(item.context.length > 0, `${chip}: sent after a welcome`);
+    assertEquals(item.asksPrayer, /pray/i.test(chip), chip);
+  }
 });

@@ -33,7 +33,7 @@ const FACTS: HeavyFacts = {
 const HEAVY_BLOCK = buildHeavyBlock(FACTS);
 
 Deno.test("scholar-v2: the instruction's sections, in order, ending with the heavy section", () => {
-  assertEquals(SCHOLAR_PROMPT_VERSION, "scholar-v2");
+  assertEquals(SCHOLAR_PROMPT_VERSION, "scholar-v3");
   const headings = sections(buildScholarInstruction()).map((section) => section.split("\n")[0]);
   assertEquals(headings, [
     "## Role",
@@ -89,6 +89,68 @@ Deno.test("scholar-v2: the role, the Scripture rule, the boundaries and the pray
   assert(!/\bI am (?:a|your) (?:pastor|counsel|therap|person)/i.test(instruction));
 });
 
+Deno.test("scholar-v3: a greeting gets a welcome that names what people bring here, invites them, and promises no safe place", () => {
+  const instruction = buildScholarInstruction();
+  const answer = sections(instruction).find((section) => section.startsWith("## How to answer\n")) ?? "";
+  const rule = answer.split("\n").find((line) => line.startsWith("- When the new message only greets you")) ?? "";
+  for (
+    const words of [
+      "asks what you can do, or says they are not sure where to begin",
+      "nothing earlier in the conversation says what they need",
+      "worry and anxiety, feeling worn out, grief, a hope that feels far away, needing prayer, and questions about the Bible",
+      "listen, look at what Scripture says, and pray with them",
+      "ask them, in one short question, what is on their heart, and say a few words are enough",
+      "Keep it short, at most 70 words, and word it freshly each time.",
+      "A welcome names no passage, holds no prayer, and never calls this place safe or private.",
+    ]
+  ) {
+    assert(rule.includes(words), words);
+  }
+  // It comes right after "Answer the new message", before the Bible rules.
+  assertEquals(answer.split("\n")[2], rule);
+  assert(
+    instruction.includes(
+      '- welcome: true when your reply is a welcome, by "How to answer": the message only greets you, asks what you can do, or says they are not sure where to begin. Then title, lead_passage, passage and prayer are null. Otherwise false.',
+    ),
+  );
+  type Schema = { properties: Record<string, Record<string, unknown>>; required: string[] };
+  for (const schema of [buildScholarSchema(), buildScholarSchema({ heavy: false, spoken: true })] as Schema[]) {
+    assertEquals(Object.keys(schema.properties).slice(0, 2), ["is_heavy", "welcome"]);
+    const about = String(schema.properties.welcome.description);
+    assert(about.includes("title, lead_passage, passage and prayer are null"), about);
+    assert(schema.required.includes("welcome"));
+  }
+  // The "I need prayer" chip under a welcome is prayed at once, without guessing what they carry.
+  const prayer = sections(instruction).find((section) => section.startsWith("## Prayer\n")) ?? "";
+  assert(
+    prayer.includes(
+      "When they ask you to pray and nothing in the conversation says what for, pray now for whatever they are carrying today, without guessing what it is, and in the reply invite them to say more if they wish.",
+    ),
+    "a request for prayer that says nothing of what for",
+  );
+  // A heavy moment is never a welcome.
+  assert(!("welcome" in (buildScholarSchema({ heavy: true }) as Schema).properties));
+});
+
+Deno.test("the heavy writer's instruction is the everyday one without scholar-v3's three welcome additions, and nothing else", () => {
+  const everyday = buildScholarInstruction();
+  const heavy = buildScholarInstruction({ heavy: true });
+  const rule = everyday.split("\n").find((line) => line.startsWith("- When the new message only greets you")) ?? "";
+  const field = everyday.split("\n").find((line) => line.startsWith("- welcome: true when your reply is a welcome")) ??
+    "";
+  const unnamed =
+    " When they ask you to pray and nothing in the conversation says what for, pray now for whatever they are carrying today, without guessing what it is, and in the reply invite them to say more if they wish.";
+  assert(rule !== "" && field !== "" && everyday.includes(unnamed));
+  assertEquals(everyday.replace(`\n${rule}`, "").replace(unnamed, "").replace(`\n${field}`, ""), heavy);
+  // It is still the whole instruction: every section, the heavy section last.
+  assertEquals(
+    sections(heavy).map((section) => section.split("\n")[0]),
+    sections(everyday).map((s) => s.split("\n")[0]),
+  );
+  assert(heavy.endsWith(HEAVY_CHAT_SECTION));
+  assertEquals(buildScholarInstruction({ heavy: false }), everyday);
+});
+
 const ALLOWED_KEYWORDS = new Set(["type", "properties", "required", "items", "maxItems", "enum", "description"]);
 const onlySupportedKeywords = (schema: unknown) => {
   const walk = (node: unknown, parentIsProperties: boolean) => {
@@ -101,13 +163,14 @@ const onlySupportedKeywords = (schema: unknown) => {
   walk(schema, false);
 };
 
-Deno.test("the schema: seven required fields, nullable title, passages and prayer, the 65-book enum, and only supported keywords", () => {
+Deno.test("the schema: eight required fields, nullable title, passages and prayer, the 65-book enum, and only supported keywords", () => {
   const schema = buildScholarSchema() as {
     properties: Record<string, Record<string, unknown>>;
     required: string[];
   };
   assertEquals(Object.keys(schema.properties), [
     "is_heavy",
+    "welcome",
     "title",
     "lead_passage",
     "passage",
@@ -117,6 +180,7 @@ Deno.test("the schema: seven required fields, nullable title, passages and praye
   ]);
   assertEquals(schema.required, Object.keys(schema.properties));
   assertEquals(schema.properties.is_heavy.type, "boolean");
+  assertEquals(schema.properties.welcome.type, "boolean");
   assertEquals(schema.properties.says_under_18.type, "boolean");
   assertEquals(schema.properties.title.type, ["string", "null"]);
   assertEquals(schema.properties.prayer.type, ["string", "null"]);
@@ -158,7 +222,7 @@ Deno.test("a talk's schema: the same fields as the written one, with spoken desc
       JSON.stringify({ ...written.properties[key], description: null }),
     );
   }
-  for (const key of ["is_heavy", "title", "says_under_18"]) {
+  for (const key of ["is_heavy", "welcome", "title", "says_under_18"]) {
     assertEquals(JSON.stringify(spoken.properties[key]), JSON.stringify(written.properties[key]));
   }
   assert(!String(written.properties.reply.description).includes("20 to 50"));
@@ -336,9 +400,9 @@ Deno.test("a live talk: a heavy turn never carries the spoken block, because its
 });
 
 Deno.test("a live talk: what the spoken block asks for, its version, and an instruction that does not change", () => {
-  assertEquals(SCHOLAR_PROMPT_VERSION, "scholar-v2");
+  assertEquals(SCHOLAR_PROMPT_VERSION, "scholar-v3");
   assertEquals(SCHOLAR_SPOKEN_VERSION, "spoken-v4");
-  assertEquals(SCHOLAR_SPOKEN_PROMPT_VERSION, "scholar-v2/spoken-v4");
+  assertEquals(SCHOLAR_SPOKEN_PROMPT_VERSION, "scholar-v3/spoken-v4");
   const lines = SPOKEN_BLOCK.split("\n");
   assertEquals(lines[0], "<spoken>");
   assertEquals(lines.at(-1), "</spoken>");

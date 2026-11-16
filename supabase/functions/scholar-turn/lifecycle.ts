@@ -25,7 +25,8 @@ export type ConversationRow = {
 // What a message holds (jsonb, at most 16 KB): its blocks, and since 2026-11-11, on an answer that carries a help line, the help
 // line's kind (one word, helpKind.ts) and, on a written answer, which one it was (so a second written answer in the conversation
 // is the shorter one). Nothing else: no category, reason or phrase is ever saved.
-export type MessageContent = { blocks: StoredBlock[]; help?: HelpKind; fallback?: FallbackVariant };
+// welcome (scholar-v3): the answer is a welcome, and the app shows the situations' chips under it.
+export type MessageContent = { blocks: StoredBlock[]; help?: HelpKind; fallback?: FallbackVariant; welcome?: true };
 
 export type MessageRow = {
   id: string;

@@ -333,7 +333,12 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
           onDelete={item.message.helpLine === "abuse" ? openDelete : null}
         />
         {item.newest && !chat.heavy && !chat.sending ? (
-          <SuggestionChips chips={copy.scholar.chips.after} onPick={(text) => chat.send(text)} disabled={chat.sending} />
+          <SuggestionChips
+            // Under a welcome, the situations GraceHush is for (scholar-v3); under any other answer, the ways to go further.
+            chips={item.message.welcome ? copy.scholar.chips.topics : copy.scholar.chips.after}
+            onPick={(text) => chat.send(text)}
+            disabled={chat.sending}
+          />
         ) : null}
       </View>
     );

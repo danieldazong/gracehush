@@ -1232,6 +1232,9 @@ export const copy = {
     chips: {
       after: ["Explain it more simply", "Help me pray about this", "Show me a passage"],
       reflection: ["Why this passage?", "Help me pray about this", "What can I do today?"],
+      // Under a welcome (scholar-v3, 2026-11-16): the situations GraceHush is for, as the Journal's filter names them, each sent
+      // as the person's own first words. "I need hope" and not "I’m losing hope", which the screening could read as a risk.
+      topics: ["I’m feeling anxious", "I’m feeling weary", "I’m grieving", "I need hope", "I need prayer"],
     },
     contextEyebrow: "From your reflection",
     amen: "Amen.",

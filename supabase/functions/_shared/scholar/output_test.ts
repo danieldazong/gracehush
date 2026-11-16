@@ -8,6 +8,7 @@ import {
   type ScholarAnswer,
   type ScholarParseContext,
   scholarStyle,
+  welcomeSituations,
 } from "./output.ts";
 
 const MESSAGE = "My friend Adaeze is moving to Lagos and I feel lost without her.";
@@ -226,6 +227,53 @@ Deno.test("scholar-v2: says_under_18 is read in both schemas, and only true is t
     assertEquals(read(reply({ says_under_18: value }), everyday()), false, String(value));
   }
   assertEquals(read(reply(), everyday()), false);
+});
+
+const WELCOME_REPLY =
+  "Hello, and welcome. You can bring whatever you are carrying today: worry or anxiety, feeling worn out, grief, a hope that feels far away, or a need for prayer. Questions about the Bible are welcome too.\n\nI am here to listen, to look at what Scripture says with you, and to pray with you. What is on your heart right now? A few words are enough.";
+
+Deno.test("scholar-v3: a welcome keeps only its words: no title, no passage, no prayer; only true is true", () => {
+  const read = (text: string, context: ScholarParseContext = everyday({ message: "Hello", askTitle: true })) => {
+    const parsed = parseScholarReply(text, context);
+    assert(parsed.kind === "answer");
+    return parsed;
+  };
+  const welcome = read(
+    reply({
+      welcome: true,
+      title: "A Warm Hello",
+      lead_passage: { book_id: "MAT", chapter: 11, verse_start: 28, verse_end: 28 },
+      passage: { book_id: "PSA", chapter: 34, verse_start: 18, verse_end: 18 },
+      reply: WELCOME_REPLY,
+    }),
+  );
+  assertEquals(
+    [welcome.welcome, welcome.title, welcome.leadPassage, welcome.passage, welcome.prayer],
+    [true, null, null, null, null],
+  );
+  assertEquals(welcome.reply, WELCOME_REPLY);
+  // Every other answer keeps what it wrote, the title of a first answer included.
+  const answer = read(reply({ welcome: false, title: "Peace In The Waiting" }));
+  assertEquals([answer.welcome, answer.title], [false, "Peace In The Waiting"]);
+  for (const value of ["true", 1, null, undefined]) {
+    assertEquals(read(reply({ welcome: value })).welcome, false, String(value));
+  }
+  assertEquals(read(reply()).welcome, false);
+  // A reply that also prays is not a welcome: the person asked for prayer, and the prayer stands.
+  const prays = read(reply({ welcome: true, prayer: PRAYER }));
+  assertEquals([prays.welcome, prays.prayer], [false, PRAYER]);
+  // A heavy answer is never a welcome.
+  const heavy = parseScholarReply(heavyReply({ welcome: true }), heavyContext());
+  assert(heavy.kind === "answer" && heavy.welcome === false);
+});
+
+Deno.test("scholar-v3: the situations a welcome names, as the evaluation counts them", () => {
+  assertEquals(welcomeSituations(WELCOME_REPLY), 5);
+  assertEquals(welcomeSituations("When you feel anxious, tired, grieving or without hope, I can pray with you."), 5);
+  assertEquals(welcomeSituations("Hello! What would you like to talk about today?"), 0);
+  assertEquals(welcomeSituations("Worry and weariness are welcome here."), 2);
+  // Fatigue is weariness (the adversarial set's role-play answer of 2026-11-16 named worry, fatigue and prayer).
+  assertEquals(welcomeSituations("You can bring any burden here, from worry or fatigue, and I can pray with you."), 3);
 });
 
 const NAMING_ONCE = `${REPLY}\n\nI am so sorry you have had thoughts of ending your life.`;

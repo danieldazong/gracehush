@@ -76,6 +76,7 @@ function personMessage(request: ScholarTurnRequest, conversationId: string, at: 
       : [{ type: "text", text: "This is where the words you spoke would be." }],
     isHeavy: false,
     helpLine: null,
+    welcome: false,
     createdAt: at,
   };
 }
@@ -139,6 +140,7 @@ export function mockTurn(
       ],
       isHeavy: outcome === "heavy",
       helpLine: outcome === "heavy" ? "crisis" : null,
+      welcome: false,
       createdAt: nowIso(now + 1),
     }
     : {
@@ -164,6 +166,7 @@ export function mockTurn(
       ],
       isHeavy: false,
       helpLine: null,
+      welcome: false,
       createdAt: nowIso(now + 1),
     };
   if (!heavy) usedToday += 1;

@@ -238,6 +238,8 @@ export function toScholarMessage(row: MessageRow): ScholarMessage {
     isHeavy,
     // An answer that carries a help line shows the one saved with it; one saved before 2026-11-11 shows the 988 line.
     helpLine: role === "scholar" && isHeavy ? (pick(HELP_KINDS, typeof help === "string" ? help : null) ?? "crisis") : null,
+    // A welcome (scholar-v3) shows the situations' chips under it; never in a heavy conversation.
+    welcome: role === "scholar" && !isHeavy && content?.welcome === true,
     createdAt: row.created_at,
   };
 }

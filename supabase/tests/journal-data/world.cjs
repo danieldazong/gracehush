@@ -482,7 +482,9 @@ function makeServer() {
 
   // ---- Scholar (step 38): the two functions as the real ones answer, without a model. An answer is fixed text after a verified
   // passage; a message that holds the test word HEAVY is a heavy moment (ABUSE: one whose help line is the domestic violence
-  // line), answered whatever the count, never counted, with no usage; the day's limit counts the answered messages of
+  // line), answered whatever the count, never counted, with no usage; one that holds HELLO is a greeting, answered with a welcome
+  // (scholar-v3: its words alone, no title), and only a welcome carries the welcome field, as a function from before scholar-v3
+  // sends none on any answer; the day's limit counts the answered messages of
   // conversations that are not heavy. A spoken message needs its recording uploaded (chat-{messageId}), and its words are fixed.
   const SCHOLAR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const SCHOLAR_KEYS = ["conversationId", "messageId", "input", "entryId", "region"];
@@ -521,6 +523,7 @@ function makeServer() {
       blocks,
       isHeavy: row.is_heavy,
       helpLine: row.role === "scholar" && row.is_heavy ? (row.content.help ?? "crisis") : null,
+      ...(row.role === "scholar" && !row.is_heavy && row.content.welcome === true ? { welcome: true } : {}),
       createdAt: row.created_at,
     };
   }
@@ -590,6 +593,7 @@ function makeServer() {
       else words = SPOKEN_WORDS;
     }
     const heavyNow = /HEAVY|ABUSE/.test(words);
+    const welcomeNow = !heavyNow && /HELLO/.test(words);
     const help = /ABUSE/.test(words) ? "abuse" : "crisis";
     const personRow = {
       id: messageId,
@@ -627,6 +631,8 @@ function makeServer() {
       error_code: null,
       content: heavyNow
         ? { blocks: [{ type: "text", text: "You do not carry this by yourself." }], help }
+        : welcomeNow
+        ? { blocks: [{ type: "text", text: "Welcome. Bring whatever you are carrying today. What is on your heart?" }], welcome: true }
         : { blocks: [SCHOLAR_PASSAGE, { type: "text", text: "Paul wrote this from prison.\n\nGod stands guard over your heart." }] },
       is_heavy: heavyNow,
       claimed_at: null,
@@ -636,7 +642,9 @@ function makeServer() {
     personRow.claimed_at = null;
     state.scholarMessages.push(answer);
     conversation.last_message_at = answer.created_at;
-    if (!conversation.is_heavy && conversation.title === null && conversation.entry_id === null) conversation.title = "A question about peace";
+    if (!conversation.is_heavy && !welcomeNow && conversation.title === null && conversation.entry_id === null) {
+      conversation.title = "A question about peace";
+    }
     if (conversation.is_heavy) conversation.title = null;
     return json(200, {
       conversation: scholarConversationModel(conversation),

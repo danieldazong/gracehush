@@ -156,9 +156,14 @@ async function runTurn(request: Omit<ScholarTurnRequest, "region">, take?: Spoke
 }
 
 // The function answers with the times PostgREST wrote (microseconds and an offset), which the phone's engine was not shown to
-// read: they are kept as the rest of the app keeps a server time (utils/timestamp.ts), so the messages sort by them.
+// read: they are kept as the rest of the app keeps a server time (utils/timestamp.ts), so the messages sort by them. A function
+// from before scholar-v3 sends no welcome, which reads as none.
 function withCanonicalTimes(data: ScholarTurnResponse): ScholarTurnResponse {
-  const message = (item: ScholarMessage): ScholarMessage => ({ ...item, createdAt: normalizeTimestamp(item.createdAt) });
+  const message = (item: ScholarMessage): ScholarMessage => ({
+    ...item,
+    welcome: item.welcome === true,
+    createdAt: normalizeTimestamp(item.createdAt),
+  });
   return {
     ...data,
     conversation: {

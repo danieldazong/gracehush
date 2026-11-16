@@ -96,6 +96,7 @@ function localMessage(request: Request, previous: ScholarMessage | undefined, cr
       : previous?.blocks.filter((block) => block.type === "text") ?? [],
     isHeavy: previous?.isHeavy ?? false,
     helpLine: null,
+    welcome: false,
     createdAt,
   };
 }

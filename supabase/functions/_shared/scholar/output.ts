@@ -71,6 +71,10 @@ export type ScholarAnswer = {
   prayer: string | null;
   // The person said they are under 18 (scholar-v2): Scholar closes for the account after this answer.
   saysUnder18: boolean;
+  // A welcome (scholar-v3): the message only greeted Scholar, asked what it can do, or said they are not sure where to begin.
+  // It has no title, no passage and no prayer, so the next answer titles the conversation; the app shows the situations' chips
+  // under it. Never in a heavy answer.
+  welcome: boolean;
 };
 
 export type ParsedScholarReply = { kind: "flagged" } | ({ kind: "answer" } & ScholarAnswer);
@@ -303,6 +307,8 @@ export function parseScholarReply(text: string, context: ScholarParseContext): P
   const title = context.heavy ? null : readTitle(data.title, context);
   const passageKey = context.heavy && isHardPassageKey(data.passage_key) ? data.passage_key : null;
   const saysUnder18 = data.says_under_18 === true;
+  // A reply that also prays is not a welcome: the person asked for prayer, and the prayer stands.
+  const welcome = !context.heavy && data.welcome === true && prayer === null;
 
   const spoken = prayer === null ? [reply] : [reply, prayer];
   for (const part of spoken) {
@@ -312,14 +318,15 @@ export function parseScholarReply(text: string, context: ScholarParseContext): P
   const answer: ParsedScholarReply = {
     kind: "answer",
     isHeavy: data.is_heavy || context.heavy,
-    title,
+    title: welcome ? null : title,
     reply,
-    // A heavy answer has no lead passage and names its one passage by key (scholar-v2).
-    leadPassage: context.heavy ? null : leadPassage,
-    passage: context.heavy ? null : passage,
+    // A heavy answer has no lead passage and names its one passage by key (scholar-v2); a welcome names none (scholar-v3).
+    leadPassage: context.heavy || welcome ? null : leadPassage,
+    passage: context.heavy || welcome ? null : passage,
     passageKey,
     prayer,
     saysUnder18,
+    welcome,
   };
   if (context.heavy) {
     if (spoken.some(hasQuotation)) fail("heavy_quote", NOTE_HEAVY_QUOTE);
@@ -359,6 +366,20 @@ export type ScholarStyle = {
   prayerVoice: PrayerVoice | null;
   prayerPetitions: number | null;
 };
+
+// The situations a welcome names (scholar-v3), as the evaluation counts them: worry, weariness, grief, hope and prayer. A measure,
+// never a refusal.
+const WELCOME_SITUATIONS: readonly RegExp[] = [
+  /\b(?:anxi|worr|fear|afraid|stress)/i,
+  /\b(?:wear|tired|worn|fatig|exhaust|overwhelm)/i,
+  /\b(?:grie|mourn|loss)/i,
+  /\bhope/i,
+  /\bpray/i,
+];
+
+export function welcomeSituations(text: string): number {
+  return WELCOME_SITUATIONS.filter((pattern) => pattern.test(text)).length;
+}
 
 export function scholarStyle(answer: ScholarAnswer, message: string): ScholarStyle {
   return {

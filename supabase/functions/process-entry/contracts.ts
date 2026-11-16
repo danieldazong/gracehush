@@ -270,6 +270,9 @@ export interface ScholarMessage {
   isHeavy: boolean;
   // The help line under an answer to a flagged message and under the written fallback; null otherwise.
   helpLine: HelpKind | null;
+  // A welcome (scholar-v3): the answer to a greeting, or to an opening that says nothing of what the person needs. The app
+  // shows the situations' chips under it. False for every other message, and in a heavy conversation.
+  welcome: boolean;
   createdAt: string;
 }
 

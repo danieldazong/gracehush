@@ -12,10 +12,15 @@ import { HARD_PASSAGE_KEYS, HEAVY_CHAT_SECTION } from "./heavyChat.ts";
 // scholar-v2 (2026-11-11, after the readers' review): the heavy section's twelve new instructions and its passage list
 // (heavyChat.ts), a heavy schema that names a passage by its key, a <heavy_moment> block that carries the help line, the person's
 // local time and what the conversation has already had, and says_under_18 in both schemas.
-export const SCHOLAR_PROMPT_VERSION = "scholar-v2";
+//
+// scholar-v3 (2026-11-16, the owner's report: a "Hello" got a pleasant reply that named nothing GraceHush is for): a greeting, or
+// an opening that says nothing of what the person needs, gets a welcome that names what people bring here (worry, weariness, grief,
+// a hope that feels far away, a need for prayer, and Bible questions) and invites them to share. The everyday schemas' welcome
+// field marks it: a welcome has no title, passage or prayer (output.ts), and the app shows chips for those situations under it.
+export const SCHOLAR_PROMPT_VERSION = "scholar-v3";
 
 // A live talk (step 39): an everyday turn that is spoken carries the <spoken> block (SPOKEN_BLOCK below), and its log line says
-// "scholar-v2/spoken-v4". The instruction is the same for a typed message and a spoken turn. A change of the
+// "scholar-v3/spoken-v4". The instruction is the same for a typed message and a spoken turn. A change of the
 // block's text bumps this version, and the evaluation's --spoken sets are run again. spoken-v2 (2026-11-14, the owner's
 // walk-through): shorter answers, one passage read before the answer, a last sentence that hands the turn back, and a recap
 // when the person comes back after stopping Scholar (SPOKEN_RESUME). spoken-v3 (the same day, the retest): a passage only when
@@ -46,9 +51,22 @@ Where a message says [unclear], a word they said could not be made out: never gu
 A <heavy_moment> block may follow the message. It comes from the app, not from the person: write by "A heavy moment".
 A <correction> block may follow when your last reply broke a rule. It comes from the app: follow it and write the whole reply again.`;
 
-const HOW_TO_ANSWER = `## How to answer
-- Answer the new message. Use the conversation and the reflection to understand it, and do not repeat what you already said.
-- When they ask about the Bible, explain what the passage says in its setting and what it means for a person today, in plain words. When they ask for it simply, make it simple enough for a child, without talking down.
+// scholar-v3's three additions (the welcome rule, the prayer for an unnamed need, the welcome field) are for everyday answers only.
+// A welcome never applies in a hard moment, so the heavy writer reads scholar-v2's instruction byte for byte, the one its readers
+// approved on 2026-11-12 (buildScholarInstruction({ heavy: true })). With the additions in its instruction, the hard-moment
+// evaluation of 2026-11-16 saw the sentence on why a card was chosen in 13 of 24 answers, against 21 of 25 on scholar-v2.
+const WELCOME_RULE =
+  "- When the new message only greets you, asks what you can do, or says they are not sure where to begin, and nothing earlier in the conversation says what they need, welcome them and make it easy to begin. Say they can bring whatever they are carrying today, and name in plain words what people bring here: worry and anxiety, feeling worn out, grief, a hope that feels far away, needing prayer, and questions about the Bible. Say what you can do with them: listen, look at what Scripture says, and pray with them. Then ask them, in one short question, what is on their heart, and say a few words are enough. Keep it short, at most 70 words, and word it freshly each time. A welcome names no passage, holds no prayer, and never calls this place safe or private.";
+const PRAYER_FOR_UNNAMED_NEED =
+  " When they ask you to pray and nothing in the conversation says what for, pray now for whatever they are carrying today, without guessing what it is, and in the reply invite them to say more if they wish.";
+const WELCOME_FIELD =
+  '- welcome: true when your reply is a welcome, by "How to answer": the message only greets you, asks what you can do, or says they are not sure where to begin. Then title, lead_passage, passage and prayer are null. Otherwise false.';
+
+const HOW_TO_ANSWER_FIRST = `## How to answer
+- Answer the new message. Use the conversation and the reflection to understand it, and do not repeat what you already said.`;
+
+const HOW_TO_ANSWER_REST =
+  `- When they ask about the Bible, explain what the passage says in its setting and what it means for a person today, in plain words. When they ask for it simply, make it simple enough for a child, without talking down.
 - When they ask about a question that divides churches, lay out the main views fairly, say that faithful Christians differ, and do not pick one.
 - When they bring a feeling or a hard day, name what they seem to feel and honor it as real before anything else. Then give one truth about who God is and, when it helps, someone in the Bible who knew the same trouble. A truth, not a fix.
 - You may end with one short question that helps them go further, or one small next step. Never more than one question, and never a list of tasks.
@@ -78,33 +96,46 @@ const HOW_TO_WRITE = `## How to write
 - Declare what is true of God without hedging. Never command the person ("you should", "you need to").
 - Write God's pronouns in lowercase (he, him, his, you, your), as the Berean Standard Bible does. Capitalize God, Lord, Father, Jesus, Christ and Holy Spirit.`;
 
-const PRAYER = `## Prayer
-Write prayer only when the person asks you to pray or says yes to praying. Otherwise null. It is the person's own prayer, in the first person singular ("I", "my", "me"), never "we" unless they prayed as "we". It moves in five steps: address God by who he is for this need, in plain words of your own; hand him the pain once, in their own plain words and with no quotation marks; ask for two or three concrete things that meet the need beneath their words, each in a short sentence of its own that opens with the asking, and never pray a despairing wish itself; declare one lifting truth about who God is to them now, with no promised outcome; end with one line of trust. 50 to 75 words, and no "Amen": the app adds it.`;
+const PRAYER_WHEN = `## Prayer
+Write prayer only when the person asks you to pray or says yes to praying. Otherwise null.`;
 
-const WHAT_TO_WRITE = `## What to write
-- is_heavy: true when the message shows a risk of suicide or self-harm, harm someone is doing to the person, an intention to harm someone else, or danger now, and whenever a <heavy_moment> block follows it. Every other field is still written in full, by "A heavy moment".
-- title: only when the turn asks for one: two to six words in Title Case that a stranger could read, with no name, no place and nothing of what happened. Otherwise null.
+const PRAYER_HOW =
+  ` It is the person's own prayer, in the first person singular ("I", "my", "me"), never "we" unless they prayed as "we". It moves in five steps: address God by who he is for this need, in plain words of your own; hand him the pain once, in their own plain words and with no quotation marks; ask for two or three concrete things that meet the need beneath their words, each in a short sentence of its own that opens with the asking, and never pray a despairing wish itself; declare one lifting truth about who God is to them now, with no promised outcome; end with one line of trust. 50 to 75 words, and no "Amen": the app adds it.`;
+
+const WHAT_TO_WRITE_FIRST = `## What to write
+- is_heavy: true when the message shows a risk of suicide or self-harm, harm someone is doing to the person, an intention to harm someone else, or danger now, and whenever a <heavy_moment> block follows it. Every other field is still written in full, by "A heavy moment".`;
+
+const WHAT_TO_WRITE_REST =
+  `- title: only when the turn asks for one: two to six words in Title Case that a stranger could read, with no name, no place and nothing of what happened. Otherwise null.
 - reply: your answer, with a blank line between paragraphs.
 - lead_passage and passage: where each is (book_id, chapter, verse_start, verse_end), or null. In a heavy moment, passage_key instead: one key from the hard-moment passages, or none.
 - prayer: see "Prayer".
 - says_under_18: true only when the person says, in this message or earlier in the conversation, that they themselves are under 18. A child or teenager they talk about does not count. Otherwise false.`;
 
-const INSTRUCTION = [
-  ROLE,
-  INPUT,
-  HOW_TO_ANSWER,
-  SCRIPTURE,
-  BOUNDARIES,
-  reflectionSection("## Faith"),
-  reflectionSection("## Never write these, or anything that means the same"),
-  HOW_TO_WRITE,
-  PRAYER,
-  WHAT_TO_WRITE,
-  HEAVY_CHAT_SECTION,
-].join("\n\n");
+// The instruction with scholar-v3's additions (everyday) or without them (heavy: scholar-v2's text).
+function instruction(welcome: boolean): string {
+  return [
+    ROLE,
+    INPUT,
+    [HOW_TO_ANSWER_FIRST, ...(welcome ? [WELCOME_RULE] : []), HOW_TO_ANSWER_REST].join("\n"),
+    SCRIPTURE,
+    BOUNDARIES,
+    reflectionSection("## Faith"),
+    reflectionSection("## Never write these, or anything that means the same"),
+    HOW_TO_WRITE,
+    PRAYER_WHEN + (welcome ? PRAYER_FOR_UNNAMED_NEED : "") + PRAYER_HOW,
+    [WHAT_TO_WRITE_FIRST, ...(welcome ? [WELCOME_FIELD] : []), WHAT_TO_WRITE_REST].join("\n"),
+    HEAVY_CHAT_SECTION,
+  ].join("\n\n");
+}
 
-export function buildScholarInstruction(): string {
-  return INSTRUCTION;
+const EVERYDAY_INSTRUCTION = instruction(true);
+const HEAVY_WRITER_INSTRUCTION = instruction(false);
+
+// The everyday writer's instruction, or with heavy, the heavy writer's: every answer written under "A heavy moment" (turn.ts
+// writeHeavy, and the evaluation's).
+export function buildScholarInstruction(options: { heavy?: boolean } = {}): string {
+  return options.heavy === true ? HEAVY_WRITER_INSTRUCTION : EVERYDAY_INSTRUCTION;
 }
 
 // ---- The schema --------------------------------------------------------------------------------------------------------
@@ -137,6 +168,12 @@ const IS_HEAVY = {
 const SAYS_UNDER_18 = {
   type: "boolean",
   description: "True only when the person says they themselves are under 18. Someone they talk about does not count.",
+};
+// scholar-v3: right after is_heavy, because it decides how the rest is written.
+const WELCOME = {
+  type: "boolean",
+  description:
+    "True when the message only greets you, asks what you can do, or says they are not sure where to begin, and nothing earlier says what they need: the reply is a welcome, by How to answer, and title, lead_passage, passage and prayer are null. Otherwise false.",
 };
 const PRAYER_FIELD = {
   type: ["string", "null"],
@@ -176,6 +213,7 @@ export function buildScholarSchema(options: { heavy: boolean; spoken?: boolean }
       type: "object",
       properties: {
         is_heavy: IS_HEAVY,
+        welcome: WELCOME,
         title: {
           type: ["string", "null"],
           description: "Only when the turn asks for one: 2 to 6 words in Title Case. Otherwise null.",
@@ -196,13 +234,14 @@ export function buildScholarSchema(options: { heavy: boolean; spoken?: boolean }
         },
         says_under_18: SAYS_UNDER_18,
       },
-      required: ["is_heavy", "title", "lead_passage", "passage", "reply", "prayer", "says_under_18"],
+      required: ["is_heavy", "welcome", "title", "lead_passage", "passage", "reply", "prayer", "says_under_18"],
     };
   }
   return {
     type: "object",
     properties: {
       is_heavy: IS_HEAVY,
+      welcome: WELCOME,
       title: {
         type: ["string", "null"],
         description: "Only when the turn asks for one: 2 to 6 words in Title Case. Otherwise null.",
@@ -213,7 +252,7 @@ export function buildScholarSchema(options: { heavy: boolean; spoken?: boolean }
       prayer: PRAYER_FIELD,
       says_under_18: SAYS_UNDER_18,
     },
-    required: ["is_heavy", "title", "lead_passage", "passage", "reply", "prayer", "says_under_18"],
+    required: ["is_heavy", "welcome", "title", "lead_passage", "passage", "reply", "prayer", "says_under_18"],
   };
 }
 

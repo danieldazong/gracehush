@@ -751,7 +751,8 @@ async function answerMessage(turn: Turn, context: TurnContext): Promise<ScholarT
             apiKey: config.apiKey,
             model: config.heavyModel,
             thinkingLevel: HEAVY_THINKING_LEVEL,
-            system: buildScholarInstruction(),
+            // scholar-v2's instruction, the one the readers approved: the welcome additions are for everyday answers.
+            system: buildScholarInstruction({ heavy: true }),
             input: {
               kind: "text",
               text: buildScholarTurn({ reflection, history, message, askTitle: false, heavyBlock, correction }),
@@ -840,6 +841,8 @@ async function answerMessage(turn: Turn, context: TurnContext): Promise<ScholarT
     blocks: blocksFor(done),
     ...(carriesHelp ? { help: done.kind === "fallback" ? done.help : helpNow() } : {}),
     ...(done.kind === "fallback" ? { fallback: done.variant } : {}),
+    // A welcome (scholar-v3): the app shows the situations' chips under it.
+    ...(done.kind === "answer" && !heavy && done.answer.welcome ? { welcome: true as const } : {}),
   };
 
   // talk: the person hears the answer now, while it is saved (TalkTurn.onReady). It has passed its screening and every check.

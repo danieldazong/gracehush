@@ -21,7 +21,7 @@ import { HEAVY_THINKING_LEVEL, scholarTiming } from "../_shared/scholar/constant
 import { ADULTS_ONLY_TEXT, heavyChatFallback } from "../_shared/scholar/heavyChat.ts";
 import { JUDGE_NOTE_PRAYER, JUDGE_NOTE_UNANSWERED } from "../_shared/scholar/judge.ts";
 import { TYPED_VERSE_NOTE } from "../_shared/scholar/passages.ts";
-import { TITLE_REQUEST } from "../_shared/scholar/prompt.ts";
+import { buildScholarInstruction, TITLE_REQUEST } from "../_shared/scholar/prompt.ts";
 import { handle } from "./handler.ts";
 
 type Row = Record<string, unknown>;
@@ -369,7 +369,7 @@ Deno.test(
     assertEquals(Object.keys(line), Object.keys(blankLogLine({ requestId: "x", status: 200 })));
     assertEquals(Object.keys(line).length, 43);
     assertEquals(line.reason, "scholar:answered");
-    assertEquals(line.promptVersion, "scholar-v2");
+    assertEquals(line.promptVersion, "scholar-v3");
     assertEquals(line.screen, "clear");
     assertEquals(line.inputType, "text");
     assertEquals(line.limit, "free_ok");
@@ -381,6 +381,44 @@ Deno.test(
     for (const secret of [ASK, REPLY.slice(0, 40), PRAYER.slice(0, 30), "Shepherd", "Psalm", CONVERSATION, MESSAGE]) {
       assert(!written.includes(secret), `the log holds nothing of ${secret.slice(0, 12)}`);
     }
+  }),
+);
+
+const WELCOME_REPLY =
+  "Hello, and welcome. You can bring whatever you are carrying today: worry or anxiety, feeling worn out, grief, a hope that feels far away, or a need for prayer. Questions about the Bible are welcome too.\n\nI am here to listen, to look at what Scripture says with you, and to pray with you. What is on your heart right now? A few words are enough.";
+
+Deno.test(
+  "scholar-v3: a welcome is saved as one with its words alone, leaves the conversation untitled, and the next answer is titled",
+  flow(async (world) => {
+    world.geminiQueue.push(geminiOk(answerOutput({ welcome: true, reply: WELCOME_REPLY })));
+    const body = await ok(await send(world, typed("Hello")));
+    assertEquals(body.answer.welcome, true);
+    assertEquals(body.message.welcome, false);
+    // No passage card and no title, though the writer named both.
+    assertEquals(body.answer.blocks, [{ type: "text", text: WELCOME_REPLY }]);
+    assertEquals(body.conversation.title, null);
+    assertEquals(scholarRows(world)[0].content, { blocks: [{ type: "text", text: WELCOME_REPLY }], welcome: true });
+    assertEquals(lastLog(world).reason, "scholar:answered");
+
+    // The next answer is asked for the title the welcome did not take, and it is no welcome.
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    const next = await ok(await send(world, typed(ASK, { messageId: NEXT })));
+    assert(inputOf(world.geminiCalls[1]).includes(TITLE_REQUEST), "the next answer is asked for a title");
+    assertEquals(next.conversation.title, "The Shepherd Who Stays");
+    assertEquals(next.answer.welcome, false);
+    assertEquals(Object.keys(scholarRows(world, NEXT)[0].content as Row), ["blocks"]);
+  }),
+);
+
+Deno.test(
+  "scholar-v3: a heavy conversation never has a welcome, whatever the writer says",
+  flow(async (world) => {
+    world.screenQueue.push(crisis());
+    world.geminiQueue.push(geminiOk(heavyAnswer({ welcome: true })));
+    const body = await ok(await send(world, typed(TIRED)));
+    assertEquals(body.answer.isHeavy, true);
+    assertEquals(body.answer.welcome, false);
+    assert(!("welcome" in (scholarRows(world)[0].content as Row)));
   }),
 );
 
@@ -397,6 +435,28 @@ Deno.test(
     const body = await ok(await send(world, typed(TIRED, { conversationId: SECOND, messageId: NEXT })));
     assertEquals(world.geminiCalls.slice(1).map(modelOf), ["gemini-heavy-model"]);
     assertEquals(textBlock(body.answer), HEAVY_REPLY);
+  }),
+);
+
+Deno.test(
+  "the heavy writer reads scholar-v2's instruction: the welcome additions go to the everyday writer only",
+  flow(async (world) => {
+    const systemOf = (call: Recorded) => String((call.json as Row).system_instruction);
+    // Screen first, so a flagged message reaches the heavy writer alone.
+    Deno.env.set("SCHOLAR_SCREEN_FIRST", "true");
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    await ok(await send(world, typed()));
+    world.screenQueue.push(crisis());
+    world.geminiQueue.push(geminiOk(heavyAnswer()));
+    await ok(await send(world, typed(TIRED, { conversationId: SECOND, messageId: NEXT })));
+    assertEquals(world.geminiCalls.map(modelOf), ["gemini-scholar-model", "gemini-heavy-model"]);
+    const [everyday, heavy] = world.geminiCalls.map(systemOf);
+    assertEquals(everyday, buildScholarInstruction());
+    assertEquals(heavy, buildScholarInstruction({ heavy: true }));
+    for (const welcome of ["only greets you", "nothing in the conversation says what for", "- welcome: true"]) {
+      assert(everyday.includes(welcome), welcome);
+      assert(!heavy.includes(welcome), welcome);
+    }
   }),
 );
 

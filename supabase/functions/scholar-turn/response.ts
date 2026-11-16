@@ -49,6 +49,7 @@ export function toScholarMessage(row: MessageRow): ScholarMessage {
     isHeavy: row.is_heavy,
     // An answer that carries a help line shows the one saved with it; one saved before 2026-11-11 shows the 988 line.
     helpLine: row.role === "scholar" && row.is_heavy ? (isHelpKind(help) ? help : "crisis") : null,
+    welcome: row.role === "scholar" && !row.is_heavy && row.content?.welcome === true,
     createdAt: row.created_at,
   };
 }
