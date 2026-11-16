@@ -43,13 +43,13 @@ function withSetting(agent: Record<string, unknown>, path: string, value: unknow
   return copy;
 }
 
-Deno.test("setup: every voice's agent passes all twenty-six checks as it is written, and the eight differ only in their voice", () => {
+Deno.test("setup: every voice's agent passes all twenty-seven checks as it is written, and the eight differ only in their voice", () => {
   const stripped = VOICES.map((voice) => {
     const config = agentConfig(TARGET, SECRET_ID, voice);
     const checks = checksFor(config, TARGET, SECRET_ID, voice);
-    assertEquals(checks.length, 26);
+    assertEquals(checks.length, 27);
     assertEquals(checks.filter(([, ok]) => !ok), [], voice.key);
-    assertEquals(new Set(checks.map(([label]) => label)).size, 26, "every check has its own name");
+    assertEquals(new Set(checks.map(([label]) => label)).size, 27, "every check has its own name");
     assertEquals(readPath(config, "conversation_config.tts.voice_id"), voice.elevenLabsVoiceId);
     assertEquals(config.name, `GraceHush Scholar: ${voice.key} (development)`);
     assertEquals(config.tags, ["gracehush", "development", voice.key]);
@@ -102,6 +102,7 @@ Deno.test("setup: each setting that keeps a talk safe has a check that notices w
   const passNothing = "the phone can pass nothing but the signed session";
   const pinned = "the speech model and its settings are pinned";
   const backstop = "ends a talk at 30 minutes with our own line";
+  const captions = "sends the phone the words for its captions";
   const cases: [path: string, value: unknown, expected: string[]][] = [
     [`${prompt}.llm`, "gemini-2.5-flash", ["the brain is the custom LLM"]],
     [`${prompt}.custom_llm.url`, "https://elsewhere.example/v1", ["the custom LLM is our endpoint"]],
@@ -146,6 +147,10 @@ Deno.test("setup: each setting that keeps a talk safe has a check that notices w
     [`${turn}.noisy_environment_detection`, true, ["never tells someone to move somewhere quieter"]],
     ["conversation_config.conversation.max_duration_seconds", 600, [backstop]],
     ["conversation_config.agent.max_conversation_duration_message", "", [backstop]],
+    // The captions (2026-11-16).
+    ["conversation_config.conversation.client_events", ["audio", "user_transcript"], [captions]],
+    ["conversation_config.conversation.client_events", ["user_transcript", "tentative_user_transcript"], [captions]],
+    ["conversation_config.conversation.client_events", undefined, [captions]],
   ];
   for (const [path, value, expected] of cases) {
     assertEquals(failing(withSetting(good, path, value)), expected, path);

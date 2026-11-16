@@ -35,11 +35,15 @@ export const SPEECH_OUTPUT_FORMAT = "pcm_48000";
 // The words ElevenLabs' speech-to-text listens harder for (its documented keyword boost): the stop words a person says over
 // Scholar, and Scholar's name. On 2026-11-14 a spoken "Wait." came out as "Weight." three times of three (stop.ts also takes it).
 export const ASR_KEYWORDS: readonly string[] = ["wait", "stop", "pause", "go on", "Scholar"];
-const CLIENT_EVENTS = [
+// The events ElevenLabs sends the phone in a talk. The Talk screen's captions read three of them: "tentative_user_transcript"
+// (the person's words while they are still speaking, 2026-11-16), "user_transcript" (their words once the turn is over) and
+// "audio", whose alignment times each character Scholar says; nothing else in a talk is drawn or kept.
+export const CLIENT_EVENTS: readonly string[] = [
   "conversation_initiation_metadata",
   "audio",
   "interruption",
   "user_transcript",
+  "tentative_user_transcript",
   "agent_response",
   "agent_response_correction",
   "vad_score",
@@ -288,6 +292,14 @@ export function checksFor(agent: unknown, target: AgentTarget, secretId: string,
     [
       "never tells someone to move somewhere quieter",
       readPath(agent, "conversation_config.turn.noisy_environment_detection") === false,
+    ],
+    [
+      "sends the phone the words for its captions",
+      ["audio", "user_transcript", "tentative_user_transcript"].every((event) =>
+        (readPath(agent, "conversation_config.conversation.client_events") as unknown[] | undefined)?.includes(
+          event,
+        ) === true
+      ),
     ],
     [
       "ends a talk at 30 minutes with our own line",
