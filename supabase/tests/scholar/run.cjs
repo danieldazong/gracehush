@@ -736,23 +736,34 @@ async function conversationChecks() {
 
 // ================================================================== the rows
 async function rowChecks() {
-  await test("rows: an answer is shared as its words, passages and prayer in the saved order, never the person's message; nothing to share is null", async (w) => {
+  await test("rows: an answer is shared as Scholar's words and prayer first, then its passages, never the person's message; nothing to share is null", async (w) => {
     const { answerShareText } = w.use("@/utils/scholarRows");
     const { copy } = w.use("@/constants/copy");
-    const scripture = (verified, words) => ({ reference: "Psalm 23:1–2", text: words, translation: "BSB", verified });
+    const scripture = (verified, words, reference = "Psalm 23:1–2") => ({ reference, text: words, translation: "BSB", verified });
     const answer = (blocks) => ({
       id: "a1", conversationId: CONV, role: "scholar", replyTo: "u1", inputType: null, status: "ready", errorCode: null,
       blocks, isHeavy: false, helpLine: null, createdAt: new Date(BASE).toISOString(),
     });
+    // Saved with the lead passage first, as the bubble draws it: the share still opens on Scholar's own words.
     const body = answerShareText(
       answer([
         { type: "passage", scripture: scripture(true, "The LORD is my shepherd; I shall not want.") },
         { type: "text", text: " First.\n\nSecond. " },
+        { type: "passage", scripture: scripture(true, "He restores my soul.", "Psalm 23:3") },
         { type: "prayer", text: "Lord, stay near." },
       ]),
     );
-    assert.equal(body, "“The LORD is my shepherd; I shall not want.”\n— Psalm 23:1–2 (BSB)\n\nFirst.\n\nSecond.\n\n“Lord, stay near. Amen.”");
+    assert.equal(
+      body,
+      "First.\n\nSecond.\n\n“Lord, stay near. Amen.”\n\n“The LORD is my shepherd; I shall not want.”\n— Psalm 23:1–2 (BSB)\n\n“He restores my soul.”\n— Psalm 23:3 (BSB)",
+    );
+    assert.ok(body.startsWith("First."), "the share sheet's preview is Scholar's words, not the verse");
     assert.equal(copy.scholar.share.message(body), `${body}\n\nShared from GraceHush`);
+    // An answer that is only a verified passage still shares it.
+    assert.equal(
+      answerShareText(answer([{ type: "passage", scripture: scripture(true, "The LORD is my shepherd; I shall not want.") }])),
+      "“The LORD is my shepherd; I shall not want.”\n— Psalm 23:1–2 (BSB)",
+    );
     // A passage that is not verified shares nothing of itself, and an answer with nothing to share is null.
     assert.equal(answerShareText(answer([{ type: "passage", scripture: scripture(false, null) }])), null);
     assert.equal(answerShareText(answer([{ type: "passage", scripture: scripture(true, "") }, { type: "text", text: "   " }])), null);

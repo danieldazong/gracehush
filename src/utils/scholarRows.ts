@@ -118,23 +118,24 @@ export function answerCount(messages: ScholarMessage[]): number {
   return messages.filter((message) => message.role === "scholar" && message.status === "ready").length;
 }
 
-// What leaves the app when an answer is shared (2026-11-15): Scholar's words, its passages (the verified text with its reference
-// and translation) and its prayer, in the order they were saved, and never the person's own message. A passage that is not
-// verified shares nothing of itself. null when nothing in the answer can be shared.
+// What leaves the app when an answer is shared (2026-11-15, reordered 2026-11-16): Scholar's own words first (its text and its
+// prayer, in the order they were saved), then the passages it read (the verified text with its reference and translation, in
+// their saved order), and never the person's own message. The words lead because they are the answer: led by the verse, the share
+// sheet's preview and the first thing a contact read was the passage, which the owner read as a different response. A passage
+// that is not verified shares nothing of itself. null when nothing in the answer can be shared.
 export function answerShareText(message: ScholarMessage): string | null {
-  const parts: string[] = [];
+  const words: string[] = [];
+  const passages: string[] = [];
   for (const block of message.blocks) {
-    if (block.type === "text") {
-      const words = block.text.trim();
-      if (words.length > 0) parts.push(words);
-    } else if (block.type === "passage") {
+    if (block.type === "passage") {
       const { scripture } = block;
       if (scripture.verified && scripture.text !== null && scripture.text.trim().length > 0) {
-        parts.push(`${quoteVerse(scripture.text)}\n— ${scripture.reference} (${scripture.translation})`);
+        passages.push(`${quoteVerse(scripture.text)}\n— ${scripture.reference} (${scripture.translation})`);
       }
     } else if (block.text.trim().length > 0) {
-      parts.push(copy.reflection.closingPrayer(block.text.trim()));
+      words.push(block.type === "text" ? block.text.trim() : copy.reflection.closingPrayer(block.text.trim()));
     }
   }
+  const parts = [...words, ...passages];
   return parts.length === 0 ? null : parts.join("\n\n");
 }
