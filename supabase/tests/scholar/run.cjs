@@ -418,6 +418,22 @@ async function conversationChecks() {
     handle.unmount();
   });
 
+  await test("conversation: the person's own messages are marked sent this visit, apart from the answers, and a failed turn announces nothing", async (w) => {
+    w.server.state.functions["scholar-turn"].push(() => json(503, { error: { code: "AI_UNAVAILABLE", message: "x", requestId: "r" } }));
+    const handle = renderConversation(w, {});
+    await until(handle, (s) => s.phase === "ready", "ready");
+    assert.deepEqual(handle.result.current.sentIds, [], "nothing sent yet");
+    handle.result.current.send(QUESTION);
+    const failed = await until(handle, (s) => !s.sending && s.messages[0]?.status === "failed", "the failure");
+    assert.deepEqual(failed.sentIds, [failed.messages[0].id], "the message fades in when it is sent");
+    assert.deepEqual(failed.fresh, [], "no answer arrived, so no answer is announced");
+    failed.retry(failed.messages[0].id);
+    const answered = await until(handle, (s) => !s.sending && s.messages.length === 2, "the retried answer");
+    assert.deepEqual(answered.sentIds, [answered.messages[0].id], "a retry does not list the message twice");
+    assert.deepEqual(answered.fresh, [answered.messages[1].id], "the answer is the one that is announced");
+    handle.unmount();
+  });
+
   await test("conversation: the free limit holds a message with Try again alone, and the heads-up follows the server's numbers", async (w) => {
     w.server.state.scholarFreeLimit = 3;
     const handle = renderConversation(w, {});
@@ -662,6 +678,32 @@ async function conversationChecks() {
 
 // ================================================================== the rows
 async function rowChecks() {
+  await test("rows: an answer is shared as its words, passages and prayer in the saved order, never the person's message; nothing to share is null", async (w) => {
+    const { answerShareText } = w.use("@/utils/scholarRows");
+    const { copy } = w.use("@/constants/copy");
+    const scripture = (verified, words) => ({ reference: "Psalm 23:1–2", text: words, translation: "BSB", verified });
+    const answer = (blocks) => ({
+      id: "a1", conversationId: CONV, role: "scholar", replyTo: "u1", inputType: null, status: "ready", errorCode: null,
+      blocks, isHeavy: false, helpLine: null, createdAt: new Date(BASE).toISOString(),
+    });
+    const body = answerShareText(
+      answer([
+        { type: "passage", scripture: scripture(true, "The LORD is my shepherd; I shall not want.") },
+        { type: "text", text: " First.\n\nSecond. " },
+        { type: "prayer", text: "Lord, stay near." },
+      ]),
+    );
+    assert.equal(body, "“The LORD is my shepherd; I shall not want.”\n— Psalm 23:1–2 (BSB)\n\nFirst.\n\nSecond.\n\n“Lord, stay near. Amen.”");
+    assert.equal(copy.scholar.share.message(body), `${body}\n\nShared from GraceHush`);
+    // A passage that is not verified shares nothing of itself, and an answer with nothing to share is null.
+    assert.equal(answerShareText(answer([{ type: "passage", scripture: scripture(false, null) }])), null);
+    assert.equal(answerShareText(answer([{ type: "passage", scripture: scripture(true, "") }, { type: "text", text: "   " }])), null);
+    assert.equal(
+      answerShareText(answer([{ type: "passage", scripture: scripture(false, "Words that must not leave unverified") }, { type: "text", text: "Kept." }])),
+      "Kept.",
+    );
+  });
+
   await test("rows: the AI reminder opens every conversation and comes again after three hours; answers follow their messages", async (w) => {
     const { buildConversationRows } = w.use("@/utils/scholarRows");
     assert.deepEqual(buildConversationRows([], null).map((row) => row.kind), ["reminder"], "a new conversation starts with it");
@@ -820,6 +862,78 @@ function sourceChecks() {
     assert.match(hook, /if \(!saved\.isHeavy && !answer\.isHeavy\) \{/, "events only outside a heavy conversation");
     const composer = read("src/screens/scholar/ConversationComposer.tsx");
     assert.ok(!/usage|remaining|LIMIT/.test(composer), "the composer knows no limit");
+  });
+
+  sourceCheck("chat: the person's bubble is plum and the answer's is a rose tint with the small corner on the other side; only what was sent or arrived this visit fades in", () => {
+    const user = read("src/components/scholar/UserMessage.tsx");
+    assert.match(user, /className="max-w-\[80%\] bg-plum px-4 py-3"/, "plum, at most 80% wide");
+    assert.match(user, /borderBottomRightRadius: radii\.bubbleTail/, "the small corner is the sender's");
+    assert.ok(!/border-petal|linen-deep/.test(user), "no petal border or linen-deep box any more");
+    assert.match(user, /return animate \? \(\s*<FadeIn rise=\{8\} duration=\{150\}>/, "only a message sent this visit fades in");
+    const answer = read("src/components/scholar/ScholarAnswer.tsx");
+    assert.match(answer, /className="max-w-\[92%\] gap-3 self-start border border-rose\/50 bg-rose\/25 px-4 pb-1 pt-3" style=\{styles\.bubble\}/, "the answer sits in a rose-tinted bubble of its own, at most 92% wide");
+    assert.match(answer, /borderBottomLeftRadius: radii\.bubbleTail/, "the small corner is the answer's, bottom-left: the mirror of the person's");
+    assert.match(answer, /<View className="h-px bg-plum\/10" \/>/, "a hairline above the icon row");
+    assert.equal((answer.match(/bg-plum"/g) ?? []).length, 1, "the only plum fill in an answer is Listen's playing circle");
+    assert.match(answer, /<ScriptureCard scripture=\{block\.scripture\} tone="white" \/>/, "the verse card is white inside the tint");
+    assert.match(answer, /rounded-xl border border-petal bg-card p-3/, "the prayer panel is white inside the tint");
+    assert.match(answer, /<FadeIn rise=\{10\} duration=\{240\}>\s*\{bubble\}/, "the bubble arrives as one piece");
+    assert.ok(!/BLOCK_DELAY_MS/.test(answer), "no block-by-block stagger inside the bubble");
+    const scripture = read("src/components/ScriptureCard.tsx");
+    assert.match(scripture, /tone === "white" \? "card" : "card card--blush"/, "the card is blush unless asked to be white");
+    assert.match(scripture, /\{ scripture, tone = "blush" \}: ScriptureCardProps/, "Reflection's card stays blush: the default is blush");
+    assert.match(answer, /text-label-md text-plum-deep">\{copy\.scholar\.name\}/, "the name in sentence case");
+    assert.ok(!/eyebrow|copy\.scholar\.listen\./.test(answer), "no uppercase eyebrow, no word label on Listen");
+    const screen = read("src/screens/scholar/ConversationScreen.tsx");
+    assert.match(screen, /animate=\{chat\.sentIds\.includes\(item\.message\.id\)\}/, "a message fades in only when sent this visit");
+    assert.match(screen, /animate=\{chat\.fresh\.includes\(item\.message\.id\)\}/, "an answer only when it arrived this visit");
+    assert.match(screen, /if \(item\.kind === "waiting"\) return <TypingIndicator \/>;/, "the typing indicator waits for the answer");
+    assert.ok(!/ActivityIndicator/.test(screen), "no spinner row any more");
+  });
+
+  sourceCheck("chat: Share is the system sheet with the answer's words only, never in a heavy conversation or under a help line", () => {
+    const screen = read("src/screens/scholar/ConversationScreen.tsx");
+    assert.match(
+      screen,
+      /onShare=\{chat\.heavy \|\| item\.message\.helpLine !== null \? null : \(\) => void shareAnswer\(item\.message\)\}/,
+      "offered only outside a heavy conversation and under an answer with no help line",
+    );
+    assert.match(screen, /const body = answerShareText\(message\);\s+if \(body === null\) return;/, "what is shared is built from the answer alone");
+    assert.match(screen, /await Share\.share\(\{ message: copy\.scholar\.share\.message\(body\) \}\);/);
+    assert.ok(!/haptics/.test(screen), "no haptic");
+    assert.ok(!/track\(/.test(screen), "no event for a share");
+    const rows = read("src/utils/scholarRows.ts");
+    const builder = rows.slice(rows.indexOf("export function answerShareText"));
+    assert.ok(!/role === "user"|messageText\(/.test(builder), "the builder never reads the person's words");
+    assert.match(screen, /numberOfLines=\{1\} className="text-body-sm text-mauve"/, "the title sits under Scholar in the header");
+  });
+
+  sourceCheck("chat: the typing indicator is three dots on the native driver, still under Reduce Motion, and stops with the screen", () => {
+    const dots = read("src/components/scholar/TypingIndicator.tsx");
+    assert.match(dots, /const DOT_COUNT = 3;/);
+    assert.match(dots, /const DOT_STAGGER_MS = 150;/);
+    assert.match(dots, /const PULSE_MS = 600;/);
+    assert.match(dots, /const REST_MS = 300;/);
+    assert.equal((dots.match(/useNativeDriver: true/g) ?? []).length, 1, "one timing helper, on the native driver");
+    assert.match(dots, /if \(reduceMotion\) return undefined;/, "no animation under Reduce Motion");
+    assert.match(dots, /reduceMotion\s+\? \{ opacity: STILL_OPACITY \}/, "still dots under Reduce Motion");
+    assert.match(dots, /return \(\) => loop\.stop\(\);/, "the loop stops when the indicator goes");
+    assert.match(dots, /accessibilityLabel=\{copy\.scholar\.a11y\.writing\}/, "one element that says Scholar is writing");
+    assert.match(dots, /h-9 w-14 flex-row items-center justify-center gap-1\.5 rounded-full border border-rose\/50 bg-rose\/25/, "the pill wears the answer's tint");
+    assert.ok(!/ActivityIndicator/.test(dots), "no spinner");
+  });
+
+  sourceCheck("composer: one white pill with the microphone bare inside it only while the field is empty; one circle outside, Send or Talk", () => {
+    const composer = read("src/screens/scholar/ConversationComposer.tsx");
+    assert.equal((composer.match(/rounded-hero border border-petal bg-card/g) ?? []).length, 3, "the Type, take and idle rows are one pill");
+    assert.ok(!/rounded-input/.test(composer), "no 12-radius box any more");
+    const type = composer.slice(composer.indexOf('{mode === "type" ? ('), composer.indexOf("<SpeakRow"));
+    const mic = type.indexOf("copy.scholar.a11y.speak");
+    const slot = type.indexOf('<View className="h-12 justify-center">');
+    assert.ok(mic > 0 && slot > mic, "the microphone is inside the pill, before the slot outside it");
+    assert.match(type, /\{hasText \? \(\s*<View className="w-4" \/>\s*\) : \(\s*<Pressable/, "the microphone only while the field is empty");
+    assert.match(type, /\) : onTalk !== null \? \(\s*<View className="h-12 justify-center">\s*<TalkButton onPress=\{onTalk\} disabled=\{busy\} \/>/, "Talk outside the pill while the field is empty");
+    assert.ok(!/border-petal bg-card">\s*<Icon name=\{icons\.mic\}/.test(type), "no bordered microphone circle");
   });
 
   sourceCheck("player: it never touches the lock screen and never holds the session; a take stops it", () => {

@@ -144,6 +144,9 @@ export function useConversation(params: Params) {
   const [breakNote, setBreakNote] = useState(false);
   // The answers that arrived during this visit: they fade in, and "Scholar answered" is announced for each one.
   const [fresh, setFresh] = useState<string[]>([]);
+  // The person's own messages sent during this visit: they fade in (2026-11-15). Kept apart from `fresh` on purpose: that one
+  // also drives "Scholar answered", which a message that got no answer must not announce.
+  const [sentIds, setSentIds] = useState<string[]>([]);
 
   // The latest values for the callbacks below, written only in callbacks.
   const list = useRef<ScholarMessage[]>([]);
@@ -287,6 +290,7 @@ export function useConversation(params: Params) {
       busy.current = true;
       setNotice(null);
       setSendingId(request.messageId);
+      setSentIds((ids) => (ids.includes(request.messageId) ? ids : [...ids, request.messageId]));
       const previous = list.current.find((message) => message.id === request.messageId);
       // A retry moves the message to the end, as the server does.
       const others = list.current.filter((message) => message.id !== request.messageId);
@@ -493,6 +497,7 @@ export function useConversation(params: Params) {
     headsUp,
     breakNote: breakNote && !heavy,
     fresh,
+    sentIds,
     send,
     sendSpoken,
     retry,

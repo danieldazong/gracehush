@@ -8,13 +8,15 @@ const { scripture: scriptureCopy } = copy.reflection;
 
 type ScriptureCardProps = {
   scripture: Scripture;
+  // White inside a tinted bubble (Scholar's answer); blush everywhere else.
+  tone?: "blush" | "white";
 };
 
 // The verse renders only for verified scripture. An unverified passage shows its reference and a calm
 // note: its text is null in the data, and never shown. The verse is set as one flowing paragraph
 // (flowVerse): the Bible's own lines of poetry would wrap at the wrong places in a card this narrow,
 // and the breaks are balanced so that no word is left alone on a line.
-export function ScriptureCard({ scripture }: ScriptureCardProps) {
+export function ScriptureCard({ scripture, tone = "blush" }: ScriptureCardProps) {
   const { reference, text, verified } = scripture;
   const flowed = verified && text ? flowVerse(text) : null;
 
@@ -22,7 +24,7 @@ export function ScriptureCard({ scripture }: ScriptureCardProps) {
     <View
       accessible
       accessibilityLabel={scriptureCopy.a11y(reference, flowed ?? scriptureCopy.confirming)}
-      className="card card--blush"
+      className={tone === "white" ? "card" : "card card--blush"}
     >
       {/* No flex-1 on the reference, so the pill drops under it when they do not fit side by side. */}
       <View className="flex-row flex-wrap items-center justify-between gap-x-3 gap-y-2">

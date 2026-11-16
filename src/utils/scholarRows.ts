@@ -1,5 +1,7 @@
 import { SCHOLAR_AI_REMINDER_MS } from "@/constants/app";
+import { copy } from "@/constants/copy";
 import type { HelpKind, ScholarConversation, ScholarMessage } from "@/types";
+import { quoteVerse } from "@/utils/format";
 
 // What the Conversation screen draws (step 38), worked out from the messages alone, so it is the same on every visit and testable
 // without a screen. Pure: no React, no clock but the one passed in.
@@ -114,4 +116,25 @@ export function newestHelpLine(messages: ScholarMessage[], fallback: HelpKind | 
 // How many answers the conversation holds, for the break note.
 export function answerCount(messages: ScholarMessage[]): number {
   return messages.filter((message) => message.role === "scholar" && message.status === "ready").length;
+}
+
+// What leaves the app when an answer is shared (2026-11-15): Scholar's words, its passages (the verified text with its reference
+// and translation) and its prayer, in the order they were saved, and never the person's own message. A passage that is not
+// verified shares nothing of itself. null when nothing in the answer can be shared.
+export function answerShareText(message: ScholarMessage): string | null {
+  const parts: string[] = [];
+  for (const block of message.blocks) {
+    if (block.type === "text") {
+      const words = block.text.trim();
+      if (words.length > 0) parts.push(words);
+    } else if (block.type === "passage") {
+      const { scripture } = block;
+      if (scripture.verified && scripture.text !== null && scripture.text.trim().length > 0) {
+        parts.push(`${quoteVerse(scripture.text)}\n— ${scripture.reference} (${scripture.translation})`);
+      }
+    } else if (block.text.trim().length > 0) {
+      parts.push(copy.reflection.closingPrayer(block.text.trim()));
+    }
+  }
+  return parts.length === 0 ? null : parts.join("\n\n");
 }

@@ -59,6 +59,9 @@ export const radii = {
   card: 16,
   hero: 24,
   sheet: 24,
+  // The person’s bubble in a Scholar conversation: round on three corners, a small one at the sender’s bottom corner.
+  bubble: 20,
+  bubbleTail: 6,
   full: 9999,
 } as const;
 

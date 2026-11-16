@@ -1,14 +1,13 @@
-import { Image } from "expo-image";
 import type { SymbolViewProps } from "expo-symbols";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -27,10 +26,10 @@ import { ConversationNotice } from "@/components/scholar/ConversationNotice";
 import { ScholarAnswer, type ListenView } from "@/components/scholar/ScholarAnswer";
 import { SuggestionChips } from "@/components/scholar/SuggestionChips";
 import { TalkSheet, type TalkSheetStep } from "@/components/scholar/TalkSheet";
+import { TypingIndicator } from "@/components/scholar/TypingIndicator";
 import { UserMessage } from "@/components/scholar/UserMessage";
 import { MODAL_HANDOFF_FALLBACK_MS, PRIVACY_POLICY_URL, SCHOLAR_TALK_LOW_S, SUPPORT_EMAIL } from "@/constants/app";
 import { copy } from "@/constants/copy";
-import { images } from "@/constants/images";
 import { colors, layout, shadows } from "@/constants/theme";
 import { useAiPermission, useAiWordingNote, useScholarVoice, useVoicePermission } from "@/hooks/useAiPermission";
 import { useAnnounce } from "@/hooks/useAnnounce";
@@ -51,7 +50,7 @@ import { getTalkState, resetTalk, subscribeTalk } from "@/services/scholarTalk";
 import { voiceSupported } from "@/services/voiceSupport";
 import { selectIsOnline, useOfflineStore } from "@/store/offlineStore";
 import type { ScholarMessage } from "@/types";
-import type { ConversationRow } from "@/utils/scholarRows";
+import { answerShareText, type ConversationRow } from "@/utils/scholarRows";
 
 import { AiPermissionSheet } from "../journal/AiPermissionSheet";
 import { ConversationComposer } from "./ConversationComposer";
@@ -105,6 +104,18 @@ function listenView(state: ScholarListenState, messageId: string): ListenView {
     };
   }
   return { phase: state.phase };
+}
+
+// The answer's words and passages go through the system share sheet, which has Copy in it (2026-11-15). Never the person's own
+// message. The sheet failing to open shares nothing, and there is nothing to show.
+async function shareAnswer(message: ScholarMessage) {
+  const body = answerShareText(message);
+  if (body === null) return;
+  try {
+    await Share.share({ message: copy.scholar.share.message(body) });
+  } catch {
+    // The share sheet could not open.
+  }
 }
 
 // A conversation with Scholar (step 38): the header, the messages and their answers, and the composer pinned above the keyboard.
@@ -304,23 +315,12 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
           message={item.message}
           failure={item.failure}
           retryDisabled={chat.sending}
+          animate={chat.sentIds.includes(item.message.id)}
           onRetry={() => chat.retry(item.message.id)}
         />
       );
     }
-    if (item.kind === "waiting") {
-      return (
-        <View className="flex-row items-center gap-2">
-          <View className="size-8 items-center justify-center rounded-full border border-petal bg-blush">
-            <Image source={images.logoMark} contentFit="contain" style={styles.mark} />
-          </View>
-          <ActivityIndicator size="small" color={colors.plum} />
-          <Text accessibilityLiveRegion="polite" className="text-body-sm text-mauve">
-            {copy.scholar.waiting}
-          </Text>
-        </View>
-      );
-    }
+    if (item.kind === "waiting") return <TypingIndicator />;
     return (
       <View className="gap-3">
         <ScholarAnswer
@@ -329,6 +329,7 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
           listen={listenView(listen, item.message.id)}
           onListen={() => void onListen(item.message)}
           onStopListening={stopScholarAudio}
+          onShare={chat.heavy || item.message.helpLine !== null ? null : () => void shareAnswer(item.message)}
           onDelete={item.message.helpLine === "abuse" ? openDelete : null}
         />
         {item.newest && !chat.heavy && !chat.sending ? (
@@ -337,6 +338,10 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
       </View>
     );
   }
+
+  // The conversation's title under "Scholar" once it has one (a heavy conversation has none).
+  const title = chat.conversation?.title?.trim() ?? "";
+  const conversationTitle = title.length > 0 ? title : null;
 
   const header = (
     <View>
@@ -351,9 +356,16 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
             <Icon name={icons.back} size={22} color={colors.ink} />
           </View>
         </Pressable>
-        <Text accessibilityRole="header" className="flex-1 text-section text-plum-deep">
-          {copy.scholar.header}
-        </Text>
+        <View className="flex-1">
+          <Text accessibilityRole="header" className="text-section text-plum-deep">
+            {copy.scholar.header}
+          </Text>
+          {conversationTitle !== null ? (
+            <Text numberOfLines={1} className="text-body-sm text-mauve">
+              {conversationTitle}
+            </Text>
+          ) : null}
+        </View>
         {/* The readers: in a heavy conversation help stays within reach for the rest of it. */}
         {chat.heavy ? (
           <Pressable
@@ -605,7 +617,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   list: { paddingTop: 16, paddingBottom: 16 },
   gap: { height: 20 },
-  mark: { width: 18, height: 18 },
   pressed: { opacity: 0.6 },
   hidden: { position: "absolute", width: 1, height: 1, opacity: 0.01 },
 });

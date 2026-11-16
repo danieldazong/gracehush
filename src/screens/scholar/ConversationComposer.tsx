@@ -44,8 +44,8 @@ type ConversationComposerProps = {
   onTalk?: (() => void) | null;
 };
 
-// Scholar's composer (step 38), pinned under the conversation: Type (a field and one button: a ghost mic while the field is
-// empty, a plum send once there are words) and Speak (a take of at most two minutes, sent as a recording that the server
+// Scholar's composer (step 38, restyled 2026-11-15), pinned under the conversation: Type (a white pill with the microphone bare
+// inside it while the field is empty, and one plum circle outside it: Talk while the field is empty, Send once there are words) and Speak (a take of at most two minutes, sent as a recording that the server
 // transcribes and screens). Never disabled by a limit: a message is always sent, because the server screens it first and answers
 // a heavy one whatever the count. The AI line under it is always on screen. Since step 39 a plum Talk button sits beside the mic
 // while the field is empty, and starts a live talk. It is in the Speak row too, while no take is under way (2026-11-15: the
@@ -73,38 +73,27 @@ export function ConversationComposer({
     <View className="gap-1.5 border-t border-petal bg-linen px-4 pb-2 pt-2.5">
       {mode === "type" ? (
         <View className="flex-row items-end gap-2">
-          <TextInput
-            ref={inputRef}
-            accessibilityLabel={copy.scholar.a11y.message}
-            className="flex-1 rounded-input border border-petal bg-card px-4 text-body text-ink"
-            style={styles.input}
-            value={text}
-            onChangeText={setText}
-            multiline
-            textAlignVertical="center"
-            autoCapitalize="sentences"
-            autoCorrect
-            maxLength={SCHOLAR_MAX_MESSAGE_LENGTH}
-            placeholder={copy.scholar.input}
-            placeholderTextColor={colors.mauve}
-            keyboardAppearance="light"
-            underlineColorAndroid="transparent"
-          />
-          {hasText ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={copy.scholar.a11y.send}
-              accessibilityState={{ disabled: busy }}
-              disabled={busy}
-              onPress={sendText}
-              style={({ pressed }) => [busy && styles.disabled, pressed && styles.pressed]}
-            >
-              <View className="size-11 items-center justify-center rounded-full bg-plum">
-                <Icon name={icons.send} size={20} color={colors.card} />
-              </View>
-            </Pressable>
-          ) : (
-            <>
+          <View className="min-h-12 flex-1 flex-row items-end rounded-hero border border-petal bg-card pl-4">
+            <TextInput
+              ref={inputRef}
+              accessibilityLabel={copy.scholar.a11y.message}
+              className="flex-1 text-body text-ink"
+              style={styles.input}
+              value={text}
+              onChangeText={setText}
+              multiline
+              textAlignVertical="center"
+              autoCapitalize="sentences"
+              autoCorrect
+              maxLength={SCHOLAR_MAX_MESSAGE_LENGTH}
+              placeholder={copy.scholar.input}
+              placeholderTextColor={colors.mauve}
+              keyboardAppearance="light"
+              underlineColorAndroid="transparent"
+            />
+            {hasText ? (
+              <View className="w-4" />
+            ) : (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={copy.scholar.a11y.speak}
@@ -113,13 +102,32 @@ export function ConversationComposer({
                 onPress={() => setMode("speak")}
                 style={({ pressed }) => [busy && styles.disabled, pressed && styles.pressed]}
               >
-                <View className="size-11 items-center justify-center rounded-full border border-petal bg-card">
-                  <Icon name={icons.mic} size={20} color={colors.plum} />
+                <View className="h-[46px] w-11 items-center justify-center">
+                  <Icon name={icons.mic} size={22} color={colors.mauve} />
                 </View>
               </Pressable>
-              {onTalk !== null ? <TalkButton onPress={onTalk} disabled={busy} /> : null}
-            </>
-          )}
+            )}
+          </View>
+          {hasText ? (
+            <View className="h-12 justify-center">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={copy.scholar.a11y.send}
+                accessibilityState={{ disabled: busy }}
+                disabled={busy}
+                onPress={sendText}
+                style={({ pressed }) => [busy && styles.disabled, pressed && styles.pressed]}
+              >
+                <View className="size-11 items-center justify-center rounded-full bg-plum">
+                  <Icon name={icons.send} size={20} color={colors.card} />
+                </View>
+              </Pressable>
+            </View>
+          ) : onTalk !== null ? (
+            <View className="h-12 justify-center">
+              <TalkButton onPress={onTalk} disabled={busy} />
+            </View>
+          ) : null}
         </View>
       ) : (
         <SpeakRow
@@ -257,27 +265,29 @@ function SpeakRow({ takeId, busy, onType, onSent, onSendSpoken, onTalk }: SpeakR
     return (
       <View className="gap-1">
         <View className="flex-row items-center gap-2">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={copy.scholar.a11y.discardRecording}
-            disabled={sending}
-            onPress={() => void discard()}
-            style={({ pressed }) => pressed && styles.pressed}
-          >
-            <View className="size-11 items-center justify-center rounded-full border border-petal bg-card">
-              <Icon name={icons.close} size={18} color={colors.ink} />
+          <View className="min-h-12 flex-1 flex-row items-center rounded-hero border border-petal bg-card">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={copy.scholar.a11y.discardRecording}
+              disabled={sending}
+              onPress={() => void discard()}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <View className="size-11 items-center justify-center">
+                <Icon name={icons.close} size={20} color={colors.ink} />
+              </View>
+            </Pressable>
+            <View
+              accessible
+              accessibilityLabel={copy.scholar.a11y.recording(formatDurationSpoken(shownMs))}
+              className="flex-1 flex-row items-center gap-2 pr-4"
+            >
+              {recording ? <View className="size-2 rounded-full bg-crisis" /> : null}
+              <Text className="text-label-md text-ink" style={styles.timer}>
+                {elapsed}
+              </Text>
+              <Waveform levels={levels} active={recording} size="compact" />
             </View>
-          </Pressable>
-          <View
-            accessible
-            accessibilityLabel={copy.scholar.a11y.recording(formatDurationSpoken(shownMs))}
-            className="flex-1 flex-row items-center gap-2"
-          >
-            {recording ? <View className="size-2 rounded-full bg-crisis" /> : null}
-            <Text className="text-label-md text-ink" style={styles.timer}>
-              {elapsed}
-            </Text>
-            <Waveform levels={levels} active={recording} size="compact" />
           </View>
           <Pressable
             accessibilityRole="button"
@@ -315,17 +325,19 @@ function SpeakRow({ takeId, busy, onType, onSent, onSendSpoken, onTalk }: SpeakR
   return (
     <View className="gap-1">
       <View className="flex-row items-center gap-2">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={copy.scholar.a11y.type}
-          onPress={onType}
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <View className="size-11 items-center justify-center rounded-full border border-petal bg-card">
-            <Icon name={icons.keyboard} size={20} color={colors.plum} />
-          </View>
-        </Pressable>
-        <Text className="flex-1 text-center text-body text-mauve">{copy.scholar.speak.tap}</Text>
+        <View className="min-h-12 flex-1 flex-row items-center rounded-hero border border-petal bg-card">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copy.scholar.a11y.type}
+            onPress={onType}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <View className="size-11 items-center justify-center">
+              <Icon name={icons.keyboard} size={22} color={colors.mauve} />
+            </View>
+          </Pressable>
+          <Text className="flex-1 text-center text-body text-mauve">{copy.scholar.speak.tap}</Text>
+        </View>
         {onTalk !== null ? <TalkButton onPress={onTalk} disabled={busy || requesting} /> : null}
         <Pressable
           accessibilityRole="button"
@@ -350,7 +362,7 @@ function SpeakRow({ takeId, busy, onType, onSent, onSendSpoken, onTalk }: SpeakR
 }
 
 const styles = StyleSheet.create({
-  input: { minHeight: 44, maxHeight: 120, paddingTop: 11, paddingBottom: 11 },
+  input: { minHeight: 46, maxHeight: 120, paddingTop: 12, paddingBottom: 12 },
   timer: { fontVariant: ["tabular-nums"] },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.5 },

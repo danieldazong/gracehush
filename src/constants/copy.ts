@@ -1224,7 +1224,8 @@ export const copy = {
     askBar: "Ask Scholar…",
     input: "Message Scholar…",
     header: "Scholar",
-    eyebrow: "Scholar",
+    // The name over an answer, in sentence case (2026-11-15; it was an uppercase eyebrow).
+    name: "Scholar",
     // Under the composer, always on screen, and the AI reminder in the list: at the start of every conversation and again three
     // hours or more after the last one (2026-11-11, the public page and New York's companion law).
     aiLine: "Scholar is AI and can be wrong. It isn’t a pastor or counselor.",
@@ -1249,10 +1250,8 @@ export const copy = {
       uploadFailed: "We couldn’t send your recording. Try again.",
       startFailed: "We couldn’t start recording. Please try again.",
     },
+    // Listen is a bare icon under an answer (2026-11-15), so only its failure has words; its spoken labels are in a11y.
     listen: {
-      listen: "Listen",
-      stop: "Stop",
-      preparing: "Preparing audio…",
       failed: "We couldn’t play that. Try again.",
     },
     waiting: "Scholar is writing…",
@@ -1298,6 +1297,10 @@ export const copy = {
       back: "Go back",
     },
     reflectionRow: { title: "Talk it through with Scholar", subtitle: "Ask about this passage or your day" },
+    // The system share sheet under an answer (2026-11-15): Scholar’s words and its passages, never the person’s own message.
+    share: {
+      message: (body: string) => `${body}\n\nShared from GraceHush`,
+    },
     // The live talk (step 39). Every number comes from the server.
     talk: {
       button: "Talk with Scholar",
@@ -1352,6 +1355,7 @@ export const copy = {
       askBarSpeak: "Speak to Scholar",
       listen: "Listen to this answer",
       stop: "Stop listening",
+      share: "Share this answer",
       recording: (time: string) => `Recording, ${time}`,
     },
   },
