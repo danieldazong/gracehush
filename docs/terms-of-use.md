@@ -16,7 +16,7 @@ You must be at least 18 and able to enter a binding contract where you live. The
 
 ## 2. What GraceHush is, and is not
 
-GraceHush is a private audio prayer journal. You speak or write a prayer, and GraceHush creates a reflection for you: a Bible passage from the Berean Standard Bible, a short spoken devotional, a closing prayer and three affirmations, each with a Bible verse. GraceHush also includes Scholar, an AI Bible companion you can ask, by typing or speaking, about Scripture and your day, and, on a paid plan, talk with out loud in a live voice talk.
+GraceHush is a private audio prayer journal. You speak or write a prayer, and GraceHush creates a reflection for you: a Bible passage from the Berean Standard Bible, a short spoken devotional, a closing prayer and three affirmations, each with a Bible verse. GraceHush also includes Scholar, an AI Bible companion you can ask, by typing or speaking, about Scripture and your day, and talk with out loud in a live voice talk.
 
 Scholar is a computer program, not a person, and it can be wrong, in a live talk as in writing. GraceHush, Scholar included, is **not** pastoral counseling, therapy, medical advice or an emergency or crisis service, and it is not a substitute for a pastor, a counselor, a doctor or emergency services. If you are in danger or thinking about harming yourself, contact your local emergency number; in the US you can call or text 988.
 
@@ -43,22 +43,22 @@ You agree not to: break the law; try to get into another person’s account or i
 ## 7. Plans, free trials and billing
 
 - **Free plan.** The free plan includes a limited number of audio devotionals each week (currently three; the app shows your count). The count starts again each Monday.
-- **Scholar.** The free plan includes a limited number of messages to Scholar each day (currently five). The count starts again at midnight where you are, and the app shows how many are left when only a few remain. A message in a conversation about a hard moment is never counted.
-- **GraceHush Pro.** Pro includes unlimited audio devotionals, more messages to Scholar each day (currently 40), Scholar reading its answers aloud (currently up to five answers a day), and live voice talks with Scholar (currently 30 minutes a month, at most 10 minutes a talk; the minutes start again on the first of each month where you are). A live talk in a conversation about a hard moment is never counted or cut short. There is a monthly plan and a yearly plan. The price, in your currency and including any taxes that apply, is shown in the app before you buy, and the App Store charges it, not us.
-- **Free trial.** The yearly plan may include a free trial (currently 7 days), only if the App Store tells us you are eligible. If you do not cancel in time, the App Store charges the yearly price when the trial ends: cancel at least 24 hours before the trial ends in your App Store subscription settings.
+- **Scholar.** Scholar is part of GraceHush Pro. Every account, including one on a free trial, has one free conversation with Scholar: the first conversation Scholar answers, with up to 8 messages, its answers read aloud, and live voice talks of up to 3 minutes in all. It is given once: deleting it does not give you another. On the free plan Scholar speaks in its default voice; its other voices come with a free trial or Pro. Beyond the free conversation, a message you send without Pro is saved, and Scholar can answer it once your plan includes Scholar. In a conversation about a hard moment, Scholar answers on every plan, you can listen to its answers, and nothing there is counted, toward your free conversation or anything else.
+- **GraceHush Pro.** Pro includes unlimited audio devotionals and Scholar: its messages, its answers read aloud, and live voice talks. Messages and answers read aloud use Scholar’s credits, a daily allowance that renews 24 hours after you first use it (currently 400 credits; a message uses 4, and an answer read aloud uses 3 for every 100 characters it has), and the app shows when few are left and when they renew. Live talks have their own time (currently 60 minutes a month, at most 10 minutes a talk; the minutes start again on the first of each month where you are). A live talk in a conversation about a hard moment is never counted or cut short. There is a monthly plan and a yearly plan. The price, in your currency and including any taxes that apply, is shown in the app before you buy, and the App Store charges it, not us.
+- **Free trial.** The yearly plan may include a free trial (currently 3 days), only if the App Store tells us you are eligible. The trial includes unlimited audio devotionals and the free conversation with Scholar that every account has, and Scholar opens fully when your paid plan begins. If you do not cancel in time, the App Store charges the yearly price when the trial ends: cancel at least 24 hours before the trial ends in your App Store subscription settings.
 - **Renewal.** Plans renew automatically until you cancel. Cancel at least 24 hours before the current period ends, in your App Store subscription settings, which the app links to. Deleting the app or your GraceHush account does not cancel a subscription.
 - **Refunds.** Apple handles refunds under its own policies; we cannot issue refunds for purchases made through the App Store, so please ask Apple.
 - **Price changes.** If a price changes, the App Store’s rules for notifying you apply.
-- **When a paid plan ends.** You keep your entries. Pro features continue until the end of the period you paid for, then the free limit applies.
+- **When a paid plan ends.** You keep your entries and your conversations with Scholar. Pro features, Scholar included, continue until the end of the period you paid for, then the free plan applies.
 - **Restore.** If you reinstall or change phones, use Restore purchases in the app.
 
 ## 8. Changes to GraceHush
 
-We may add, change or remove features, and we may change the free limits, Scholar’s daily limits and the monthly talk time. If a change reduces what a paid plan includes, we will tell you in the app before it takes effect.
+We may add, change or remove features, and we may change the free limits (the free conversation with Scholar included), Scholar’s credits and what each use costs, and the monthly talk time. If a change reduces what a paid plan includes, we will tell you in the app before it takes effect.
 
 ## 9. Reminders and notifications
 
-If you turn on reminders, GraceHush schedules notifications on your phone at the times you choose. They show an affirmation written for you and a Bible verse, which may appear on your lock screen. You can turn reminders off in Profile or in your phone’s settings.
+If you turn on reminders, GraceHush schedules notifications on your phone at the times you choose. They show an affirmation written for you and a Bible verse, which may appear on your lock screen. You can turn reminders off in Profile or in your phone’s settings. If you start a free trial with “Remind me before my trial ends” on, GraceHush also schedules one notification about two days before the trial ends; turning off GraceHush’s notifications in your phone’s settings stops it too.
 
 ## 10. Other companies’ services
 

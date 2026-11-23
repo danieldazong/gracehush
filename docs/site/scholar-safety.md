@@ -40,7 +40,7 @@ Under that answer the app shows a help line that fits your situation, with butto
 
 For the rest of that conversation, every answer is written with the same care, and a small help button stays within reach. A new conversation starts fresh. There is one exception: a conversation you open from a reflection that was itself written with extra care keeps that care.
 
-A message like this never counts toward your daily limit and never brings up a paywall. In that conversation you can listen to answers on any plan.
+A message like this is answered on every plan, never uses Scholar’s credits or your free conversation, and never brings up a paywall. In that conversation you can listen to answers on any plan.
 
 ## What happens, and what does not
 
@@ -54,7 +54,7 @@ A message like this never counts toward your daily limit and never brings up a p
 
 ## Talking with Scholar out loud
 
-On a paid plan you can also talk with Scholar out loud, in a live talk. ElevenLabs, a voice company, hears what you say and speaks Scholar’s answers, and only after you say yes in the app. The answers are still written by Google’s AI under GraceHush’s rules, and the check does not change:
+On a paid plan, and for a few minutes in your free conversation, you can also talk with Scholar out loud, in a live talk. ElevenLabs, a voice company, hears what you say and speaks Scholar’s answers, and only after you say yes in the app. The answers are still written by Google’s AI under GraceHush’s rules, and the check does not change:
 
 - Everything you say is checked in the same way before Scholar speaks a word of its answer. A hard moment in a talk is answered with the same care as a written one.
 - In a hard moment, the help line stays on your screen for the rest of the talk, and Scholar reads it aloud after its answer, with the numbers said one digit at a time.
