@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "./testing/assert.ts";
 import { buildSystemInstructionV1 } from "./eval/prompt_v1.ts";
+import { buildSystemInstructionV2_6 } from "./eval/prompt_v2_6.ts";
 import { HEAVY_INSTRUCTION } from "./heavy.ts";
 import {
   buildReplacementInstruction,
@@ -36,8 +37,8 @@ const section = (text: string, heading: string) => {
   return next < 0 ? text.slice(start) : text.slice(start, next);
 };
 
-Deno.test("the version is gen-v2.6, and the heavy moment of gen-v2.4 is still written in full", () => {
-  assertEquals(PROMPT_VERSION, "gen-v2.6");
+Deno.test("the version is gen-v2.7, and the heavy moment of gen-v2.4 is still written in full", () => {
+  assertEquals(PROMPT_VERSION, "gen-v2.7");
   const text = buildSystemInstruction();
   assert(text.includes(HEAVY_INSTRUCTION), "the heavy moment's section is in the instruction");
   assert(text.includes("- is_crisis: Set is_crisis to true"));
@@ -129,25 +130,128 @@ Deno.test("the instruction: its blocks are explained, Song of Solomon is gone, a
   assert(buildReplacementInstruction().startsWith("You choose a passage of scripture"));
 });
 
-Deno.test("the narrated voice and the first line are still asked for, and the stock openings are the measured ones", () => {
+Deno.test("gen-v2.7: plain speech, the way a caring friend talks, and the stock openings are still the measured ones", () => {
   const text = buildSystemInstruction();
-  for (const part of ["## Voice", "## The first line", "sure of God", "with quiet authority", "Every line counts"]) {
+  for (
+    const part of [
+      "## Voice",
+      "## The first line",
+      "the way a caring Christian friend talks",
+      "A nine-year-old should understand every sentence",
+      "plain, never childish",
+      "Most are under 15 words",
+      "Never over 25 words.",
+      "use a contraction every time a person would say one",
+      "Look, not gaze.",
+      "Keeps his promises, not faithfulness.",
+      "No writing tricks",
+      "never to commands to the person, and never to promises about outcomes",
+      "Stay with that feeling for a few sentences before any hope.",
+    ]
+  ) {
     assert(text.includes(part), part);
   }
+  // The sermon of gen-v2.1 to gen-v2.6 is gone: "sermon" is named only to say what this is not.
+  for (
+    const gone of [
+      "the way a sermon sounds",
+      "like a short sermon",
+      "preach",
+      "rise and land",
+      "riches of the faith",
+      "quiet authority",
+      "carries weight",
+      "worth carrying into the day",
+      "borrow the passage's key words",
+      "name him by who he is",
+      "Grant me",
+      "one picture",
+      "mostly under 20 words",
+    ]
+  ) {
+    assert(!text.includes(gone), gone);
+  }
+  assertEquals(text.match(/sermon/gi)?.length, 2);
+  assert(text.includes("You are not a pastor giving a sermon"));
+  assert(text.includes("never the way a book, a sermon or a greeting card reads"));
+  // "Written to be read aloud" holds the same lengths and the contractions.
+  assert(
+    section(text, "Written to be read aloud").includes(
+      "most under 15 words and never over 25, with a contraction every time a person would say one",
+    ),
+  );
   // Every opening the evaluation counts as stock is one the instruction forbids, in its own quotes.
   const rule = text.split("\n").find((line) => line.startsWith("- Never begin with")) ?? "";
   for (const words of STOCK_OPENINGS) assert(rule.includes(`"${words}"`), words);
-  // What protects the person is unchanged: the order of care, the never-say list and no scripture in the devotional.
+  // What protects the person is unchanged: the never-say list and no scripture in the devotional.
   for (
     const part of [
-      "Stay with that feeling for a few sentences before any hope.",
       'Commands such as "you should" or "you need to".',
-      "never to commands to the person, and never to promises about outcomes",
       "The devotional and the closing prayer never quote, paraphrase, cite or point to the passage or any other verse",
       "never Hebrews 13:5, which opens with a warning against the love of money",
     ]
   ) {
     assert(text.includes(part), part);
+  }
+});
+
+Deno.test("gen-v2.7: nothing the reflection says depends on the time of day", () => {
+  const text = buildSystemInstruction();
+  const headings = text.split(/\n\n(?=## )/).map((part) => part.split("\n")[0]);
+  assertEquals(headings.indexOf("## Any hour of the day"), headings.indexOf("## Written to be read aloud") + 1);
+  const hour = section(text, "Any hour of the day");
+  for (
+    const part of [
+      "nothing you write may depend on the time of day",
+      "Name a time only when it is part of what they told you",
+      'no "this morning", "this afternoon", "this evening", "tonight", "before you sleep", "when you wake", "as you start your day" or "at the end of the day"',
+      'Say "today" or "right now", or say nothing about time.',
+    ]
+  ) {
+    assert(hour.includes(part), part);
+  }
+  const write = section(text, "What to write");
+  const lead = write.slice(write.indexOf("- affirmations:"), write.indexOf("  - verse:"));
+  const textBullet = write.slice(write.indexOf("  - text:"), write.indexOf("- prayer:"));
+  for (const part of [section(text, "How to care"), CLOSING_PRAYER_RULE, lead, textBullet]) {
+    assert(part.length > 100, part);
+    for (const word of ["tonight", "this morning", "this evening", "sleep", "for that hour"]) {
+      assert(!part.includes(word), `"${word}" in ${part.slice(0, 40)}`);
+    }
+  }
+});
+
+Deno.test("gen-v2.7: no example quoted in Voice or The first line is taken from an evaluation case", async () => {
+  const cases: { text: string }[] = JSON.parse(await Deno.readTextFile(new URL("./eval/cases.json", import.meta.url)));
+  const plain = (value: string) => value.toLowerCase().replace(/’/g, "'");
+  const texts = cases.map((item) => plain(item.text));
+  const text = buildSystemInstruction();
+  // Single words such as “don’t” are left out: the cases use them.
+  const examples = [section(text, "Voice"), section(text, "The first line")]
+    .flatMap((part) => [...part.matchAll(/“([^”]*)”/g)].map((match) => match[1]))
+    .filter((example) => example.trim().split(/\s+/).length >= 4);
+  assert(examples.length >= 4, `${examples.length} examples`);
+  for (const example of examples) assert(!texts.some((item) => item.includes(plain(example))), example);
+});
+
+Deno.test("gen-v2.7: Input, Faith, the never-say list, The person, Variety and the heavy moment are gen-v2.6's, byte for byte", () => {
+  // Scholar copies Faith and the never-say list from the live text (its own test compares the two, so both would move together),
+  // and its hard-moment answers share the heavy rules: this is the guard that they did not change with the voice.
+  const bySection = (text: string) => new Map(text.split(/\n\n(?=## )/).map((part) => [part.split("\n")[0], part]));
+  const now = bySection(buildSystemInstruction());
+  const then = bySection(buildSystemInstructionV2_6());
+  for (
+    const heading of [
+      "## Input",
+      "## Faith",
+      "## Never write these, or anything that means the same",
+      "## The person",
+      "## Variety",
+      "## A heavy moment",
+    ]
+  ) {
+    assert(now.has(heading) && then.has(heading), heading);
+    assertEquals(now.get(heading), then.get(heading), heading);
   }
 });
 
@@ -157,6 +261,7 @@ Deno.test("gen-v2.3: the first line keeps their facts, in their words or yours, 
     const part of [
       "The devotional's first sentence is the hook.",
       "Build it from one concrete thing they told you",
+      'with "you" or "your" in it',
       "Keep their facts exactly as they gave them, in your own words or in theirs. Never add or change a detail.",
       "a place, an object or a gesture they did not mention is a made-up detail",
       "one full sentence with its own verb (not a phrase that begins with an -ing word)",
@@ -195,7 +300,7 @@ Deno.test("gen-v2.3: the person's details belong in the devotional and the praye
   assert(section(text, "Written to be read aloud").includes("no quotation marks except around the one echo"));
 });
 
-Deno.test("gen-v2.3: the prayer is the person's own, the validation line is asked for, and the affirmations name their day", () => {
+Deno.test("gen-v2.3: the prayer is the person's own, the validation line is asked for, and the affirmations take three sides", () => {
   const write = section(buildSystemInstruction(), "What to write");
   assert(!write.includes('prayed with the person ("we")'), "the we prayer is gone");
   for (
@@ -210,9 +315,10 @@ Deno.test("gen-v2.3: the prayer is the person's own, the validation line is aske
       'unless the person themselves prayed as "we" in the entry',
       "End with one line of trust in who God is, never with a promised outcome.",
       'Do not write "Amen".',
-      "tied to this person's day: morning names, in general words, the first thing they face today",
-      "afternoon steadies them in the worry they named",
-      "evening helps them set down tonight what they carried",
+      // gen-v2.7: three sides of what they shared, where gen-v2.3 to gen-v2.6 wrote one word for each hour.
+      "each of the three from a different side",
+      "None names a part of the day: each fits any hour.",
+      "So the time_slot only says where it is sent first",
     ]
   ) {
     assert(write.includes(part), part);
@@ -228,29 +334,32 @@ Deno.test("gen-v2.3: the prayer is the person's own, the validation line is aske
   );
 });
 
-Deno.test("gen-v2.6: the closing prayer meets the need beneath the words and lifts, in five moves", () => {
+Deno.test("gen-v2.7: the closing prayer keeps its five moves, in the words a tired person really prays", () => {
   const text = buildSystemInstruction();
   const write = section(text, "What to write");
   assert(write.includes(`- closing_prayer: ${CLOSING_PRAYER_RULE}`), "the rule is the exported constant");
   for (
     const part of [
       "It moves in five steps, in this order.",
-      "name him by who he is for this need",
+      "(1) Talk to God the way the person talked to him in the entry",
       "Hand him the pain once, in their own plain words and with no quotation marks",
-      "Ask him for two or three concrete things that meet the need beneath their words, each in a short sentence of its own that opens with the asking",
-      "in plain words of your own and never the passage's",
+      "(3) Ask him for two or three concrete things that meet the need beneath their words, each in a short sentence of its own that opens with the asking",
       'Every petition stays "me" and "my", also when it is for another person or for a shared home',
       "Pray for the need, never for a despairing wish itself",
       "do not ask God to let them, and do not argue with them",
       "ask instead for rest and clear sight before any decision, and for his wisdom in it",
       "Tie one petition to the next step the devotional offered",
-      "Declare one lifting truth about who God is to them now, in your own words and never the passage's, with no promised outcome",
+      "(4) Tell him one true thing about who he is to them now",
       "never that the exam, the job, the test or the person will turn out well",
       "(5) End with one line of trust in who God is, never with a promised outcome.",
       "5 to 7 sentences, 50 to 75 words and never more.",
     ]
   ) {
     assert(write.includes(part), part);
+  }
+  // gen-v2.6's naming device and old church English are gone from the whole instruction.
+  for (const gone of ["the God who provides", "never the passage's", "Grant me", "Declare one lifting truth"]) {
+    assert(!text.includes(gone), gone);
   }
   assert(!text.includes("30 to 50 words"), "the old length is gone");
   assert(!text.includes("2 to 4 sentences") && !text.includes("4 to 6 sentences"), "the old counts are gone");

@@ -706,7 +706,7 @@ Deno.test("with the real output rules: a name in a headline is asked for again, 
     });
   const leaky = grounded({
     affirmations: [
-      { time_slot: "morning", headline: "You are a blessing", text: "Begin the day knowing you are held." },
+      { time_slot: "morning", headline: "You are a blessing", text: "Know today that you are held." },
       { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
       { time_slot: "evening", headline: "It is enough", text: "You did what you could today." },
     ],

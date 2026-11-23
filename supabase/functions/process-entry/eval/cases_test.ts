@@ -26,9 +26,9 @@ const NEW_CASES = [
 // gen-v2.6 (2026-11-10): four setbacks whose prayer must meet the need beneath the words and never pray the despairing wish.
 const SETBACK_CASES = ["exam-dropout", "job-lost", "give-up-business", "decision-anger"];
 
-Deno.test("36 cases with unique ids, every one in the shape run_tone_eval.ts reads", () => {
-  assertEquals(cases.length, 36);
-  assertEquals(new Set(cases.map((item) => item.id)).size, 36);
+Deno.test("37 cases with unique ids, every one in the shape run_tone_eval.ts reads", () => {
+  assertEquals(cases.length, 37);
+  assertEquals(new Set(cases.map((item) => item.id)).size, 37);
   for (const item of cases) {
     assertEquals(Object.keys(item).sort(), ["id", "names", "notes", "text", "topic"], item.id);
     assert(/^[a-z0-9-]+$/.test(item.id), `${item.id} is a plain id`);
@@ -44,13 +44,22 @@ Deno.test("the eight real-world cases of step 36 are there, after the first 24",
 });
 
 Deno.test("the four setback cases of gen-v2.6 are there, after the 32, and each says the wish the prayer must not pray", () => {
-  assertEquals(cases.slice(32).map((item) => item.id), SETBACK_CASES);
+  assertEquals(cases.slice(32, 36).map((item) => item.id), SETBACK_CASES);
   assert(/drop out/.test(byId("exam-dropout")!.text), "a wish to drop out");
   assert(/rent/i.test(byId("job-lost")!.text), "the rent is the need");
   assert(/giving up/.test(byId("give-up-business")!.text), "a wish to give up on the business, not on life");
   assert(/angry/.test(byId("decision-anger")!.text), "a decision made in anger");
   // Three share a topic, so the swap test draws a same-topic decoy for them; the fourth pairs with decision-job.
   assertEquals(SETBACK_CASES.map((id) => byId(id)!.topic), ["setbacks", "setbacks", "setbacks", "decisions"]);
+});
+
+Deno.test("gen-v2.7: left-behind, the project lead's own situation, is the 37th, a setback with no name", () => {
+  const item = cases[36];
+  assertEquals([item.id, item.topic, item.names], ["left-behind", "setbacks", []]);
+  assert(
+    /moving forward/.test(item.text) && /stuck/.test(item.text),
+    "friends moving ahead, and a life that feels stuck",
+  );
 });
 
 Deno.test("each new case is the kind of entry it names", () => {

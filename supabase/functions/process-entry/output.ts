@@ -13,12 +13,14 @@ import {
   headlineProblems,
   hookProblem,
   leakedWords,
+  plainSpeechProblem,
   prayerVoiceProblem,
   privateWords,
   salvageLine,
   type SalvageReason,
   salvageReflection,
   type SoftProblem,
+  timeOfDayProblem,
   validationProblem,
 } from "./tone.ts";
 
@@ -30,7 +32,8 @@ import {
 // the validation line, then a never-say phrase anywhere the person reads or hears, and for a heavy moment (gen-v2.4, heavy.ts)
 // a quotation in the devotional or the prayer and a phrase a heavy moment never says. Then the SOFT checks, all of them, in this
 // order: a word the person wrote in the title or a headline (both reach a lock screen), and since gen-v2.3 (step 36) the
-// prayer's voice, grounding, the validation line, the echo, and last the hook guard. A reply with soft faults fails with every
+// prayer's voice, grounding, the validation line, the echo, since gen-v2.7 plain speech and the time of day, and last the hook
+// guard. A reply with soft faults fails with every
 // note joined into one (the retry fixes them together, gemini.ts sends it) and carries itself as a salvage: safe texts in the
 // leaking fields and the devotional's first sentence for a line that failed, kept in case no clean reply comes. The first fault
 // names the reason and the salvage.
@@ -76,8 +79,8 @@ export type ReadyReflection = {
   // shape of one). Whether it exists, is short enough and is a whole sentence is decided afterwards (verses.ts).
   affirmations: ReplyAffirmation[];
   // Null for every clean reply. Set when this is a reply kept after a soft check still failed on the last try (a word from the
-  // entry in its title or a headline, with the safe text in its place; the prayer's voice; grounding; the line; the echo; the
-  // hook): the log line says which.
+  // entry in its title or a headline, with the safe text in its place; the prayer's voice; grounding; the line; the echo; plain
+  // speech; the time of day; the hook): the log line says which.
   salvaged: SalvageReason | null;
 };
 
@@ -85,11 +88,14 @@ export type ReadyReflection = {
 // `recentFirstWords`: the first word of each recent devotional of the person's (tone.ts firstWord), for the hook guard.
 // `heavy`: the app's check (the crisis screening) found a heavy moment, so the heavy rules apply whatever the reply says.
 // `recentHeadlines` (gen-v2.5, step 37): the person's newest affirmation headlines, which a new one must not repeat.
+// `gen27Checks` (gen-v2.7): plain speech and the time of day, on unless it is false. Only the evaluation turns them off, to read
+// gen-v2.6 and older replies by their own rules; production never does.
 export type ParseContext = {
   entry: string;
   recentFirstWords?: readonly string[];
   heavy?: boolean;
   recentHeadlines?: readonly string[];
+  gen27Checks?: boolean;
 };
 
 // An affirmation as the reply gave it. `verse` is optional so that the written fallback (heavy.ts) and an older version's
@@ -305,12 +311,14 @@ function salvageOf(reflection: ReadyReflection, entry: string, problems: readonl
 }
 
 // The tone checks on a reflection that has the right shape, in their order, or null when it passes them all.
-// `recentFirstWords`: the first word of each of the person's recent devotionals, for the hook guard.
+// `recentFirstWords`: the first word of each of the person's recent devotionals, for the hook guard. `gen27Checks`: see
+// ParseContext.
 export function checkTone(
   reflection: ReadyReflection,
   entry: string,
   recentFirstWords: readonly string[] = [],
   recentHeadlines: readonly string[] = [],
+  { gen27Checks = true }: { gen27Checks?: boolean } = {},
 ): OutputInvalid | null {
   const hard = hardProblem(reflection, entry);
   if (hard) return hard;
@@ -319,6 +327,8 @@ export function checkTone(
     privacyProblem(reflection, entry),
     ...headlineProblems(reflection.affirmations, recentHeadlines),
     ...personalProblems(reflection, entry),
+    gen27Checks ? plainSpeechProblem(reflection, entry) : null,
+    gen27Checks ? timeOfDayProblem(reflection, entry) : null,
     hook ? { reason: hook.reason, salvaged: hook.reason, note: hook.note } : null,
   ].filter((problem): problem is SoftProblem => problem !== null);
   if (problems.length === 0) return null;
@@ -340,7 +350,9 @@ function readValidationLine(value: unknown): string | null {
 // Throws the first problem (OutputInvalid), or returns the reflection as it is kept.
 export function checkReflection(read: ReadyReflection, context: ParseContext): ReadyReflection {
   const reflection = context.heavy === true && !read.heavy ? { ...read, heavy: true } : read;
-  const problem = checkTone(reflection, context.entry, context.recentFirstWords ?? [], context.recentHeadlines ?? []);
+  const problem = checkTone(reflection, context.entry, context.recentFirstWords ?? [], context.recentHeadlines ?? [], {
+    gen27Checks: context.gen27Checks ?? true,
+  });
   if (problem) throw problem;
   return reflection;
 }

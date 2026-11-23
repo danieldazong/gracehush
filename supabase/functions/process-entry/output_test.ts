@@ -4,9 +4,11 @@ import {
   countWords,
   curlyApostrophes,
   finishSentence,
+  hardProblem,
   OutputInvalid,
   parseReflection,
   parseScripturePick,
+  readReflection,
   type ReadyReflection,
   removeAmen,
   singleLine,
@@ -30,8 +32,9 @@ function invalid(value: unknown, reason: string, entry = TEXT): OutputInvalid {
 }
 
 const words = (count: number) => Array.from({ length: count }, (_, index) => `word${index}`).join(" ");
-// Filler prose of `count` words whose first sentence is ten words long, so the hook guard (gen-v2.2) leaves it alone.
-const prose = (count: number) => words(count).replace(/^((?:\S+ ){9}\S+)/, "$1.");
+// Filler prose of `count` words in sentences of ten, so the hook guard (gen-v2.2) leaves its first sentence alone and the plain
+// check (gen-v2.7) reads it as easy: one sentence of two hundred words would grade far over PLAIN_RETRY_GRADE.
+const prose = (count: number) => words(count).replace(/((?:\S+ ){9}\S+)(?= |$)/g, "$1.");
 // A filler prayer in the person's own voice (gen-v2.3 asks for the first person singular): "I", "my", then `count` words.
 const mine = (count: number) => `I lift my ${words(count)}`;
 
@@ -44,7 +47,7 @@ Deno.test("a good written reflection is accepted and cleaned", () => {
   assertEquals(result.validationSource, "model");
   assertEquals(result.scripture, { bookId: "PHP", chapter: 4, verseStart: 6, verseEnd: 7 });
   assertEquals(/amen/i.test(result.closingPrayer), false);
-  assertEquals(result.closingPrayer.endsWith("my heart tonight."), true);
+  assertEquals(result.closingPrayer.endsWith("my heart."), true);
   assertEquals(result.prayer, {
     title: "Peace for the week",
     summary: "Peace and steadiness for a heavy week.",
@@ -127,8 +130,10 @@ Deno.test("a heavy moment never presents death as a way home, rest at last or a 
   ];
   for (const [sentence, id] of cases) {
     heavyFails(readyOutput({ devotional_text: withSentence(sentence) }), `heavy_never_say:${id}`);
-    // An ordinary reflection is not held to these: they are not on NEVER_SAY.
-    assertEquals(parse(readyOutput({ devotional_text: withSentence(sentence) })).heavy, false, sentence);
+    // An ordinary reflection is not held to these: they are not on NEVER_SAY, so no hard check refuses it. (A part of the day
+    // such as "tonight" or "sleep" is the soft time check's since gen-v2.7, which only asks for the reply once more.)
+    const ordinary = readReflection(JSON.stringify(readyOutput({ devotional_text: withSentence(sentence) })));
+    assertEquals([ordinary.heavy, hardProblem(ordinary, TEXT)?.reason ?? null], [false, null], sentence);
   }
   // A headline counts too.
   heavyFails(
@@ -163,8 +168,13 @@ Deno.test("what a heavy moment may still say: a denial, forgiving yourself, rest
       "You are too tired to keep going on your own.",
     ]
   ) {
-    assertEquals(heavyParse(readyOutput({ devotional_text: withSentence(sentence) })).heavy, true, sentence);
+    // The heavy rules (hard) let each of these through. A part of the day ("tonight", "sleep") is the soft time check's since
+    // gen-v2.7, which asks for the reply once more and never refuses it, so the hard checks are what this holds.
+    const read = readReflection(JSON.stringify(readyOutput({ devotional_text: withSentence(sentence) })));
+    assertEquals(hardProblem({ ...read, heavy: true }, TEXT)?.reason ?? null, null, sentence);
   }
+  // Without a part of the day, the whole parse passes as a heavy moment.
+  assertEquals(heavyParse(readyOutput({ devotional_text: withSentence("He will stay with you.") })).heavy, true);
 });
 
 Deno.test("a heavy moment is never held to grounding or the echo: its own words may be about dying or harm", () => {
@@ -391,7 +401,7 @@ const devotionalWith = (sentence: string) => `${sentence}\n\n${readyOutput().dev
 const headlines = (morning: string, evening = "It is enough", base: Record<string, unknown> = readyOutput()) => ({
   ...base,
   affirmations: [
-    { time_slot: "morning", headline: morning, text: "Begin the day knowing you are held." },
+    { time_slot: "morning", headline: morning, text: "Know today that you are held." },
     { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
     { time_slot: "evening", headline: evening, text: "You did what you could today." },
   ],
@@ -536,7 +546,7 @@ Deno.test("the hook guard: a stock opening is asked for again, and the reply is 
   }
   // A fresh opening passes, and with no recent devotionals nothing else is compared.
   assert(
-    parseAfter(readyOutput({ devotional_text: devotionalWith("Another night at your desk.") }), []).kind === "ready",
+    parseAfter(readyOutput({ devotional_text: devotionalWith("Another week at your desk.") }), []).kind === "ready",
   );
   assert(parseAfter(readyOutput(), []).kind === "ready");
 });
@@ -548,7 +558,7 @@ Deno.test("the hook guard: a first word a recent devotional began with is asked 
   assertEquals((error.salvage as ReadyReflection).salvaged, "hook_repeated");
   // A stock opening names the recent first words too, so the retry avoids both.
   const stock = hookInvalid(
-    readyOutput({ devotional_text: devotionalWith("The night was long.") }),
+    readyOutput({ devotional_text: devotionalWith("The week was long.") }),
     ["waiting"],
     "hook_stock",
   );
@@ -746,7 +756,7 @@ const versed = (morning: unknown, over: Record<string, unknown> = {}) =>
         time_slot: "morning",
         verse: morning,
         headline: "god is your refuge",
-        text: "Begin the day knowing you are held.",
+        text: "Know today that you are held.",
       },
       {
         time_slot: "afternoon",
@@ -791,7 +801,7 @@ Deno.test("headline_feeling and headline_repeated: soft, so the reply is asked f
   const feeling = invalid(
     versed(null, {
       affirmations: [
-        { time_slot: "morning", headline: "When you feel anxious", text: "Begin the day knowing you are held." },
+        { time_slot: "morning", headline: "When you feel anxious", text: "Know today that you are held." },
         { time_slot: "afternoon", headline: "He leads you gently", text: "Pause; the work will wait." },
         { time_slot: "evening", headline: "Your needs are known", text: "You did what you could today." },
       ],

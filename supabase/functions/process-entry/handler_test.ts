@@ -679,7 +679,7 @@ Deno.test(
   "b) a heavy moment the screening sees (crisis, uncertain or a block) is written in full, by the heavy rules",
   flow([], async (world) => {
     const cases: [GeminiReply, string, string, string][] = [
-      [flagged("crisis"), "model", "11111111-1111-4111-8111-111111111111", "Tonight"],
+      [flagged("crisis"), "model", "11111111-1111-4111-8111-111111111111", "Lately"],
       [flagged("uncertain"), "uncertain", "22222222-2222-4222-8222-222222222222", "Somewhere"],
       [blocked(), "blocked", "33333333-3333-4333-8333-333333333333", "Before"],
     ];
@@ -709,12 +709,12 @@ Deno.test(
   "a heavy moment's help line follows what was found: someone hurting them, an emergency, harm to others, else 988",
   flow([], async (world) => {
     const cases: [GeminiReply | null, string, string, string][] = [
-      [flagged("crisis", { categories: ["abuse_or_danger_now", "self_harm"] }), QUIET_TEXT, "abuse", "Tonight"],
+      [flagged("crisis", { categories: ["abuse_or_danger_now", "self_harm"] }), QUIET_TEXT, "abuse", "Lately"],
       [flagged("crisis", { categories: ["medical_emergency"] }), QUIET_TEXT, "emergency", "Somewhere"],
       [flagged("uncertain", { categories: ["harm_to_others"] }), QUIET_TEXT, "harm_others", "Before"],
       [blocked(), QUIET_TEXT, "crisis", "Quiet"],
-      [null, "I am going to hurt someone. I cannot stop thinking about it.", "harm_others", "Morning"],
-      [null, PHRASE_TEXT, "crisis", "Evening"],
+      [null, "I am going to hurt someone. I cannot stop thinking about it.", "harm_others", "Another"],
+      [null, PHRASE_TEXT, "crisis", "Outside"],
     ];
     for (const [index, [reply, text, help, first]] of cases.entries()) {
       if (reply !== null) world.screenQueue.push(reply);
@@ -756,7 +756,7 @@ Deno.test(
   flow([], async (world) => {
     const cases: [GeminiReply, string, string][] = [
       // A parent afraid for their child: the kinds could read as someone in danger, the line the model names is 988.
-      [flagged("crisis", { categories: ["abuse_or_danger_now"], help_line: "crisis" }), "crisis", "Tonight"],
+      [flagged("crisis", { categories: ["abuse_or_danger_now"], help_line: "crisis" }), "crisis", "Lately"],
       [flagged("uncertain", { categories: [], help_line: "abuse" }), "abuse", "Somewhere"],
       // A line the app does not know is no line: the kinds choose.
       [flagged("crisis", { categories: ["medical_emergency"], help_line: "pastor" }), "emergency", "Before"],
@@ -1237,7 +1237,7 @@ Deno.test(
     assertEquals(line.tokensOut, 1308);
     assertEquals(line.tokensThought, 174);
     assertEquals(line.scripture, "verified");
-    assertEquals(line.promptVersion, "gen-v2.6");
+    assertEquals(line.promptVersion, "gen-v2.7");
     assert(Number.isInteger(line.bibleMs) && line.bibleMs >= 0);
     assert(/^[0-9a-f]{8}$/.test(line.user), "a short hash, not the user id");
     const everything = world.logs.join("\n");
@@ -1275,7 +1275,7 @@ Deno.test(
   flow(
     [
       geminiOk(heavyOutput()),
-      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning"), affirmations: affirmationSet(1) })),
+      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Another"), affirmations: affirmationSet(1) })),
     ],
     async (world) => {
       const token = await world.token({ sub: USER });
@@ -1544,8 +1544,8 @@ Deno.test(
   "speech e) a half-set or malformed secret is logged by name and never fails the reflection; it is not a failed call",
   speechFlow([
     geminiOk(readyOutput()),
-    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Morning"), affirmations: affirmationSet(1) })),
-    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Evening"), affirmations: affirmationSet(2) })),
+    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Another"), affirmations: affirmationSet(1) })),
+    geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Outside"), affirmations: affirmationSet(2) })),
   ], async (world) => {
     const cases: [string, () => void, string][] = [
       ["a voice is missing", () => Deno.env.delete("TTS_VOICE_NAME"), "bad_config:TTS_VOICE_NAME"],
@@ -1853,7 +1853,7 @@ Deno.test(
   flow(
     [
       geminiOk(heavyOutput()),
-      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning"), affirmations: affirmationSet(1) })),
+      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Another"), affirmations: affirmationSet(1) })),
     ],
     async (world) => {
       seedWeek(world);
@@ -2153,7 +2153,7 @@ Deno.test(
 Deno.test(
   "billing d) no end date, or one still ahead: RevenueCat is not asked",
   flow(
-    [geminiOk(readyOutput()), geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Morning") }))],
+    [geminiOk(readyOutput()), geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Another") }))],
     async (world) => {
       paidUntil(world, "pro", null);
       seedWeek(world);
@@ -2213,7 +2213,7 @@ const blessingReady = (over: Record<string, unknown> = {}) =>
 const withHeadlines = (morning: string, over: Record<string, unknown> = {}) =>
   blessingReady({
     affirmations: [
-      { time_slot: "morning", headline: morning, text: "Begin the day knowing you are held." },
+      { time_slot: "morning", headline: morning, text: "Know today that you are held." },
       { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
       { time_slot: "evening", headline: "It is enough", text: "You did what you could today." },
     ],
@@ -2226,7 +2226,7 @@ Deno.test(
     [
       geminiOk(readyOutput()),
       geminiOk(
-        readyOutput({ reflection_title: "Rest for the Weary", devotional_text: devotionalStartingWith("Morning") }),
+        readyOutput({ reflection_title: "Rest for the Weary", devotional_text: devotionalStartingWith("Another") }),
       ),
     ],
     async (world) => {
@@ -2344,7 +2344,7 @@ Deno.test(
     assertEquals(books.length, 65);
     assert(!books.includes("SNG"));
     assert("validation_line" in body.response_format.schema.properties);
-    assertEquals(lastLog(world).promptVersion, "gen-v2.6");
+    assertEquals(lastLog(world).promptVersion, "gen-v2.7");
   }),
 );
 
@@ -2368,7 +2368,7 @@ Deno.test(
   flow(
     [
       geminiOk(heavyOutput()),
-      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Morning"), affirmations: affirmationSet(1) })),
+      geminiOk(heavyOutput({ devotional_text: devotionalStartingWith("Another"), affirmations: affirmationSet(1) })),
     ],
     async (world) => {
       // The model's own flag.
@@ -2434,6 +2434,62 @@ Deno.test(
   ),
 );
 
+// gen-v2.7: the two soft checks of plain speech and any hour. Each costs one retry with a note, never a reflection.
+const STEADFAST = String(readyOutput().devotional_text).replace("About rest", "His love is steadfast. About rest");
+const TONIGHT = String(readyOutput().devotional_text).replace("About rest", "Tonight, tell God one thing. About rest");
+
+Deno.test(
+  "a list word twice: the reflection is kept as the second reply wrote it, and the log says salvaged:plain_speech",
+  flow(
+    everyAttempt(geminiOk(readyOutput({ devotional_text: STEADFAST }))),
+    async (world) => {
+      const response = await post(world, handle, textBody());
+      assertEquals(response.status, 200);
+      assertEquals((await ok(response)).entry.status, "ready");
+      assertEquals(world.geminiCalls.length, 2);
+      assert(
+        reflectionInput(world, 1).includes(
+          "<correction>\nYour last reply did not sound like a caring friend talking. It used words people don’t say out loud: “steadfast”.",
+        ),
+      );
+      assert(String(world.entries[0].devotional_script).includes("His love is steadfast."), "kept as written");
+      const line = lastLog(world);
+      // The screening's attempt and the reflection's two.
+      assertEquals([line.status, line.code, line.reason, line.attempts], [200, null, "salvaged:plain_speech", 3]);
+    },
+  ),
+);
+
+Deno.test(
+  "a part of the day twice: the reflection is kept as the second reply wrote it, and the log says salvaged:time_of_day",
+  flow(
+    everyAttempt(geminiOk(readyOutput({ devotional_text: TONIGHT }))),
+    async (world) => {
+      const response = await post(world, handle, textBody());
+      assertEquals(response.status, 200);
+      assertEquals(world.geminiCalls.length, 2);
+      assert(reflectionInput(world, 1).includes("<correction>\nYour last reply named a part of the day (“tonight”)"));
+      const line = lastLog(world);
+      assertEquals([line.status, line.code, line.reason, line.attempts], [200, null, "salvaged:time_of_day", 3]);
+    },
+  ),
+);
+
+Deno.test(
+  "a list word, then a clean reply: the clean one is saved, and the log names no salvage",
+  flow(
+    [geminiOk(readyOutput({ devotional_text: STEADFAST })), geminiOk(readyOutput())],
+    async (world) => {
+      const response = await post(world, handle, textBody());
+      assertEquals(response.status, 200);
+      assertEquals(world.geminiCalls.length, 2);
+      assert(!String(world.entries[0].devotional_script).includes("steadfast"));
+      const line = lastLog(world);
+      assertEquals([line.status, line.reason, line.attempts], [200, null, 3]);
+    },
+  ),
+);
+
 Deno.test(
   "a stock validation line twice: the devotional's first sentence stands in, and the log says so",
   flow(
@@ -2494,13 +2550,13 @@ Deno.test(
 Deno.test(
   "the hook guard: a devotional that opens like a recent one is asked for again, and the second reply is saved",
   flow(
-    [geminiOk(readyOutput()), geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Morning") }))],
+    [geminiOk(readyOutput()), geminiOk(readyOutput({ devotional_text: devotionalStartingWith("Another") }))],
     async (world) => {
       seedDevotional(world, USER, { devotional_script: devotionalStartingWith("Paragraph") });
       const response = await post(world, handle, textBody());
       assertEquals(response.status, 200);
       const body = await ok(response);
-      assert(body.entry.devotional?.script.startsWith("Morning 1 holds"), body.entry.devotional?.script);
+      assert(body.entry.devotional?.script.startsWith("Another 1 holds"), body.entry.devotional?.script);
       assertEquals(world.geminiCalls.length, 2);
       assert(!reflectionInput(world, 0).includes("<correction>"));
       const retry = reflectionInput(world, 1);
@@ -2611,7 +2667,7 @@ const withVerses = (
         time_slot: "morning",
         verse: morning,
         headline: "God is your refuge",
-        text: "Begin the day knowing you are held.",
+        text: "Know today that you are held.",
       },
       { time_slot: "afternoon", verse: afternoon, headline: "He leads you gently", text: "Pause; the work will wait." },
       { time_slot: "evening", verse: evening, headline: "Your needs are known", text: "You did what you could today." },

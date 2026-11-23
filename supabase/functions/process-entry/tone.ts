@@ -9,7 +9,8 @@ import type { TimeSlot } from "./contracts.ts";
 // passage on its own). SOFT checks cost at most a retry, never a reflection: a name the person wrote in a title or a headline
 // (both reach a lock screen, so a safe text takes its place), and since gen-v2.3 (step 36) a prayer that is not in the person's
 // own voice, a reply that uses nothing they told, a validation line that is missing, a template or private, a quotation that is
-// not their words, and the hook guard. STYLE measures (styleMeasures) never cost anything: the tone evaluation counts them.
+// not their words, and the hook guard; since gen-v2.7 a word a friend never needs or a devotional that reads too hard, and a
+// part of the day the reply guessed. STYLE measures (styleMeasures) never cost anything: the tone evaluation counts them.
 
 // ---- Never say ---------------------------------------------------------------------------------------------------------
 
@@ -435,6 +436,17 @@ export type StyleMeasures = {
   grounding: number;
   prayerVoice: PrayerVoice;
   validationWords: number;
+  // gen-v2.7: plain speech and any hour, measured with the rules of the two checks below.
+  readingGrade: number; // the devotional's Flesch-Kincaid grade (readingGrade)
+  prayerGrade: number; // the closing prayer's
+  wordsPerSentence: number; // in the devotional and the prayer together
+  avoidWords: number; // distinct words of PLAIN_AVOID_WORDS in the line, the devotional and the prayer, as the check finds them
+  avoidWordsElsewhere: number; // the same scan of the title, the headlines and the affirmation texts (reported only)
+  plainerWords: number; // every word of PLAINER_WORDS in the devotional and the prayer, the echo set aside
+  contractions: number; // in the devotional, the echo set aside
+  uncontracted: number; // "does not", "cannot" and the like, in the devotional, the echo set aside
+  contrastFrames: number; // "not just", "not …, but", "not …; he" and "rather than", in the devotional and the prayer
+  timeWords: number; // distinct time words and phrases where the time check looks
 };
 
 const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
@@ -456,6 +468,10 @@ export function styleMeasures(reflection: ToneReflection, entry = ""): StyleMeas
   const devotionalWords = countWords(reflection.devotional);
   const prayerWords = countWords(reflection.closingPrayer);
   const titleWords = countWords(reflection.title);
+  const line = reflection.validationLine ?? "";
+  const headlines = reflection.affirmations.map((item) => item.headline);
+  const affirmationTexts = reflection.affirmations.map((item) => item.text);
+  const spokenSentences = sentences(spoken).length;
   return {
     longSentences: sentences(spoken).filter((sentence) => countWords(sentence) > 25).length,
     questions: count(reflection.devotional, /\?/g),
@@ -490,6 +506,18 @@ export function styleMeasures(reflection: ToneReflection, entry = ""): StyleMeas
       : groundingCount(entry, [reflection.validationLine ?? "", reflection.devotional, reflection.closingPrayer]),
     prayerVoice: prayerVoice(reflection.closingPrayer, entry),
     validationWords: countWords(reflection.validationLine ?? ""),
+    readingGrade: readingGrade(reflection.devotional),
+    prayerGrade: readingGrade(reflection.closingPrayer),
+    wordsPerSentence: spokenSentences === 0 ? 0 : gradeWords(spoken).length / spokenSentences,
+    avoidWords: avoidedWords([line, reflection.devotional, reflection.closingPrayer], entry).length,
+    avoidWordsElsewhere: avoidedWords([reflection.title, ...headlines, ...affirmationTexts], entry).length,
+    plainerWords: plainTokens(unquoted(spoken)).filter((token) => PLAINER_WORDS.has(token)).length,
+    contractions: count(unquoted(reflection.devotional), CONTRACTION),
+    uncontracted: count(unquoted(reflection.devotional), UNCONTRACTED),
+    contrastFrames: count(spoken, CONTRAST),
+    timeWords:
+      timeWords([line, reflection.devotional, reflection.closingPrayer, ...headlines, ...affirmationTexts], entry)
+        .length,
   };
 }
 
@@ -863,7 +891,7 @@ export const SAFE_HEADLINES: Readonly<Record<TimeSlot, string>> = {
 // title_private and headline_private: a safe text took the place of a word from the entry. hook_stock, hook_repeated and
 // hook_long: the reply was kept as it was, with an opening the hook guard asked to change. gen-v2.3 (step 36): prayer_we and
 // prayer_none, the prayer as the reply wrote it; grounding_low and echo_invented, the reply as it was; validation_<rule>, the
-// devotional's first sentence (or nothing) in place of the line.
+// devotional's first sentence (or nothing) in place of the line. gen-v2.7: plain_speech and time_of_day, the reply as it was.
 export type SalvageReason =
   | "title_private"
   | "headline_private"
@@ -873,7 +901,9 @@ export type SalvageReason =
   | "grounding_low"
   | "echo_invented"
   | ValidationRule
-  | HeadlineRule;
+  | HeadlineRule
+  | "plain_speech"
+  | "time_of_day";
 
 // The reflection with its title and each headline that leaks a private word replaced by its safe text; nothing else changes.
 // `salvaged` says which check it was (title_private when the title leaked, otherwise headline_private), or null when nothing
@@ -949,3 +979,186 @@ export function headlineProblems(
   }
   return problems;
 }
+
+// ---- gen-v2.7 (2026-11-23): plain speech, and words that fit any hour ---------------------------------------------------
+//
+// The project lead heard TestFlight build 11 and found the voice natural and the words a sermon ("so structured, so
+// organized … a human being does not talk like that"), and the owner found bedtime words in the morning and waking words at
+// night. Two soft checks, each worth one retry with a note and never a reflection (output.ts keeps the reply as it was when no
+// better one comes): a word a friend never needs or a devotional that reads too hard (plainSpeechProblem), and a part of the
+// day the reply guessed (timeOfDayProblem). The rules are exact: the evaluation's bars and the incident's numbers
+// (prompts/40-plain-spoken-reflections.md) were measured with them, so they are never "improved" in place.
+
+// Syllables, by a rule of thumb that is consistent rather than exact ("create" counts 1, "everything" 4).
+export function syllables(raw: string): number {
+  const word = raw.toLowerCase().replace(/[’‘]/g, "'").replace(/'s$/, "").replace(/[^a-z]/g, "");
+  if (word === "") return 0;
+  if (word.length <= 3) return 1;
+  const trimmed = word.replace(/(?:[^laeiouy]es|[^laeiouydt]ed|[^laeiouy]e)$/, (end) => end[0]).replace(/^y/, "");
+  return Math.max(1, (trimmed.match(/[aeiouy]+/g) ?? []).length);
+}
+
+// A word for the grade: a whitespace token with a letter or a digit in it.
+const gradeWords = (text: string) => text.trim().split(/\s+/).filter((token) => /[\p{L}\p{N}]/u.test(token));
+
+// The Flesch-Kincaid grade, with `sentences` (the split this file already uses). 0 for an empty text.
+export function readingGrade(text: string): number {
+  const words = gradeWords(text);
+  const count = sentences(text).length;
+  if (words.length === 0 || count === 0) return 0;
+  const syllableCount = words.reduce((sum, word) => sum + syllables(word), 0);
+  return 0.39 * (words.length / count) + 11.8 * (syllableCount / words.length) - 15.59;
+}
+
+// A devotional over this grade is asked for again. The lead's own example reads at 5.83; the evaluation holds 6.5.
+export const PLAIN_RETRY_GRADE = 7;
+
+// The words a caring friend never needs (checked), lowercase, each form of a word on its own: gen-v2.6's own output and the
+// humanizer's list of AI words. A word joins only when a friend never needs it, it is not a word of the faith, and no fixed
+// text holds it (the written fallback, the safe title and headlines, the line's example): plain_test.ts holds that.
+export const PLAIN_AVOID_WORDS: ReadonlySet<string> = new Set([
+  ..."abide abides abiding amid amidst anchor anchored anchors anguish apprehension beacon behold beloved boundless"
+    .split(" "),
+  ..."bountiful bountifully ceaseless cherish cherished cherishes countenance cradle cradled cradles cradling dwell"
+    .split(" "),
+  ..."dwelling dwells embark enfold enfolded enfolds envelop enveloped enveloping envelops everlasting fortitude fragment"
+    .split(" "),
+  ..."fragments furthermore gaze gazed gazes gazing haven hence immeasurable indeed inhabit inhabiting inhabits inherently"
+    .split(" "),
+  ..."intercession journey journeys linger lingered lingering lingers moreover navigate navigates navigating nevertheless"
+    .split(" "),
+  ..."nonetheless profound profoundly providence realm respite sanctuary serenity simultaneously solace solitude sovereign"
+    .split(" "),
+  ..."sovereignty steadfast steadfastly steadfastness sustain sustained sustaining sustains tapestry tenderly tenderness"
+    .split(" "),
+  ..."testament thus tranquil tranquility tumult turmoil unending unfailing unseen unshakable unshakeable unwavering"
+    .split(" "),
+  ..."utterly vigor weariness whilst yearn yearning yearns".split(" "),
+]);
+
+// Plainer words than a sermon's, still not the plainest (measured only, never refused): "faithful" and "mercy" are the
+// faith's own words, and the written fallback's prayer says "because you are faithful".
+export const PLAINER_WORDS: ReadonlySet<string> = new Set([
+  ..."burden burdens compassion compassionate compassions completely deeply devotion embrace embraces entirely faithful"
+    .split(" "),
+  ..."faithfulness mercy merciful precious renew renews restore restores sorrow sorrowful sorrows surrender tender truly"
+    .split(" "),
+  ..."weary whisper whispers".split(" "),
+]);
+
+const plainTokens = (text: string) => text.toLowerCase().replace(/[’‘]/g, "'").match(/[a-z]+(?:'[a-z]+)*/g) ?? [];
+// The echo, the one quotation the spoken texts may hold: set aside, because the person's own words are theirs to hear back.
+const QUOTATIONS = /“[^”]*”|"[^"]*"/g;
+const unquoted = (text: string) => text.replace(QUOTATIONS, " ");
+
+// The distinct words of the list in these texts, in the order first seen: the quoted echo and any word the entry itself uses
+// are set aside (the person's own words are theirs to hear back).
+export function avoidedWords(texts: readonly string[], entry: string): string[] {
+  const own = new Set(plainTokens(entry));
+  const found: string[] = [];
+  for (const text of texts) {
+    for (const token of plainTokens(unquoted(text))) {
+      if (PLAIN_AVOID_WORDS.has(token) && !own.has(token) && !found.includes(token)) found.push(token);
+    }
+  }
+  return found;
+}
+
+// A word of the list in the validation line, the devotional or the prayer (the affirmation texts take words from their verse,
+// such as "steadfast love", so they are measured and never checked), or a devotional graded over PLAIN_RETRY_GRADE. The note
+// names only the list's own words, at most eight, never the person's.
+export function plainSpeechProblem(
+  reflection: { validationLine?: string | null; devotional: string; closingPrayer: string },
+  entry: string,
+): SoftProblem | null {
+  const words = avoidedWords([reflection.validationLine ?? "", reflection.devotional, reflection.closingPrayer], entry);
+  const hard = readingGrade(reflection.devotional) > PLAIN_RETRY_GRADE;
+  if (words.length === 0 && !hard) return null;
+  return {
+    reason: "plain_speech",
+    salvaged: "plain_speech",
+    note: `Your last reply did not sound like a caring friend talking.${
+      words.length
+        ? ` It used words people don’t say out loud: ${words.slice(0, 8).map((word) => `“${word}”`).join(", ")}.`
+        : ""
+    }${
+      hard ? " Its devotional reads at a harder level than asked." : ""
+    } Write the whole reply again in the plain words of "Voice": everyday words a nine-year-old knows, short sentences with one idea each, and a contraction every time a person would say one.`,
+  };
+}
+
+// Parts of the day, sleep and waking: a word the person did not write means the text guessed when it would be heard.
+export const TIME_WORDS: ReadonlySet<string> = new Set([
+  ..."morning mornings afternoon afternoons evening evenings tonight night nights nighttime overnight midnight bedtime bed"
+    .split(" "),
+  ..."sleep sleeps sleeping slept asleep awake wake wakes waking woke sunrise sunset dawn daybreak daylight nightfall dusk"
+    .split(" "),
+]);
+const TIME_PHRASES =
+  /\b(?:start|starting|begin|beginning)\s+(?:your|the|this)\s+day\b|\b(?:end|close)\s+of\s+(?:your|the|this)\s+day\b|\blay\s+your\s+head\b/gi;
+
+// A time word as it is compared: without a trailing "'s", so "tonight’s" counts as "tonight". A phrase: lowercase, one space.
+const timeToken = (token: string) => token.replace(/'s$/, "");
+const phraseKey = (phrase: string) => phrase.toLowerCase().replace(/\s+/g, " ");
+
+// The distinct time words and phrases in these texts, in the order first seen. The quoted echo is set aside; a word is set
+// aside when the entry uses it (tokens as `plainTokens`, each without a trailing "'s", so "tonight’s" counts as "tonight");
+// a phrase is set aside when the entry holds the same phrase.
+export function timeWords(texts: readonly string[], entry: string): string[] {
+  const ownWords = new Set(plainTokens(entry).map(timeToken));
+  const ownPhrases = new Set([...entry.matchAll(TIME_PHRASES)].map((match) => phraseKey(match[0])));
+  const found: string[] = [];
+  for (const text of texts) {
+    const bare = unquoted(text);
+    const hits: { at: number; item: string }[] = [];
+    for (const match of bare.toLowerCase().replace(/[’‘]/g, "'").matchAll(/[a-z]+(?:'[a-z]+)*/g)) {
+      const word = timeToken(match[0]);
+      if (TIME_WORDS.has(word) && !ownWords.has(word)) hits.push({ at: match.index ?? 0, item: word });
+    }
+    for (const match of bare.matchAll(TIME_PHRASES)) {
+      const phrase = phraseKey(match[0]);
+      if (!ownPhrases.has(phrase)) hits.push({ at: match.index ?? 0, item: phrase });
+    }
+    for (const { item } of hits.sort((a, b) => a.at - b.at)) if (!found.includes(item)) found.push(item);
+  }
+  return found;
+}
+
+// A time word or phrase in the validation line, the devotional, the prayer, a headline or an affirmation text. Its scope is
+// wider than the plain check's: the headlines are what the lock screen and the Today card show at other hours. The note names
+// only words of the list or a phrase the model wrote, never the person's.
+export function timeOfDayProblem(
+  reflection: {
+    validationLine?: string | null;
+    devotional: string;
+    closingPrayer: string;
+    affirmations: readonly { headline: string; text: string }[];
+  },
+  entry: string,
+): SoftProblem | null {
+  const found = timeWords(
+    [
+      reflection.validationLine ?? "",
+      reflection.devotional,
+      reflection.closingPrayer,
+      ...reflection.affirmations.map((item) => item.headline),
+      ...reflection.affirmations.map((item) => item.text),
+    ],
+    entry,
+  );
+  if (found.length === 0) return null;
+  return {
+    reason: "time_of_day",
+    salvaged: "time_of_day",
+    note: `Your last reply named a part of the day (${
+      found.slice(0, 8).map((word) => `“${word}”`).join(", ")
+    }), but the person may hear or read it at any hour. Write the whole reply again so that nothing in it depends on the time of day, as "Any hour of the day" asks: say "today" or "right now", or say nothing about time.`,
+  };
+}
+
+// The style measures of plain speech (styleMeasures; never a reason to refuse a reply).
+const CONTRACTION =
+  /(?<![\p{L}\p{N}])(?:\p{L}+n['’]t|(?:i|you|we|they|who)['’](?:re|ve|ll|d)|i['’]m|(?:it|he|she|that|there|what|who|here)['’](?:s|ll|d)|let['’]s)(?![\p{L}\p{N}])/giu;
+const UNCONTRACTED = /\b(?:do|does|did|is|are|was|were|have|has|had|will|would|could|should)\s+not\b|\bcannot\b/gi;
+const CONTRAST =
+  /\bnot\s+(?:just|only|simply|merely)\b|\bnot\b[^.!?;]{0,80},\s*but\b|\bnot\b[^.!?;]{0,80};\s*(?:he|she|it|you|god)\b|\brather than\b/gi;

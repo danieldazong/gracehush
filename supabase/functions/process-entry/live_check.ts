@@ -46,7 +46,7 @@ import { buildSchema } from "./schema.ts";
 import { resolveScripture } from "./scripture.ts";
 import { flowText, resolveAffirmationVerses } from "./verses.ts";
 import { GEMINI_DEADLINE_MS } from "./constants.ts";
-import { groundingCount, groundingThreshold, prayerVoice } from "./tone.ts";
+import { groundingCount, groundingThreshold, prayerVoice, styleMeasures } from "./tone.ts";
 
 const args = Deno.args;
 const flag = (name: string) => args.includes(name);
@@ -294,6 +294,11 @@ async function run(name: string, input: ScreenInput, expect: "ready" | "heavy" |
         detail += `\n         ${
           found === 3 ? "ok     " : "note   "
         } affirmation verses ${found} of 3 (${verses.kept} as chosen, ${verses.replaced} from the follow-up), Bible ${verses.bibleMs} ms`;
+        // gen-v2.7: plain speech, numbers only.
+        const style = styleMeasures(result, words);
+        detail += `\n         plain: grade ${
+          style.readingGrade.toFixed(1)
+        }, list words ${style.avoidWords}, contractions ${style.contractions}, time words ${style.timeWords}`;
         if (flag("--show")) {
           result.affirmations.forEach((item, index) => {
             const verse = verses.verses[index];

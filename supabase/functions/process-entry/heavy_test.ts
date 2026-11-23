@@ -133,7 +133,7 @@ Deno.test("the instruction's heavy section holds no number and names no service:
 });
 
 // Step 38: HEAVY_INSTRUCTION is built from the shared rules (HEAVY_SHARED_RULES, which a Scholar answer follows too) and the
-// lines only a reflection has. It must stay byte for byte what gen-v2.4 to gen-v2.6 sent: this is that text, frozen.
+// lines only a reflection has. It must stay byte for byte what gen-v2.4 to gen-v2.7 sent: this is that text, frozen.
 const FROZEN_HEAVY_INSTRUCTION = `## A heavy moment
 Some entries carry a risk to the person: thoughts of ending their life or of harming themselves, harm someone is doing to them, an intention to harm someone else, or danger happening right now. When the entry shows any of these, or a <heavy_moment> block follows it, set is_crisis to true and still write the whole reflection in full, by every rule above and by these on top of them. These rules come first wherever they meet another rule, "The person" and "The first line" included. The person may be in the darkest hour they have known: every part of the reflection, the line, the devotional, the passage, the prayer and the affirmations, should lift them toward hope, toward God and toward the people around them.
 - Stay with them first. Name the pain in plain words and honor it as real, without alarm and without a lecture. Then declare who God is to them right now: present, tender, holding on to them. Tell them their life matters to him and to the people around them.

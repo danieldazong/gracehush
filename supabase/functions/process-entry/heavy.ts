@@ -152,8 +152,10 @@ export const HEAVY_FALLBACK_PASSAGE: ScriptureRef = { bookId: "ISA", chapter: 41
 
 // Written for the owner's approval on 2026-11-08, for any heavy moment: it knows nothing of the entry, so it repeats nothing,
 // and it follows every rule of the instruction (a hook of nine words, 148 words in four paragraphs, a first-person prayer of
-// 44 words, lock-screen-safe title and headlines, no quotation, no verse named, the next step a person). The tests check it
-// against every hard and soft check (heavy_test.ts).
+// 44 words, lock-screen-safe title and headlines, no quotation, no verse named, the next step a person). Since gen-v2.7
+// (2026-11-23, with the owner's approval) its three affirmations fit any hour, because the app shows each one at any reminder
+// and on the Today card; everything else is word for word what was approved. The tests check it against every hard and soft
+// check (heavy_test.ts).
 export function heavyFallback(): ReadyReflection {
   return {
     kind: "ready",
@@ -176,19 +178,17 @@ export function heavyFallback(): ReadyReflection {
       {
         slot: "morning",
         headline: "You are not alone today",
-        text:
-          "Before this day asks anything of you, God is already here. Take one small step, and let someone take it with you.",
+        text: "God is already here with you. Take one small step, and let someone take it with you.",
       },
       {
         slot: "afternoon",
         headline: "God is with you here",
-        text: "In the middle of this day, you are held. Reach out to someone you trust, even with just a few words.",
+        text: "Right where you are, you are held. Reach out to someone you trust, even with just a few words.",
       },
       {
         slot: "evening",
-        headline: "You are held tonight",
-        text:
-          "You made it through today. Let tonight be gentle, and know that his love for you does not change in the dark.",
+        headline: "You are held, even now",
+        text: "You’ve made it this far. Be gentle with yourself, and know that his love for you doesn’t change.",
       },
     ],
     salvaged: null,

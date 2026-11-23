@@ -1770,23 +1770,24 @@ export function devotionalStartingWith(word: string): string {
 }
 
 // gen-v2.5 (step 37): a headline the person has already received is asked for again (tone.ts headlineProblems), so a test that
-// makes several reflections for one person gives each a set of its own. Set 0 is readyOutput's.
+// makes several reflections for one person gives each a set of its own. Set 0 is readyOutput's. gen-v2.7: none names a part of
+// the day (tone.ts timeOfDayProblem), so a reflection made from one is not asked for again for its time words.
 const AFFIRMATION_SETS: readonly (readonly [string, string, string])[] = [
   ["You are held", "Rest is allowed", "It is enough"],
-  ["New mercy meets your morning", "Your steps are kept today", "Quiet trust carries your night"],
-  ["Mercy walks beside you today", "Your needs are known to him", "Steady love keeps your evening"],
-  ["Strength waits for your morning", "His hand steadies your day", "Your rest is his gift tonight"],
-  ["Grace greets your morning", "His peace guards your hours", "Faithful love holds your night"],
-  ["Light finds you early", "God goes ahead of you", "Calm settles over your evening"],
-  ["Hope rises with the day", "Kindness surrounds your work", "Shelter is near you tonight"],
-  ["Each morning is his gift", "Courage meets your afternoon", "Night is no stranger to him"],
-  ["Morning brings his care", "Your path is lit today", "He keeps watch tonight"],
+  ["New mercy meets you", "Your steps are kept today", "Quiet trust carries you"],
+  ["Mercy walks beside you today", "Your needs are known to him", "Steady love keeps you"],
+  ["Strength waits for you", "His hand steadies your day", "Your rest is his gift"],
+  ["Grace greets you", "His peace guards your hours", "Faithful love holds you"],
+  ["Light finds you early", "God goes ahead of you", "Calm settles over you"],
+  ["Hope rises with the day", "Kindness surrounds your work", "Shelter is near you"],
+  ["Each day is his gift", "Courage meets you", "Nothing is a stranger to him"],
+  ["Today brings his care", "Your path is lit today", "He keeps watch over you"],
 ];
 
 export function affirmationSet(index: number): Row[] {
   const [morning, afternoon, evening] = AFFIRMATION_SETS[index];
   return [
-    { time_slot: "morning", headline: morning, text: "Begin the day knowing you are held." },
+    { time_slot: "morning", headline: morning, text: "Know today that you are held." },
     { time_slot: "afternoon", headline: afternoon, text: "Pause and breathe; the work will wait." },
     { time_slot: "evening", headline: evening, text: "You did what you could today." },
   ];
@@ -1805,7 +1806,7 @@ export function readyOutput(overrides: Row = {}): Row {
     scripture: { book_id: "PHP", chapter: 4, verse_start: 6, verse_end: 7 },
     devotional_text: DEVOTIONAL,
     closing_prayer:
-      "Lord, I bring you this anxious week of work and ask for your quiet peace to settle on my heart tonight. Amen.",
+      "Lord, I bring you this anxious week of work and ask for your quiet peace to settle on my heart. Amen.",
     prayer: {
       is_active_prayer: true,
       title: "Peace for the week",
@@ -1813,7 +1814,7 @@ export function readyOutput(overrides: Row = {}): Row {
       category: "INNER PEACE",
     },
     affirmations: [
-      { time_slot: "morning", headline: "You are held", text: "Begin the day knowing you are held." },
+      { time_slot: "morning", headline: "You are held", text: "Know today that you are held." },
       { time_slot: "afternoon", headline: "Rest is allowed", text: "Pause and breathe; the work will wait." },
       { time_slot: "evening", headline: "It is enough", text: "You did what you could today." },
     ],
