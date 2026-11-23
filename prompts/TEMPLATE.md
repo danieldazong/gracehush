@@ -47,7 +47,7 @@ The flows to run, the cases to try, and the checks to pass, ending with an end-t
 - Safety: a crisis-style entry shows the Crisis Support state, with no devotional, no affirmations, no autoplay, and working call/text actions
 - Privacy: no transcript text in notifications, no secrets in the client, user data cleared on sign-out
 - End-to-end: the full user flow from client to Edge Function to database and back to the client
-- Phone walk-through: the checks of the section below, run as the guided walk-through in AGENTS.md
+- Phone walk-through: the checks of the section below, run as the guided walk-through (AGENTS.md rules, `docs/rules/testing-and-release.md`)
 
 ## Phone walk-through
 
@@ -70,4 +70,4 @@ A check that nothing can read and the user did not answer is "not verified" in t
 
 ## AGENTS.md updates
 
-Any decision later features must respect, and the section it belongs in. Note rules this replaces. Write "None" if nothing.
+Any rule later features must respect, and the file in `docs/rules/` and the section it belongs in (the core `AGENTS.md` changes only for a standing instruction, a non-negotiable, the stack in brief or the rules index), in a few lines: no measurements, timings, counts of checks or walk-through results. Note rules this replaces. Write "None" if nothing. The step's history (what was built, measured, checked and walked through) is appended to the end of `docs/build-log.md`, never to a rules file or AGENTS.md, which stays under 40,000 characters (AGENTS.md, "How the rules are kept").
