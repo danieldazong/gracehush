@@ -40,6 +40,12 @@ export const WORD_PICTURE = {
   // (a 40 box, a 6 gap and 22-point letters with -2.5% tracking there). It does not follow the text size. The reference
   // keeps 12 points clear of it.
   brand: { mark: 26, gap: 4, size: 14, line: 18, tracking: -0.35, clearance: 12 },
+  // Apple's App Store badge at the top left (2026-11-23, the lead's mock-up): Apple's own black "Download on the App Store"
+  // artwork, unaltered, 14 points tall (42 pixels, over the 40 Apple asks for on a screen), its top 12 points down and its left
+  // on the text's 20 of padding. Apple asks for clear space of a quarter of its height; the scene's room keeps the words far
+  // below it. It does not follow the text size. No other store's badge (App Review Guideline 2.3.10; GraceHush is not on Google
+  // Play).
+  storeBadge: { height: 14, top: 12 },
 } as const;
 
 export type WordPicture = {

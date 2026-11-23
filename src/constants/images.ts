@@ -1,3 +1,4 @@
+import appStoreBadge from "@/assets/images/app-store-badge.png";
 import appleLogo from "@/assets/images/apple-logo.svg";
 import googleG from "@/assets/images/google-g.svg";
 import iconAnxious from "@/assets/images/icon-anxious.svg";
@@ -88,6 +89,9 @@ export const images = {
   // form, white and rose, for the brand gradient and plum surfaces. Both carry the mark at 72% of a 456 px square.
   logoMark,
   logoMarkLight,
+  // Apple's "Download on the App Store" badge (black, US), unaltered: Apple's own SVG of 2017 drawn at 359 by 120 pixels with
+  // its clear corners. Only the word card's shared picture draws it (services/wordCardImage.ts), never a screen of the app.
+  appStoreBadge,
   googleG,
   appleLogo,
   // The Scholar tab's own icons (2026-11-16), drawn for GraceHush in one hand: a hairline plum line (0.8 on a 32 grid, halved from

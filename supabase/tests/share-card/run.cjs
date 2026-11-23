@@ -107,6 +107,8 @@ const LONG = {
 };
 const SCENE_FILES = Array.from({ length: 20 }, (_, i) => asset(`images/player-scene-${i + 1}.jpg`));
 const MARK_FILE = asset("images/logo-mark-light.png");
+// Apple's "Download on the App Store" badge (2026-11-23), drawn from Apple's own SVG at 359 by 120 pixels.
+const BADGE_FILE = asset("images/app-store-badge.png");
 // The four font files App.tsx loads, by the module the app imports them from and the family name the theme gives each.
 const FONT_FILES = [
   ["@expo-google-fonts/fraunces/500Medium", "Fraunces_500Medium"],
@@ -320,7 +322,7 @@ async function renderWorld() {
       },
     },
     "react-native": { StyleSheet: { create: (styles) => styles } },
-    "@/constants/images": { __esModule: true, images: { logoMarkLight: MARK_FILE }, playerScenes: SCENE_FILES },
+    "@/constants/images": { __esModule: true, images: { logoMarkLight: MARK_FILE, appStoreBadge: BADGE_FILE }, playerScenes: SCENE_FILES },
   };
   for (const font of FONT_FILES) fakes[font.specifier] = { __esModule: true, [font.name]: font.file };
   const env = makeEnv({ fakes });
@@ -415,6 +417,7 @@ async function layoutChecks() {
     assert.deepEqual([WORD_PICTURE.minWidth, WORD_PICTURE.maxWidth, WORD_PICTURE.defaultWidth], [280, 440, 350]);
     assert.deepEqual([WORD_PICTURE.minFontScale, WORD_PICTURE.maxFontScale], [0.82, 1.36]);
     assert.deepEqual(WORD_PICTURE.brand, { mark: 26, gap: 4, size: 14, line: 18, tracking: -0.35, clearance: 12 });
+    assert.deepEqual(WORD_PICTURE.storeBadge, { height: 14, top: 12 }, "the App Store badge: 14 tall, 12 from the top");
   });
 
   await test("layout: the picture is as wide as the card and follows the phone's text size, each within what an iPhone shows", async () => {
@@ -538,8 +541,8 @@ async function pictureChecks() {
     const { ops, gradients } = world.state;
     assert.deepEqual(
       ops.map((step) => step.op),
-      ["scale", "color", "image", "rect", "text", "text", "text", "image", "text"],
-      "plum-deep, the scene, the fade, then the headline, the verse, the reference and the lockup",
+      ["scale", "color", "image", "rect", "text", "text", "text", "image", "text", "image"],
+      "plum-deep, the scene, the fade, then the headline, the verse, the reference, the lockup and the App Store badge",
     );
     assert.deepEqual([ops[0].sx, ops[0].sy], [3, 3]);
     nearList(ops[1].color, [62 / 255, 39 / 255, 65 / 255, 1], 1e-6, "plum-deep behind everything, as the card's background");
@@ -650,6 +653,57 @@ async function pictureChecks() {
     assert.equal(count(shot, [0, (footTop + 44) * 3, 1050, 840], isLight), 0, "and 8 of plain plum-deep under the foot row");
   });
 
+  await test("picture: Apple's App Store badge stands at the top left, whole, in its own shape, at least 40 pixels tall and clear of the words", async () => {
+    const world = await renderWorld();
+    const shot = world.open(await world.render({ ...PICTURE, scene: 1 }));
+    const drawn = world.state.ops.filter((step) => step.op === "image");
+    assert.equal(drawn.length, 3, "the scene, the mark and the badge");
+    const badge = drawn[2];
+    assert.equal(badge.file, BADGE_FILE, "Apple's own badge");
+    assert.deepEqual(badge.size, { width: 359, height: 120 }, "drawn from Apple's SVG at 359 by 120");
+    assert.deepEqual([badge.src.x, badge.src.y, badge.src.width, badge.src.height], [0, 0, 359, 120], "the whole badge, never cut");
+    assert.deepEqual([badge.dst.x, badge.dst.y, badge.dst.height], [20, 12, 14], "the text's 20 of padding, 12 from the top, 14 tall");
+    near(badge.dst.width, (14 * 359) / 120, 1e-3, "in its own proportions, never stretched");
+    assert.ok(badge.dst.height * 3 >= 40, "at least 40 pixels tall, as Apple asks on a screen");
+    assert.equal(badge.filter, world.types.FilterMode.Linear);
+    assert.equal(badge.mipmap, world.types.MipmapMode.Linear, "drawn small, so sampled through its smaller copies");
+    // Apple's clear space, a quarter of its height, on every side: inside the picture, and far above the words.
+    const clear = 14 / 4;
+    const { headline } = pieces(world.state);
+    assert.ok(badge.dst.x >= clear && badge.dst.y >= clear, "clear of the picture's left and top edges");
+    assert.ok(badge.dst.x + badge.dst.width + clear <= 350, "and of its right edge");
+    assert.ok(badge.dst.y + badge.dst.height + clear <= headline.at.y, "clear of the headline");
+    // In the pixels, on the light dawn scene: the badge's black body and light words where it stands, the scene beside it.
+    const isBlack = (r, g, b) => r < 40 && g < 40 && b < 40;
+    const area = [badge.dst.x * 3, badge.dst.y * 3, (badge.dst.x + badge.dst.width) * 3, (badge.dst.y + badge.dst.height) * 3];
+    const pixels = (area[2] - area[0]) * (area[3] - area[1]);
+    const black = count(shot, area, isBlack);
+    const light = count(shot, area, isLight);
+    assert.ok(black > pixels * 0.5, `mostly black: ${black} of ${Math.round(pixels)}`);
+    assert.ok(light > pixels * 0.05, `with its light words and apple: ${light} of ${Math.round(pixels)}`);
+    const beside = [area[2] + clear * 3, area[1], area[2] + clear * 3 + (area[2] - area[0]), area[3]];
+    const sceneBlack = count(shot, beside, isBlack);
+    assert.ok(sceneBlack < pixels * 0.1, `the scene beside it, not more badge: ${sceneBlack}`);
+  });
+
+  await test("picture: the badge keeps its place and size whatever the card's width, the text size or the verse", async () => {
+    const world = await renderWorld();
+    const cases = [
+      { ...PICTURE, width: 374, fontScale: 0.88 },
+      { ...PICTURE, width: 280 },
+      { ...PICTURE, width: 440, fontScale: 1.35 },
+      LONG,
+    ];
+    for (const picture of cases) {
+      world.state.ops.length = 0;
+      assert.notEqual(await world.render(picture), null);
+      const badge = world.state.ops.filter((step) => step.op === "image")[2];
+      const label = `width ${picture.width}, text size ${picture.fontScale}`;
+      assert.deepEqual([badge.dst.x, badge.dst.y, badge.dst.height], [20, 12, 14], label);
+      near(badge.dst.width, (14 * 359) / 120, 1e-3, label);
+    }
+  });
+
   await test("picture: the pixels show the painted scene at the top and the words on plum-deep below, inside the card's padding", async () => {
     const world = await renderWorld();
     const dawn = world.open(await world.render({ ...PICTURE, scene: 1 }));
@@ -749,7 +803,7 @@ async function pictureChecks() {
     assert.equal(count(shot, [0, shot.height - 24, 1050, shot.height], isLight), 0, "nothing in the 8 under the foot row");
   });
 
-  await test("picture: when a font, the mark or the scene cannot be read there is no picture, and nothing is drawn", async () => {
+  await test("picture: when a font, the mark, the badge or the scene cannot be read there is no picture, and nothing is drawn", async () => {
     const notAnImage = fontFile("DMSans_600SemiBold");
     const notAFont = SCENE_FILES[0];
     const cases = [
@@ -758,6 +812,9 @@ async function pictureChecks() {
       ["a font that cannot be downloaded", (state) => state.offline.add(fontFile("DMSans_600SemiBold"))],
       ["a mark with no copy on the phone", (state) => state.unreadable.add(MARK_FILE)],
       ["a mark that is no image", (state) => state.swapped.set(MARK_FILE, notAnImage)],
+      ["a badge with no copy on the phone", (state) => state.unreadable.add(BADGE_FILE)],
+      ["a badge that is no image", (state) => state.swapped.set(BADGE_FILE, notAnImage)],
+      ["a badge that cannot be downloaded", (state) => state.offline.add(BADGE_FILE)],
       ["a scene with no copy on the phone", (state) => state.unreadable.add(SCENE_FILES[0])],
       ["a scene that is no image", (state) => state.swapped.set(SCENE_FILES[0], notAnImage)],
     ];
@@ -786,22 +843,23 @@ async function pictureChecks() {
     assert.equal(typeof (await world.render(PICTURE)), "string", "and the next share draws");
   });
 
-  await test("picture: the fonts and the mark are read once and kept, and a read that failed is tried again at the next share", async () => {
+  await test("picture: the fonts, the mark and the badge are read once and kept, and a read that failed is tried again at the next share", async () => {
     const world = await renderWorld();
     const { state } = world;
-    const kitFiles = [...FONT_FILES.map((font) => font.file), MARK_FILE];
+    const kitFiles = [...FONT_FILES.map((font) => font.file), MARK_FILE, BADGE_FILE];
     const readsOf = (files) => state.reads.filter((file) => files.includes(file)).length;
 
     state.unreadable.add(MARK_FILE);
     assert.equal(await world.render(PICTURE), null, "no mark, no picture");
+    assert.equal(readsOf([BADGE_FILE]), 0, "and the badge is not read for a kit that has already failed");
     state.unreadable.clear();
     assert.notEqual(await world.render(PICTURE), null, "the next share reads everything again and draws");
     const afterFirstPicture = readsOf(kitFiles);
-    assert.equal(afterFirstPicture, 4 + 5, "the four fonts twice (once for the failed try), the mark once");
+    assert.equal(afterFirstPicture, 4 + 6, "the four fonts twice (once for the failed try), the mark and the badge once");
 
     assert.notEqual(await world.render({ ...PICTURE, scene: 1 }), null);
     assert.notEqual(await world.render(PICTURE), null);
-    assert.equal(readsOf(kitFiles), afterFirstPicture, "later pictures read no font and no mark again");
+    assert.equal(readsOf(kitFiles), afterFirstPicture, "later pictures read no font, no mark and no badge again");
     assert.equal(readsOf([SCENE_FILES[0]]), 2, "the scene is read for each picture");
     assert.equal(readsOf([SCENE_FILES[1]]), 1);
     assert.equal(state.fonts.length, 8, "and the fonts are registered once for each kit that was made");
@@ -810,7 +868,7 @@ async function pictureChecks() {
     const fresh = await renderWorld();
     const both = await Promise.all([fresh.render(PICTURE), fresh.render({ ...PICTURE, scene: 3 })]);
     assert.ok(both.every((picture) => typeof picture === "string"));
-    assert.equal(fresh.state.reads.filter((file) => kitFiles.includes(file)).length, 5);
+    assert.equal(fresh.state.reads.filter((file) => kitFiles.includes(file)).length, 6);
   });
 }
 
@@ -1315,6 +1373,28 @@ async function sourceChecks() {
     }
     assert.match(renderer, /playerScenes\[picture\.scene\] \?\? playerScenes\[0\]/);
     assert.match(renderer, /loadData\(images\.logoMarkLight\)/);
+    // Apple's App Store badge (2026-11-23): its file is Apple's artwork as drawn, 359 by 120 with clear corners (RGBA), it is
+    // read with the mark, and no screen of the app draws it: only the shared picture.
+    assert.ok(images.includes('import appStoreBadge from "@/assets/images/app-store-badge.png";'));
+    assert.match(renderer, /loadData\(images\.appStoreBadge\)/);
+    const png = fs.readFileSync(BADGE_FILE);
+    assert.equal(png.toString("ascii", 1, 4), "PNG");
+    assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20), png[25]], [359, 120, 6], "359 by 120, with an alpha channel");
+    const users = [];
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(path.join(REPO, dir), { withFileTypes: true })) {
+        const relative = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) walk(relative);
+        else if (/\.tsx?$/.test(entry.name) && read(relative).includes("appStoreBadge")) users.push(relative);
+      }
+    };
+    walk("src");
+    assert.deepEqual(users.sort(), ["src/constants/images.ts", "src/services/wordCardImage.ts"], "only the shared picture draws the badge");
+    // No other store's badge (App Review Guideline 2.3.10; GraceHush is not on Google Play).
+    for (const file of ["src/services/wordCardImage.ts", "src/utils/wordCardLayout.ts", "src/constants/images.ts"]) {
+      const code = read(file).replace(/\/\/.*$/gm, "");
+      assert.doesNotMatch(code, /google ?play|play ?store|googlePlay|playBadge/i, `${file} draws no other store's badge`);
+    }
     // The two-tone name is the header wordmark's own words.
     const copy = read("src/constants/copy.ts");
     assert.match(copy, /wordmark: \{ grace: "Grace", hush: "Hush" \}/);

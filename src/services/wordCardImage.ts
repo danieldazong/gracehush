@@ -33,7 +33,8 @@ import {
 // The Today tab's word card as a picture (2026-11-20): what Share sends, so the person a verse is shared with sees the card
 // itself, the painted scene with the headline, the verse and its reference on it. Skia draws it off the screen, from the same
 // scene, fade, fonts and measures as the card (utils/wordCardLayout.ts), at the card's width and the phone's text size, three
-// pixels to a point. The card's two buttons are not drawn; the GraceHush lockup stands in their place.
+// pixels to a point. The card's two buttons are not drawn; the GraceHush lockup stands in their place. Since 2026-11-23 Apple's App
+// Store badge stands at its top left (WORD_PICTURE.storeBadge), so whoever receives the picture knows where to find the app.
 //
 // This file loads Skia, whose JavaScript needs its native module the moment it runs, so only wordCardShare.ts loads it, and
 // only in a build that has Skia. Nothing here logs, and nothing is kept but the fonts and the mark.
@@ -70,7 +71,7 @@ async function loadData(module: number): Promise<SkData | null> {
   return Skia.Data.fromURI(asset.localUri);
 }
 
-type Kit = { fonts: SkTypefaceFontProvider; mark: SkImage };
+type Kit = { fonts: SkTypefaceFontProvider; mark: SkImage; badge: SkImage };
 
 async function loadKit(): Promise<Kit | null> {
   const provider = Skia.TypefaceFontProvider.Make();
@@ -82,11 +83,14 @@ async function loadKit(): Promise<Kit | null> {
   }
   const data = await loadData(images.logoMarkLight);
   const mark = data === null ? null : Skia.Image.MakeImageFromEncoded(data);
-  return mark === null ? null : { fonts: provider, mark };
+  if (mark === null) return null;
+  const badgeData = await loadData(images.appStoreBadge);
+  const badge = badgeData === null ? null : Skia.Image.MakeImageFromEncoded(badgeData);
+  return badge === null ? null : { fonts: provider, mark, badge };
 }
 
-// The fonts and the mark are loaded once and kept for the next picture. A failed load is not kept, so the next share tries
-// again.
+// The fonts, the mark and the badge are loaded once and kept for the next picture. A failed load is not kept, so the next share
+// tries again.
 let kit: Promise<Kit | null> | null = null;
 
 function getKit(): Promise<Kit | null> {
@@ -143,9 +147,9 @@ function brandName(provider: SkTypefaceFontProvider, width: number): SkParagraph
   return built;
 }
 
-function draw(picture: WordPicture, { fonts: provider, mark }: Kit, scene: SkImage): string | null {
+function draw(picture: WordPicture, { fonts: provider, mark, badge }: Kit, scene: SkImage): string | null {
   const { width, fontScale, textWidth } = wordPictureSize(picture);
-  const { brand, scale, quality } = WORD_PICTURE;
+  const { brand, storeBadge, scale, quality } = WORD_PICTURE;
   const sized = (look: { size: number; line: number }) => ({ size: look.size * fontScale, line: look.line * fontScale });
 
   // Measure first: the card is as tall as its text needs, and at least 280.
@@ -223,6 +227,22 @@ function draw(picture: WordPicture, { fonts: provider, mark }: Kit, scene: SkIma
     Skia.Paint(),
   );
   name.paint(canvas, lockupLeft + brand.mark + brand.gap, inRow(name.getHeight()));
+
+  // Apple's App Store badge at the top left, whole and in its own proportions, at a third of its size or less, so it is sampled
+  // through its smaller copies as the mark is.
+  canvas.drawImageRectOptions(
+    badge,
+    Skia.XYWHRect(0, 0, badge.width(), badge.height()),
+    Skia.XYWHRect(
+      frame.textLeft,
+      storeBadge.top,
+      (storeBadge.height * badge.width()) / badge.height(),
+      storeBadge.height,
+    ),
+    FilterMode.Linear,
+    MipmapMode.Linear,
+    Skia.Paint(),
+  );
 
   const base64 = surface.makeImageSnapshot().encodeToBase64(ImageFormat.JPEG, quality);
   return base64 === "" ? null : base64;
