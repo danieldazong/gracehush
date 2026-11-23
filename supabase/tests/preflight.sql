@@ -164,6 +164,38 @@ from (
                                    from (values ('anon'), ('authenticated')) as r (name)
                                    where has_table_privilege(r.name, 'public.scholar_voice_sessions',
                                                              'select, insert, update, delete')), ''), 'nothing')
+        end),
+    (23, 'Scholar credits (2026-11-18)',
+        case
+          when to_regclass('public.scholar_credits') is null then 'absent'
+          else 'exists, row level security '
+               || case when (select relrowsecurity from pg_class where oid = to_regclass('public.scholar_credits'))
+                       then 'on' else 'OFF' end
+               || ', the app may read: '
+               || coalesce(nullif((select string_agg(r.name, ', ' order by r.name)
+                                   from (values ('anon'), ('authenticated')) as r (name)
+                                   where has_table_privilege(r.name, 'public.scholar_credits', 'select')), ''), 'nothing')
+               || ', write: '
+               || coalesce(nullif((select string_agg(r.name, ', ' order by r.name)
+                                   from (values ('anon'), ('authenticated')) as r (name)
+                                   where has_table_privilege(r.name, 'public.scholar_credits', 'insert, update, delete')),
+                                  ''), 'nothing')
+        end),
+    (24, 'Scholar free conversation (2026-11-20)',
+        case
+          when to_regclass('public.scholar_free_use') is null then 'absent'
+          else 'exists, row level security '
+               || case when (select relrowsecurity from pg_class where oid = to_regclass('public.scholar_free_use'))
+                       then 'on' else 'OFF' end
+               || ', the app may read: '
+               || coalesce(nullif((select string_agg(r.name, ', ' order by r.name)
+                                   from (values ('anon'), ('authenticated')) as r (name)
+                                   where has_table_privilege(r.name, 'public.scholar_free_use', 'select')), ''), 'nothing')
+               || ', write: '
+               || coalesce(nullif((select string_agg(r.name, ', ' order by r.name)
+                                   from (values ('anon'), ('authenticated')) as r (name)
+                                   where has_table_privilege(r.name, 'public.scholar_free_use', 'insert, update, delete')),
+                                  ''), 'nothing')
         end)
 ) as checks (position, item, found)
 order by position;

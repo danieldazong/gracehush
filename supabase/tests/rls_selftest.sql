@@ -32,6 +32,10 @@
 -- 2026-11-13 (step 39, supabase/migrations/20261113120000_scholar_voice.sql): checks 89 to 92 prove the server-only record of
 -- live talks: its rules, that no app role can touch it, that it goes with the account and that it outlives its conversation. Run
 -- it after that migration.
+--
+-- 2026-11-20 (supabase/migrations/20261120120000_scholar_free_conversation.sql): checks 97 to 100 prove the record of the free
+-- conversation with Scholar: the server's two functions and who may call them, one conversation per account, the app reading only
+-- its own row, and that the record goes with the account and outlives its conversation. Run it after that migration.
 
 drop table if exists pg_temp.rls_results;
 create temp table rls_results (position integer, check_name text, passed boolean);
@@ -1380,6 +1384,191 @@ begin
     voice_outlives
     and not exists (select 1 from pg_constraint
                      where conrelid = 'public.scholar_voice_sessions'::regclass and contype = 'f'
+                       and confrelid = 'public.scholar_conversations'::regclass));
+
+  -- ===== Scholar's credits (supabase/migrations/20261118120000_scholar_credits.sql) =====
+  -- A Pro account's messages and answers read aloud spend credits from a window that renews a day after its first spend. Only the
+  -- server spends; the app reads its own row.
+  insert into rls_results values (93, 'the server spends credits, within the function''s and the table''s rules',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.spend_scholar_credits('selftest_a', 4, 400, 86400)$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.spend_scholar_credits('selftest_a', 0, 400, 86400)$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.spend_scholar_credits('selftest_a', 4, 0, 86400)$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.spend_scholar_credits('selftest_a', 4, 400, 59)$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.spend_scholar_credits('selftest_a', null, 400, 86400)$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.spend_scholar_credits('selftest_nobody', 4, 400, 86400)$q$) = '23503'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_credits (user_id, used, allowance, renews_at) values ('selftest_a', -1, 400, now())$q$)
+        = '23514'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_credits (user_id, used, allowance, renews_at) values ('selftest_a', 0, 0, now())$q$)
+        = '23514'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$select public.spend_scholar_credits('selftest_a', 4, 400, 86400)$q$) = '42501'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$select public.spend_scholar_credits('selftest_a', 4, 400, 86400)$q$) = '42501'
+    -- The refusal above would come from the table even if the function were granted (it runs as the caller), so the grant itself
+    -- is checked too: only the server may run it.
+    and not has_function_privilege('authenticated', 'public.spend_scholar_credits(text, integer, integer, integer)', 'execute')
+    and not has_function_privilege('anon', 'public.spend_scholar_credits(text, integer, integer, integer)', 'execute')
+    and has_function_privilege('service_role', 'public.spend_scholar_credits(text, integer, integer, integer)', 'execute'));
+
+  -- The window: a first spend starts it a day ahead, a second adds to it, an ended one starts again, a running one keeps its end.
+  insert into rls_results values (94, 'credits renew a day after the first spend, and a running window keeps its end',
+    pg_temp.value_as('service_role', no_claims,
+      array[$q$select public.spend_scholar_credits('selftest_a', 4, 400, 86400)$q$,
+            $q$select public.spend_scholar_credits('selftest_a', 4, 400, 86400)$q$],
+      $q$select used || ':' || allowance || ':' || (renews_at > now() + interval '23 hours')::text
+           from public.scholar_credits where user_id = 'selftest_a'$q$) = 'ok:8:400:true'
+    and pg_temp.value_as('service_role', no_claims,
+      array[$q$insert into public.scholar_credits (user_id, used, allowance, renews_at)
+               values ('selftest_a', 300, 400, now() - interval '1 minute')$q$,
+            $q$select public.spend_scholar_credits('selftest_a', 4, 500, 86400)$q$],
+      $q$select used || ':' || allowance || ':' || (renews_at > now() + interval '23 hours')::text
+           from public.scholar_credits where user_id = 'selftest_a'$q$) = 'ok:4:500:true'
+    and pg_temp.value_as('service_role', no_claims,
+      array[$q$insert into public.scholar_credits (user_id, used, allowance, renews_at)
+               values ('selftest_a', 10, 400, now() + interval '2 hours')$q$,
+            $q$select public.spend_scholar_credits('selftest_a', 3, 400, 86400)$q$],
+      $q$select used || ':' || (renews_at < now() + interval '3 hours')::text
+           from public.scholar_credits where user_id = 'selftest_a'$q$) = 'ok:13:true');
+
+  -- The app sees its own row and no other, and can write nothing; a visitor sees nothing.
+  insert into rls_results values (95, 'the app reads only its own credits and cannot write them; a visitor reads nothing',
+    pg_temp.value_as('authenticated', claims_a,
+      array[$q$insert into public.scholar_credits (user_id, used, allowance, renews_at)
+               values ('selftest_a', 12, 400, now() + interval '5 hours'), ('selftest_b', 30, 400, now() + interval '5 hours')$q$],
+      $q$select string_agg(user_id || ':' || used, ',') from public.scholar_credits$q$) = 'ok:selftest_a:12'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into public.scholar_credits (user_id, used, allowance, renews_at) values ('selftest_a', 0, 400, now())$q$)
+        = '42501'
+    and pg_temp.try_as('authenticated', claims_a,
+      $q$insert into public.scholar_credits (user_id, used, allowance, renews_at) values ('selftest_a', 9, 400, now())$q$,
+      $q$update public.scholar_credits set used = 0$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a,
+      $q$insert into public.scholar_credits (user_id, used, allowance, renews_at) values ('selftest_a', 9, 400, now())$q$,
+      $q$delete from public.scholar_credits$q$) = '42501'
+    and pg_temp.try_as('anon', no_claims, null, 'select * from public.scholar_credits') = '42501'
+    and exists (select 1 from pg_class where oid = 'public.scholar_credits'::regclass and relrowsecurity)
+    and (select count(*) from pg_policies where schemaname = 'public' and tablename = 'scholar_credits') = 1);
+
+  -- A person's credits go with their account.
+  insert into rls_results values (96, 'a person''s credits go with their account',
+    pg_temp.value_as('service_role', no_claims,
+      array[$q$insert into public.users_profile (id) values ('selftest_cr')$q$,
+            $q$select public.spend_scholar_credits('selftest_cr', 4, 400, 86400)$q$],
+      $q$select count(*)::text from public.scholar_credits where user_id = 'selftest_cr'$q$) = 'ok:1'
+    and pg_temp.value_as('service_role', no_claims,
+      array[$q$insert into public.users_profile (id) values ('selftest_cr')$q$,
+            $q$select public.spend_scholar_credits('selftest_cr', 4, 400, 86400)$q$,
+            $q$delete from public.users_profile where id = 'selftest_cr'$q$],
+      $q$select count(*)::text from public.scholar_credits where user_id = 'selftest_cr'$q$) = 'ok:0');
+
+  -- ===== The free conversation (supabase/migrations/20261120120000_scholar_free_conversation.sql) =====
+  -- An account that is not Pro has one free conversation with Scholar, ever. Only the server writes its record; the app reads its
+  -- own row. The record outlives its conversation, so deleting the conversation gives nothing back.
+  insert into rls_results values (97, 'the server records the free conversation, within the functions'' and the table''s rules',
+    pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.claim_scholar_free_conversation('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$) = 'ok:1'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.use_scholar_free_message(null, 'cf000000-0000-4000-8000-000000000001')$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.use_scholar_free_message('selftest_a', null)$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.claim_scholar_free_conversation('selftest_a', null)$q$) = '22023'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.use_scholar_free_message('selftest_nobody', 'cf000000-0000-4000-8000-000000000001')$q$) = '23503'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$select public.claim_scholar_free_conversation('selftest_nobody', 'cf000000-0000-4000-8000-000000000001')$q$)
+        = '23503'
+    and pg_temp.try_as('service_role', no_claims, null,
+      $q$insert into public.scholar_free_use (user_id, conversation_id, messages)
+           values ('selftest_a', 'cf000000-0000-4000-8000-000000000001', -1)$q$) = '23514'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$) = '42501'
+    and pg_temp.try_as('anon', no_claims, null,
+      $q$select public.claim_scholar_free_conversation('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$) = '42501'
+    -- The functions run as the caller, so the table would refuse an app role anyway: the grants themselves are checked too.
+    and not has_function_privilege('authenticated', 'public.use_scholar_free_message(text, uuid)', 'execute')
+    and not has_function_privilege('anon', 'public.use_scholar_free_message(text, uuid)', 'execute')
+    and has_function_privilege('service_role', 'public.use_scholar_free_message(text, uuid)', 'execute')
+    and not has_function_privilege('authenticated', 'public.claim_scholar_free_conversation(text, uuid)', 'execute')
+    and not has_function_privilege('anon', 'public.claim_scholar_free_conversation(text, uuid)', 'execute')
+    and has_function_privilege('service_role', 'public.claim_scholar_free_conversation(text, uuid)', 'execute'));
+
+  -- The first message claims its conversation, a later one there is added, one in another conversation changes nothing; a talk
+  -- claims the conversation it starts in only when nothing has, counts no message, and answers the conversation that holds it.
+  insert into rls_results values (98, 'one free conversation: the first claims it, others change nothing, a talk claims only when free',
+    pg_temp.value_as('service_role', no_claims,
+      array[$q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$,
+            $q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$,
+            $q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000002')$q$],
+      $q$select conversation_id || ':' || messages from public.scholar_free_use where user_id = 'selftest_a'$q$)
+        = 'ok:cf000000-0000-4000-8000-000000000001:2'
+    and pg_temp.value_as('service_role', no_claims,
+      array[$q$select public.claim_scholar_free_conversation('selftest_a', 'cf000000-0000-4000-8000-000000000002')$q$],
+      $q$select conversation_id || ':' || messages from public.scholar_free_use where user_id = 'selftest_a'$q$)
+        = 'ok:cf000000-0000-4000-8000-000000000002:0'
+    and pg_temp.value_as('service_role', no_claims,
+      array[$q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$],
+      $q$select public.claim_scholar_free_conversation('selftest_a', 'cf000000-0000-4000-8000-000000000002')::text$q$)
+        = 'ok:cf000000-0000-4000-8000-000000000001'
+    and pg_temp.value_as('service_role', no_claims,
+      array[$q$select public.claim_scholar_free_conversation('selftest_a', 'cf000000-0000-4000-8000-000000000002')$q$,
+            $q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000002')$q$,
+            $q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$],
+      $q$select conversation_id || ':' || messages from public.scholar_free_use where user_id = 'selftest_a'$q$)
+        = 'ok:cf000000-0000-4000-8000-000000000002:1');
+
+  -- The app sees its own row and no other, and can write nothing; a visitor sees nothing.
+  insert into rls_results values (99, 'the app reads only its own free conversation and cannot write it; a visitor reads nothing',
+    pg_temp.value_as('authenticated', claims_a,
+      array[$q$insert into public.scholar_free_use (user_id, conversation_id, messages)
+               values ('selftest_a', 'cf000000-0000-4000-8000-000000000001', 3),
+                      ('selftest_b', 'cf000000-0000-4000-8000-000000000002', 5)$q$],
+      $q$select string_agg(user_id || ':' || messages, ',') from public.scholar_free_use$q$) = 'ok:selftest_a:3'
+    and pg_temp.try_as('authenticated', claims_a, null,
+      $q$insert into public.scholar_free_use (user_id, conversation_id)
+           values ('selftest_a', 'cf000000-0000-4000-8000-000000000001')$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a,
+      $q$insert into public.scholar_free_use (user_id, conversation_id, messages)
+           values ('selftest_a', 'cf000000-0000-4000-8000-000000000001', 8)$q$,
+      $q$update public.scholar_free_use set messages = 0$q$) = '42501'
+    and pg_temp.try_as('authenticated', claims_a,
+      $q$insert into public.scholar_free_use (user_id, conversation_id, messages)
+           values ('selftest_a', 'cf000000-0000-4000-8000-000000000001', 8)$q$,
+      $q$delete from public.scholar_free_use$q$) = '42501'
+    and pg_temp.try_as('anon', no_claims, null, 'select * from public.scholar_free_use') = '42501'
+    and exists (select 1 from pg_class where oid = 'public.scholar_free_use'::regclass and relrowsecurity)
+    and (select count(*) from pg_policies where schemaname = 'public' and tablename = 'scholar_free_use') = 1);
+
+  -- The record goes with its account, and outlives its conversation: no foreign key ties them, so deleting gives nothing back.
+  insert into rls_results values (100, 'the free conversation''s record goes with its account and outlives its conversation',
+    pg_temp.value_as('service_role', no_claims,
+      array[$q$insert into public.users_profile (id) values ('selftest_fr')$q$,
+            $q$select public.use_scholar_free_message('selftest_fr', 'cf000000-0000-4000-8000-000000000003')$q$],
+      $q$select count(*)::text from public.scholar_free_use where user_id = 'selftest_fr'$q$) = 'ok:1'
+    and pg_temp.value_as('service_role', no_claims,
+      array[$q$insert into public.users_profile (id) values ('selftest_fr')$q$,
+            $q$select public.use_scholar_free_message('selftest_fr', 'cf000000-0000-4000-8000-000000000003')$q$,
+            $q$delete from public.users_profile where id = 'selftest_fr'$q$],
+      $q$select count(*)::text from public.scholar_free_use where user_id = 'selftest_fr'$q$) = 'ok:0'
+    and pg_temp.value_as('service_role', no_claims,
+      array[$q$insert into public.scholar_conversations (id, user_id)
+               values ('cf000000-0000-4000-8000-000000000004', 'selftest_a')$q$,
+            $q$select public.use_scholar_free_message('selftest_a', 'cf000000-0000-4000-8000-000000000004')$q$,
+            $q$delete from public.scholar_conversations where id = 'cf000000-0000-4000-8000-000000000004'$q$],
+      $q$select conversation_id || ':' || messages from public.scholar_free_use where user_id = 'selftest_a'$q$)
+        = 'ok:cf000000-0000-4000-8000-000000000004:1'
+    and not exists (select 1 from pg_constraint
+                     where conrelid = 'public.scholar_free_use'::regclass and contype = 'f'
                        and confrelid = 'public.scholar_conversations'::regclass));
 
   -- Leave nothing behind: the fixtures go, and with them (cascade) their entries, affirmations, Scholar's rows and talks.

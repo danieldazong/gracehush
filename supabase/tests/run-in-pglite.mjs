@@ -45,6 +45,8 @@ const MORE = migrations.find((name) => name.includes("more_affirmations"));
 const SCHOLAR = migrations.find((name) => name.includes("scholar_conversations"));
 const HELP = migrations.find((name) => name.includes("help_lines"));
 const VOICE = migrations.find((name) => name.includes("scholar_voice"));
+const CREDITS = migrations.find((name) => name.includes("scholar_credits"));
+const FREE = migrations.find((name) => name.includes("scholar_free_conversation"));
 
 // The baseline migration is supabase/schema.sql under a short header: if one changes, the other must change with it.
 const lf = (text) => text.replace(/\r\n/g, "\n");
@@ -228,7 +230,9 @@ for (const model of MODELS) {
             (select count(*) from public.scholar_messages)::int as scholar_messages,
             (select count(*) from public.scholar_usage)::int as scholar_usage,
             (select count(*) from public.scholar_safety_daily)::int as scholar_safety_daily,
-            (select count(*) from public.scholar_voice_sessions)::int as scholar_voice_sessions`,
+            (select count(*) from public.scholar_voice_sessions)::int as scholar_voice_sessions,
+            (select count(*) from public.scholar_credits)::int as scholar_credits,
+            (select count(*) from public.scholar_free_use)::int as scholar_free_use`,
   );
   console.log("rows left behind by the tests:", JSON.stringify(left.rows[0]));
   if (Object.values(left.rows[0]).some((count) => count !== 0)) failures += 1;
@@ -366,6 +370,31 @@ if (process.argv.includes("--negative")) {
     ["the record of talks does not follow the account", "off", (sql) => sql.replace("references public.users_profile (id) on delete cascade", "references public.users_profile (id)"), [91], VOICE],
     ["a talk's record is tied to its conversation (deleting one gives time back)", "off", (sql) => sql + "\nalter table public.scholar_voice_sessions add constraint scholar_voice_sessions_conversation_fkey foreign key (conversation_id) references public.scholar_conversations (id) on delete cascade;", [92], VOICE],
     ["ON: the record of talks keeps the API roles' default grants", "on", dropLine("revoke all on public.scholar_voice_sessions from anon, authenticated;"), [90], VOICE],
+    // Scholar's credits (2026-11-18, its own migration).
+    ["a spend of no credits is accepted", "off", (sql) => sql.replace("or p_cost < 1 or p_allowance < 1 or p_window_seconds < 60", "or p_allowance < 1 or p_window_seconds < 60"), [93], CREDITS],
+    ["credits may go below zero", "off", dropLine("  constraint scholar_credits_used check (used >= 0),"), [93], CREDITS],
+    ["an ended window keeps counting", "off", (sql) => sql.replace("set used = case when c.renews_at <= now() then excluded.used else c.used + excluded.used end,", "set used = c.used + excluded.used,"), [94], CREDITS],
+    ["a running window is pushed back by every spend", "off", (sql) => sql.replace("renews_at = case when c.renews_at <= now() then excluded.renews_at else c.renews_at end,", "renews_at = excluded.renews_at,"), [94], CREDITS],
+    ["the app may read everyone's credits", "off", (sql) => sql.replace("using (user_id = (select public.requesting_user_id()));", "using (true);"), [95], CREDITS],
+    ["the app may write its credits", "off", (sql) => sql + "\ngrant insert, update on public.scholar_credits to authenticated;\ncreate policy scholar_credits_write_own on public.scholar_credits for all to authenticated using (true) with check (true);", [95], CREDITS],
+    ["the app may spend credits", "off", (sql) => sql + "\ngrant execute on function public.spend_scholar_credits(text, integer, integer, integer) to authenticated;", [93], CREDITS],
+    ["row level security off on the credits", "off", (sql) => sql.replace("enable row level security", "disable row level security"), [95], CREDITS],
+    ["the credits do not follow the account", "off", (sql) => sql.replace("references public.users_profile (id) on delete cascade", "references public.users_profile (id)"), [96], CREDITS],
+    ["ON: the credits keep the API roles' default grants", "on", dropLine("revoke all on public.scholar_credits from anon, authenticated;"), [95], CREDITS],
+    // The free conversation (2026-11-20, its own migration).
+    ["a free message with no conversation is accepted", "off", (sql) => sql.replace("  if p_user is null or p_conversation is null then\n    raise exception 'user and conversation are required' using errcode = '22023';\n  end if;\n  insert into public.scholar_free_use as f", "  insert into public.scholar_free_use as f"), [97], FREE],
+    ["free messages may go below zero", "off", dropLine(",\n  constraint scholar_free_use_messages check (messages >= 0)"), [97], FREE],
+    ["a message in another conversation is counted too", "off", (sql) => sql.replace("    where f.conversation_id = excluded.conversation_id;", "    ;"), [98], FREE],
+    ["a message in another conversation takes the free one over", "off", (sql) => sql.replace("    set messages = f.messages + 1,\n        updated_at = now()\n    where f.conversation_id = excluded.conversation_id;", "    set conversation_id = excluded.conversation_id, messages = f.messages + 1, updated_at = now();"), [98], FREE],
+    ["a talk takes the free conversation over", "off", (sql) => sql.replace("  on conflict (user_id) do nothing;", "  on conflict (user_id) do update set conversation_id = excluded.conversation_id, messages = 0;"), [98], FREE],
+    ["the app may read everyone's free conversation", "off", (sql) => sql.replace("using (user_id = (select public.requesting_user_id()));", "using (true);"), [99], FREE],
+    ["the app may write its free conversation", "off", (sql) => sql + "\ngrant insert, update, delete on public.scholar_free_use to authenticated;\ncreate policy scholar_free_use_write_own on public.scholar_free_use for all to authenticated using (true) with check (true);", [99], FREE],
+    ["the app may use a free message", "off", (sql) => sql + "\ngrant execute on function public.use_scholar_free_message(text, uuid) to authenticated;", [97], FREE],
+    ["the app may claim the free conversation", "off", (sql) => sql + "\ngrant execute on function public.claim_scholar_free_conversation(text, uuid) to authenticated;", [97], FREE],
+    ["row level security off on the free conversation", "off", (sql) => sql.replace("enable row level security", "disable row level security"), [99], FREE],
+    ["the free conversation does not follow the account", "off", (sql) => sql.replace("references public.users_profile (id) on delete cascade", "references public.users_profile (id)"), [100], FREE],
+    ["deleting the free conversation gives it back", "off", (sql) => sql.replace("  conversation_id uuid        not null,", "  conversation_id uuid        not null references public.scholar_conversations (id) on delete cascade,"), [100], FREE],
+    ["ON: the free conversation keeps the API roles' default grants", "on", dropLine("revoke all on public.scholar_free_use from anon, authenticated;"), [99], FREE],
     // Not a broken migration: the hosted project before the day's first Realtime connection. Nothing may fail, the checks that need
     // a message table say skipped, and a change is still saved (59).
     ["no message table today (nobody has connected yet)", "off", null, { skipped: [60, 61, 62], passed: [59, 63, 64] }, REALTIME, { stub: NO_MESSAGE_TABLE_TODAY }],
