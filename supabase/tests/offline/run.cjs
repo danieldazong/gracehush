@@ -62,15 +62,15 @@ const count = async (db, table = "outbox") => (await db.getFirstAsync(`SELECT CO
 
 // ================================================================== database
 async function databaseChecks() {
-  await test("the file is named after a hash of the user id, in WAL mode, migrated to version 3, with a key in the keychain", async (w) => {
+  await test("the file is named after a hash of the user id, in WAL mode, migrated to version 4, with a key in the keychain", async (w) => {
     const { db } = await openAs(w, "user_secret_id");
     const hash = sha16("user_secret_id");
     assert.deepEqual(w.sqlite.stats.opens, [`gracehush-${hash}.db`]);
     assert.ok(!w.sqlite.files().join(" ").includes("secret"));
-    assert.equal((await db.getFirstAsync("PRAGMA user_version")).user_version, 3);
+    assert.equal((await db.getFirstAsync("PRAGMA user_version")).user_version, 4);
     assert.equal((await db.getFirstAsync("PRAGMA journal_mode")).journal_mode, "wal");
     const tables = (await db.getAllAsync("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).map((r) => r.name);
-    for (const name of ["outbox", "entries_cache", "affirmations_cache", "mutations"]) assert.ok(tables.includes(name), name);
+    for (const name of ["outbox", "entries_cache", "affirmations_cache", "mutations", "word_calendar"]) assert.ok(tables.includes(name), name);
     assert.ok(w.secure.items.has(`gracehush.dbkey.${hash}`));
     assert.equal(w.secure.options.get(`gracehush.dbkey.${hash}`).keychainAccessible, "when-unlocked-this-device-only");
     assert.ok(!w.logs.some((line) => line.includes("secret")));
@@ -792,6 +792,8 @@ async function accountChecks() {
       "@/store/profilePrefsStore": { __esModule: true, useProfilePrefsStore: { getState: () => ({ forgetUser: () => undefined }) } },
       // Step 28: the affirmation notifications go too (expo-notifications cannot load in plain Node).
       "@/services/affirmationScheduler": { __esModule: true, clearAffirmations: async () => void order.push("affirmations") },
+      // 2026-11-18: the trial-end reminder goes too (expo-notifications cannot load in plain Node).
+      "@/services/trialReminder": { __esModule: true, clearTrialReminder: async () => void order.push("trial reminder") },
       // Step 30: the plan watch stops and RevenueCat logs out (react-native-purchases and expo cannot load in plain Node).
       "@/services/subscriptionSync": { __esModule: true, stopPlanWatch: () => void order.push("plan watch") },
       "@/services/revenuecat": { __esModule: true, endRevenueCatSession: async () => void order.push("revenuecat") },
@@ -802,6 +804,8 @@ async function accountChecks() {
       // Step 38: Scholar's voice stops and its parts go, and the session's turns are forgotten (expo-audio cannot load here).
       "@/services/scholarPlayer": { __esModule: true, clearScholarAudio: () => void order.push("scholar audio"), stopScholarAudio: () => undefined },
       "@/data/scholarRepository": { __esModule: true, forgetScholarSession: () => void order.push("scholar session") },
+      // 2026-11-20: the picture of the word card made for the last share goes too (expo-file-system cannot load in plain Node).
+      "@/services/wordCardShare": { __esModule: true, deleteWordPictures: () => void order.push("word picture") },
       // Step 39: a live talk ends first, while the session still works (the talk service needs expo-keep-awake and expo-audio).
       "@/services/scholarTalk": { __esModule: true, endLiveTalk: async () => void order.push("talk ended") },
     };
@@ -837,7 +841,13 @@ async function accountChecks() {
       order.includes("scholar audio") && order.includes("scholar session"),
       `Scholar's voice, its parts and its session go too: ${order.join(" > ")}`,
     );
+    assert.equal(order.filter((step) => step === "word picture").length, 1, `the picture of the word card made for the last share goes too, once: ${order.join(" > ")}`);
     assert.equal(order.filter((step) => step === "affirmations").length, 1, "the affirmation notifications are cleared once");
+    assert.equal(order.filter((step) => step === "trial reminder").length, 1, "the trial reminder is cleared once");
+    assert.ok(
+      order.indexOf("affirmations") < order.indexOf("trial reminder") && order.indexOf("trial reminder") < order.indexOf("plan watch"),
+      `the trial reminder is cleared after the affirmations and before the plan watch stops: ${order.join(" > ")}`,
+    );
     assert.ok(order.indexOf("plan watch") >= 0 && order.indexOf("plan watch") < order.indexOf("revenuecat"), `the plan watch stops before RevenueCat logs out: ${order.join(" > ")}`);
     assert.equal(order[order.length - 1], "analytics reset", `analytics resets last: ${order.join(" > ")}`);
     await mod.use("@/services/account").signOutCleanup();

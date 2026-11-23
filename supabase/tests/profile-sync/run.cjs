@@ -201,14 +201,16 @@ const row = ({
     assert.equal(s().remindersSyncedAt, syncedAt);
     assert.equal(s().reminders.morning, "05:00"); // the time itself stays
   });
-  await test("onboarding: what is saved is version 4 and includes remindersDirty, the analytics choice and hasSignedIn", async () => {
+  await test("onboarding: what is saved is version 5 and includes remindersDirty, the analytics choice, hasSignedIn and the source answer", async () => {
     const { env, store } = await onboarding(undefined);
     store.getState().setReminder("afternoon", "14:00");
     await sleep(30);
     const saved = JSON.parse(env.storage.get("gracehush.onboarding"));
-    assert.equal(saved.version, 4);
+    assert.equal(saved.version, 5);
     assert.equal(saved.state.analyticsConsent, "unset");
     assert.equal(saved.state.hasSignedIn, false);
+    assert.equal(saved.state.acquisitionSource, null);
+    assert.equal(saved.state.acquisitionSent, false);
     assert.equal(saved.state.remindersDirty, true);
     assert.equal(saved.state.reminders.afternoon, "14:00");
     assert.equal(typeof saved.state.setReminder, "undefined");
@@ -254,6 +256,65 @@ const row = ({
     assert.equal(copy.auth.fresh.gets, undefined, "no rows on the Sign In any more");
     assert.equal(copy.auth.fresh.freePlan, undefined, "and no free-plan line");
   });
+  await test("source step: four onboarding steps and five in all; the question is step 1, between Welcome and Rhythm", async () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const root = process.env.GRACEHUSH_REPO ?? path.resolve(__dirname, "..", "..", "..");
+    const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
+    const progress = read("src/components/StepProgress.tsx");
+    assert.ok(progress.includes("export const ONBOARDING_STEPS = 4;"));
+    const screen = read("src/screens/onboarding/OnboardingScreen.tsx");
+    assert.ok(screen.includes("{step === 1 && <SourceStep selected={acquisitionSource} onSelect={setAcquisitionSource} />}"));
+    const order = ["{step === 1 && <SourceStep", "{step === 2 && (", "rhythm.eyebrow", "{step === 3 && (", "permissions.eyebrow"].map((s) => screen.indexOf(s));
+    assert.ok(order.every((at) => at >= 0), order.join(","));
+    assert.deepEqual([...order].sort((a, b) => a - b), order, "Welcome, the question, Rhythm, Permissions");
+    // Welcome goes to the question, the question to Rhythm, Rhythm back to the question and on to Permissions.
+    const footers = screen.slice(screen.indexOf("const footers: Footer[] = ["), screen.indexOf("const footer = footers["));
+    assert.ok(footers.includes("label: source.primary"));
+    const sourceFooter = footers.slice(footers.indexOf("label: source.primary"), footers.indexOf("label: rhythm.primary"));
+    assert.ok(sourceFooter.includes("onPress: () => goToStep(2)"));
+    assert.ok(sourceFooter.includes("disabled: !sourceAnswered"), "Continue waits for an answer");
+    assert.ok(sourceFooter.includes("hint: sourceAnswered ? undefined : source.primaryHint"));
+    assert.ok(sourceFooter.includes('setAcquisitionSource("skipped");'), "Skip saves skipped");
+    assert.ok(/label: source\.skip,[\s\S]*setAcquisitionSource\("skipped"\);\s*goToStep\(2\);/.test(sourceFooter), "then moves on");
+    const rhythmFooter = footers.slice(footers.indexOf("label: rhythm.primary"), footers.indexOf("label: permissions.primary"));
+    assert.ok(rhythmFooter.includes("onPress: () => goToStep(3)") && rhythmFooter.includes("onPress: () => goToStep(1)"));
+    assert.ok(screen.includes('const sourceAnswered = acquisitionSource !== null && acquisitionSource !== "skipped";'));
+    assert.ok(screen.includes("disabled={footer.disabled}") && screen.includes("accessibilityHint={footer.hint}"));
+  });
+  await test("source step: one tap on a tile, a tick only for a changed choice, radios in a group, the eight places shuffled once and Something else last", async () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const root = process.env.GRACEHUSH_REPO ?? path.resolve(__dirname, "..", "..", "..");
+    const step = fs.readFileSync(path.join(root, "src", "screens", "onboarding", "SourceStep.tsx"), "utf8");
+    assert.ok(/function choose\(answer: Answer\) \{\s*if \(answer === selected\) return;\s*haptics\.selection\(\);\s*onSelect\(answer\);/.test(step));
+    assert.equal((step.match(/haptics\./g) ?? []).length, 1, "one haptic, in choose");
+    assert.ok(step.includes('accessibilityRole="radiogroup"') && step.includes('accessibilityRole="radio"'));
+    assert.ok(step.includes("accessibilityState={{ checked: selected }}"));
+    // The order is drawn once, outside render, and "other" is never in it.
+    assert.ok(/^const ORDER = shuffled\(PLACES\);$/m.test(step), "at module scope");
+    const places = step.slice(step.indexOf("const PLACES"), step.indexOf("];", step.indexOf("const PLACES")));
+    assert.ok(!places.includes('"other"') && !places.includes('"skipped"'));
+    assert.equal((places.match(/"[a-z_]+"/g) ?? []).length, 8);
+    const render = step.slice(step.indexOf("export function SourceStep"));
+    assert.ok(!render.includes("Math.random"), "never in render");
+    assert.ok(render.indexOf("ROWS.map") < render.indexOf('<Tile answer="other"'), "Something else after the eight");
+    assert.ok(!/TextInput/.test(step), "no typing");
+  });
+  await test("source step: the words, in curly punctuation, and nine answers that match the list the store keeps", async () => {
+    const { env } = await onboarding(undefined);
+    const { copy } = env.use("@/constants/copy");
+    const { ACQUISITION_SOURCES } = env.use("@/constants/app");
+    const source = copy.onboarding.source;
+    assert.equal(source.title, "How did you hear about GraceHush?");
+    assert.equal(source.eyebrow, "One quick question");
+    assert.equal(source.primary, "Continue");
+    assert.equal(source.skip, "Skip");
+    assert.deepEqual(Object.keys(source.options), ACQUISITION_SOURCES.filter((answer) => answer !== "skipped"));
+    const words = [source.eyebrow, source.title, source.subtitle, source.groupLabel, source.primaryHint, ...Object.values(source.options)];
+    for (const text of words) assert.ok(!text.includes(String.fromCharCode(39)), `curly punctuation only: ${text}`);
+    assert.ok(!/will |guarantee|free|private|safe/i.test(source.subtitle), "the subtitle promises nothing");
+  });
   await test("names: an Apple private address never gives a name, and an ordinary address still does", async () => {
     const { env } = await onboarding(undefined);
     const { getDisplayName, getFullName, getInitials } = env.use("@/utils/format");
@@ -286,6 +347,40 @@ const row = ({
       if (before === undefined) delete process.env.TZ;
       else process.env.TZ = before;
     }
+  });
+  await test("profile: the account header's name is the heading tier, and there is no member-since line", async () => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const root = process.env.GRACEHUSH_REPO ?? path.resolve(__dirname, "..", "..", "..");
+    // ProfileScreen.tsx is CRLF, so line endings are made LF before anything is sliced.
+    const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8").replace(/\r\n/g, "\n");
+    // Code only: the header's own comment explains the choice and says "member since" in words.
+    const code = read("src/screens/profile/ProfileScreen.tsx")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    const start = code.indexOf("function AccountHeader(");
+    assert.ok(start >= 0, "the header is its own component");
+    const header = code.slice(start, code.indexOf("\n}\n", start));
+    assert.ok(header.startsWith("function AccountHeader() {"), "it takes nothing: the name, email and picture all come from Clerk");
+    // The name is Fraunces Medium 20/28, the content's heading tier (the Journal greeting's), not the screen's 24 headline: at
+    // 24 "ayoko Christian timilehin" filled the owner's row, wrapped on a 375 or 390 wide phone and outweighed the wordmark.
+    assert.ok(
+      header.includes('<Text className="text-section text-plum-deep">{getFullName(names) ?? text.account.friend}</Text>'),
+      "the name is text-section in plum-deep, from Clerk with the copy's Friend as the fallback",
+    );
+    assert.ok(!header.includes("text-headline"), "the name does not take the screen's headline size");
+    assert.ok(!/Skeleton|state\./.test(header), "no placeholder and no profile data: the header shows from Clerk alone, in every state");
+    const css = read("global.css");
+    assert.ok(/@utility text-section \{\s*@apply font-fraunces-medium text-\[20px\] leading-\[28px\];/.test(css), "text-section is 20/28");
+    // The line is gone with everything that fed it.
+    for (const word of ["memberSince", "Member since", "formatMonthYear", "ReactNode"]) {
+      assert.ok(!code.includes(word), `ProfileScreen no longer has ${word}`);
+    }
+    assert.ok(code.includes("<AccountHeader />") && !/<AccountHeader\s+\w/.test(code), "drawn with no props");
+    const { env } = await onboarding(undefined);
+    const { copy } = env.use("@/constants/copy");
+    assert.deepEqual(Object.keys(copy.profile.account), ["friend"], "no member-since string is left in the copy");
+    assert.equal(copy.profile.account.friend, "Friend");
   });
   await test("verse: the card sets a verse as one flowing paragraph (whitespace only), with balanced breaks, and the share message keeps the lines", async () => {
     const fs = require("node:fs");
@@ -472,12 +567,14 @@ const row = ({
       recordingsDeleted: 0,
       devotionalsDeleted: 0,
       affirmationsCleared: 0,
+      trialRemindersCleared: 0,
       planWatchStopped: 0,
       revenueCatEnded: 0,
       analyticsReset: 0,
       scholarCleared: 0,
       scholarForgotten: 0,
       talksEnded: 0,
+      wordPicturesDeleted: 0,
     };
     const remote = { server, fetchFails: null, pushFails: [], onPush: null, onFetch: null };
     const session = { userId: "user_a" };
@@ -520,6 +617,8 @@ const row = ({
     fakes["@/services/devotionalAudio"] = { deleteAllDevotionalAudio: async () => void calls.devotionalsDeleted++ };
     // Step 28: the same for the affirmation notifications (expo-notifications cannot load in Node).
     fakes["@/services/affirmationScheduler"] = { clearAffirmations: async () => void calls.affirmationsCleared++ };
+    // 2026-11-18: the same for the trial-end reminder.
+    fakes["@/services/trialReminder"] = { clearTrialReminder: async () => void calls.trialRemindersCleared++ };
     // Step 30: the plan watch stops and RevenueCat logs out (react-native-purchases and expo cannot load in Node).
     fakes["@/services/subscriptionSync"] = { stopPlanWatch: () => void calls.planWatchStopped++ };
     fakes["@/services/revenuecat"] = { endRevenueCatSession: async () => void calls.revenueCatEnded++ };
@@ -543,6 +642,9 @@ const row = ({
     // the storage client behind them cannot load in Node).
     fakes["@/services/scholarPlayer"] = { clearScholarAudio: () => void calls.scholarCleared++, stopScholarAudio: () => undefined };
     fakes["@/data/scholarRepository"] = { forgetScholarSession: () => void calls.scholarForgotten++ };
+    // 2026-11-20: signOutCleanup deletes the picture of the word card made for the last share (expo-file-system and
+    // react-native behind the service cannot load in Node).
+    fakes["@/services/wordCardShare"] = { deleteWordPictures: () => void calls.wordPicturesDeleted++ };
     // Step 39: signOutCleanup ends a live talk first (the talk service needs expo-keep-awake and expo-audio).
     fakes["@/services/scholarTalk"] = { endLiveTalk: async () => void calls.talksEnded++ };
     const env = makeEnv({ stored, fakes });
@@ -1014,12 +1116,14 @@ const row = ({
     assert.equal(ctx.calls.recordingsDeleted, 1, "sign out deletes the finished recordings on the phone");
     assert.equal(ctx.calls.devotionalsDeleted, 1, "sign out deletes the downloaded devotionals too");
     assert.equal(ctx.calls.affirmationsCleared, 1, "and clears the affirmation notifications");
+    assert.equal(ctx.calls.trialRemindersCleared, 1, "and the trial-end reminder");
     assert.equal(ctx.calls.planWatchStopped, 1, "and stops the plan watch");
     assert.equal(ctx.calls.revenueCatEnded, 1, "and logs out of RevenueCat");
     assert.equal(ctx.calls.analyticsReset, 1, "and resets analytics");
     assert.equal(ctx.calls.scholarCleared, 1, "and stops Scholar's voice and deletes the parts it read");
     assert.equal(ctx.calls.scholarForgotten, 1, "and forgets Scholar's turns of this session");
     assert.equal(ctx.calls.talksEnded, 1, "and ends a live talk with Scholar (step 39)");
+    assert.equal(ctx.calls.wordPicturesDeleted, 1, "and deletes the picture of the word card made for the last share");
     assert.equal(ob.getState().remindersDirty, false);
     assert.deepEqual(unsentOf(ctx), { ambientSound: "soft-rain" }, "sign out keeps the user's unsent setting");
     await sleep(1000);
@@ -1029,8 +1133,10 @@ const row = ({
     assert.equal(ctx.calls.recordingsDeleted, 2, "account deletion deletes the recordings too");
     assert.equal(ctx.calls.devotionalsDeleted, 2, "and the downloaded devotionals");
     assert.equal(ctx.calls.affirmationsCleared, 2, "and the affirmation notifications");
+    assert.equal(ctx.calls.trialRemindersCleared, 2, "and the trial-end reminder");
     assert.equal(ctx.calls.revenueCatEnded, 2, "and logs out of RevenueCat");
     assert.equal(ctx.calls.analyticsReset, 2, "and resets analytics");
+    assert.equal(ctx.calls.wordPicturesDeleted, 2, "and the picture of the word card");
     assert.equal(prefsOf(ctx).getState().byUser.user_a, undefined, "delete forgets them");
   });
 
@@ -1144,6 +1250,7 @@ const row = ({
         "@/services/recordingFiles": { deleteAllRecordings: async () => undefined },
         "@/services/devotionalAudio": { deleteAllDevotionalAudio: async () => undefined },
         "@/services/affirmationScheduler": { clearAffirmations: async () => undefined },
+        "@/services/trialReminder": { clearTrialReminder: async () => undefined },
         "@/services/subscriptionSync": { stopPlanWatch: () => undefined },
         "@/services/revenuecat": { endRevenueCatSession: async () => undefined },
         "@/db/database": { isDatabaseOpen: () => false, deleteUserDatabase: async () => undefined },
@@ -1157,6 +1264,7 @@ const row = ({
         "@/services/scholarPlayer": { clearScholarAudio: () => undefined, stopScholarAudio: () => undefined },
         "@/data/scholarRepository": { forgetScholarSession: () => undefined },
         "@/services/scholarTalk": { endLiveTalk: async () => undefined },
+        "@/services/wordCardShare": { deleteWordPictures: () => undefined },
       },
     });
     await env.use("@/store/onboardingStore").useOnboardingStore.persist.rehydrate();

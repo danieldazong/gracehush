@@ -1,7 +1,14 @@
-import { AMBIENT_SOUNDS, PLAYBACK_RATES } from "@/constants/app";
+import { ACQUISITION_SOURCES, AMBIENT_SOUNDS, PLAYBACK_RATES } from "@/constants/app";
 import { SCHOLAR_VOICE_KEYS, type ScholarVoiceKey } from "@/constants/scholarVoices";
 import type { MainTabParamList, RootStackParamList } from "@/navigation/types";
-import type { AmbientSound, PackageKind, PlaybackRate, PurchaseErrorCode, TimeSlot } from "@/types";
+import type {
+  AcquisitionSource,
+  AmbientSound,
+  PackageKind,
+  PlaybackRate,
+  PurchaseErrorCode,
+  TimeSlot,
+} from "@/types";
 
 // What the app may send to PostHog (step 34), and the filter every event passes on its way out. Pure: no PostHog, no
 // React Native. services/analytics.ts is the only caller.
@@ -16,6 +23,8 @@ export type AddedPosition = 4 | 5 | 6 | 7 | 8 | 9 | 10;
 // signing in or out, or anything a person wrote; there are no ids, titles, verses, counts of words or free text.
 export type AnalyticsEvent =
   | { name: "onboarding_completed"; props: { permissions_prompted: boolean } }
+  // 2026-11-20: onboarding's "How did you hear about GraceHush?", sent once, after the person said yes to sharing.
+  | { name: "acquisition_source_answered"; props: { source: AcquisitionSource } }
   | { name: "reflection_ready"; props: { input: "text" | "voice"; scripture_verified: boolean } }
   | { name: "entry_failed"; props: { code: EntryFailedCode } }
   | { name: "devotional_played"; props: { rate: PlaybackRate } }
@@ -112,6 +121,7 @@ const ADDED_POSITIONS: readonly AddedPosition[] = [4, 5, 6, 7, 8, 9, 10];
 // Each event's own properties: all of them must be there and valid, or the event is dropped.
 const EVENT_PROPS: { [N in AnalyticsEventName]: { [K in keyof AnalyticsProps<N>]-?: Check } } = {
   onboarding_completed: { permissions_prompted: bool },
+  acquisition_source_answered: { source: oneOf(ACQUISITION_SOURCES) },
   reflection_ready: { input: oneOf(["text", "voice"]), scripture_verified: bool },
   entry_failed: { code: oneOf(ENTRY_FAILED_CODES) },
   devotional_played: { rate: oneOf(PLAYBACK_RATES) },
@@ -146,7 +156,8 @@ const SYSTEM_PROPS: Record<(typeof SYSTEM_EVENTS)[number], Record<string, Check>
 };
 
 // Kept on every event when present and valid. $screen_name is the last tracked screen (the SDK keeps it for the session);
-// tier, app_version and build are the app's own super properties.
+// tier, app_version, build and acquisition_source (2026-11-20: how the person heard about GraceHush) are the app's own
+// super properties.
 const COMMON_PROPS: Record<string, Check> = {
   $lib: shortText,
   $lib_version: shortText,
@@ -160,6 +171,7 @@ const COMMON_PROPS: Record<string, Check> = {
   tier: oneOf(["free", "trial", "pro"]),
   app_version: (value) => typeof value === "string" && /^\d{1,4}(\.\d{1,4}){0,3}$/.test(value),
   build: oneOf(["development", "release"]),
+  acquisition_source: oneOf(ACQUISITION_SOURCES),
 };
 
 const has = (record: object, key: string) => Object.prototype.hasOwnProperty.call(record, key);

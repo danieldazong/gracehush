@@ -2,7 +2,7 @@ import { createAudioPlayer, type AudioPlayer, type AudioStatus } from "expo-audi
 import { AppState } from "react-native";
 import { create } from "zustand";
 
-import { KEEP_SESSION_ACTIVE, LOAD_TIMEOUT_MS, PLAYER_UPDATE_MS } from "@/constants/audio";
+import { KEEP_SESSION_ACTIVE, LOAD_TIMEOUT_MS, NEW_REFLECTION_AMBIENT, PLAYER_UPDATE_MS } from "@/constants/audio";
 import { setAmbientBed, setAmbientRemoteHandler, stopAmbient } from "@/services/ambientPlayer";
 import { setSessionMode } from "@/services/audioSession";
 import { forgetDevotionalFile, getDevotionalFile } from "@/services/devotionalAudio";
@@ -26,6 +26,8 @@ type PlayerState = {
   title: string;
   subtitle: string;
   durationMs: number;
+  // The painted scenes that interpret the reflection, best first (PlaybackTrack.scenes): Now Playing's card shows them.
+  scenes: readonly number[];
   positionMs: number;
   status: PlaybackStatus;
   isBuffering: boolean;
@@ -51,12 +53,18 @@ type PlayerState = {
   // Profile calls it after a successful ambient save (step 15): the next load of a different devotional copies
   // the profile's ambient choice again. It changes no state, so nothing that is playing changes.
   reseedAmbient: () => void;
+  // A reflection made on this phone has just finished (services/newReflectionAmbient.ts): its devotional's first load starts
+  // with Gentle Piano at 100% (NEW_REFLECTION_AMBIENT), whatever the caller passes. It changes no state, so a devotional
+  // that is playing keeps its sound.
+  markNewReflection: (entryId: string) => void;
 };
 
 // The ambient choice is copied from the profile by the first load after the app starts (or after stop(), or after
 // reseedAmbient() when Profile saved a new default). Later loads keep the session's choice: a listener's speed
-// and sound belong to the session, not to a devotional.
+// and sound belong to the session, not to a devotional. A reflection made on this phone is the exception: its first
+// load starts with NEW_REFLECTION_AMBIENT (newReflections, 2026-11-20), and the session keeps that from then on.
 let ambientSeeded = false;
+const newReflections = new Set<string>();
 
 // ---- the player. It is not part of the state: nothing draws from it.
 //
@@ -328,6 +336,7 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
   title: "",
   subtitle: "",
   durationMs: 0,
+  scenes: [],
   positionMs: 0,
   status: "idle",
   isBuffering: false,
@@ -351,12 +360,16 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
       title: next.title,
       subtitle: next.subtitle,
       durationMs: next.durationMs,
+      scenes: next.scenes,
       positionMs: 0,
       status: "paused",
       isBuffering: false,
       error: null,
     });
-    if (!ambientSeeded) {
+    if (newReflections.delete(next.entryId)) {
+      ambientSeeded = true;
+      set({ ambientSound: NEW_REFLECTION_AMBIENT.ambientSound, ambientVolume: NEW_REFLECTION_AMBIENT.ambientVolume });
+    } else if (!ambientSeeded) {
       ambientSeeded = true;
       set({ ambientSound: ambient.ambientSound, ambientVolume: ambient.ambientVolume });
     }
@@ -455,11 +468,13 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
     releasePlayer();
     stopAmbient();
     ambientSeeded = false;
+    newReflections.clear();
     set({
       entryId: null,
       title: "",
       subtitle: "",
       durationMs: 0,
+      scenes: [],
       positionMs: 0,
       status: "idle",
       isBuffering: false,
@@ -472,6 +487,10 @@ export const usePlayerStore = create<PlayerState>()((set, get) => ({
 
   reseedAmbient: () => {
     ambientSeeded = false;
+  },
+
+  markNewReflection: (entryId) => {
+    newReflections.add(entryId);
   },
 }));
 

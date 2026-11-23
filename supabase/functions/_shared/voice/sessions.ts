@@ -40,6 +40,19 @@ export async function listSessionsSince(
   return data as VoiceSessionRow[];
 }
 
+// The person's talks in one conversation, newest first, however long ago (2026-11-20: the free conversation's talk time is
+// counted over its whole life, not a month).
+export async function listSessionsInConversation(
+  admin: SupabaseClient,
+  userId: string,
+  conversationId: string,
+): Promise<VoiceSessionRow[]> {
+  const { data, error } = await admin.from("scholar_voice_sessions").select(COLUMNS)
+    .eq("user_id", userId).eq("conversation_id", conversationId).order("started_at", { ascending: false }).limit(1000);
+  if (error) throw dbFailure("voice_sessions", error);
+  return data as VoiceSessionRow[];
+}
+
 // One talk of this person's. Another person's talk and one that does not exist are the same null.
 export async function findSession(admin: SupabaseClient, userId: string, id: string): Promise<VoiceSessionRow | null> {
   const { data, error } = await admin.from("scholar_voice_sessions").select(COLUMNS)

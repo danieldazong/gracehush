@@ -57,6 +57,8 @@ import { listRecordings } from "@/services/recordingFiles";
 import { getTalkState, subscribeTalk } from "@/services/scholarTalk";
 import { voiceSupported } from "@/services/voiceSupport";
 import { resumeAfterUpgrade, subscribe, syncNow } from "@/services/syncEngine";
+import { getCurrentOffering } from "@/services/purchases";
+import { clearTrialReminder, scheduleTestTrialReminder } from "@/services/trialReminder";
 import {
   checkSessionToken,
   describeSessionToken,
@@ -83,7 +85,7 @@ import {
 const SCENARIOS: MockScenario[] = ["default", "empty", "offline"];
 const SUBMIT_OUTCOMES: MockSubmitOutcome[] = ["ready", "crisis", "failed", "limit", "too_short"];
 // What the next Scholar message answers on the mock data (step 38).
-const SCHOLAR_OUTCOMES: MockScholarOutcome[] = ["ready", "heavy", "failed", "limit", "resting"];
+const SCHOLAR_OUTCOMES: MockScholarOutcome[] = ["ready", "heavy", "failed", "limit", "plan", "trial", "resting"];
 const OUTBOX_STATES: OutboxStatus[] = ["queued", "sending", "needs_action", "limit_reached", "paused_auth"];
 const PLANS: SubscriptionTier[] = ["free", "trial", "pro"];
 const DATA_SOURCES: DataSource[] = ["supabase", "mock"];
@@ -384,6 +386,8 @@ function DevToolsContent() {
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [affirmationLines, setAffirmationLines] = useState<string[]>(["affirmations: …"]);
   const [affirmationBusy, setAffirmationBusy] = useState(false);
+  const [trialReminderLine, setTrialReminderLine] = useState<string | null>(null);
+  const [trialReminderBusy, setTrialReminderBusy] = useState(false);
   const [outboxText, setOutboxText] = useState("outbox: …");
   const [pendingText, setPendingText] = useState("Pending changes: …");
   const realtime = useRealtimeStore();
@@ -529,6 +533,32 @@ function DevToolsContent() {
     const sent = await scheduleTestAffirmation(10_000);
     await showAffirmations(sent ? "test: in 10 s" : "test: nothing to send (switch, permission or reflection)");
     setAffirmationBusy(false);
+  }
+
+  // 2026-11-18: the trial-end reminder. "Trial reminder in 10 s" shows its real words in ten seconds for a pretend trial that
+  // ends in three days (a permission never asked is asked once), with the price and period of the current offering's yearly plan,
+  // as the Paywall would hand them over; "Clear" removes every trial reminder of ours. No date, no id, no price on screen.
+  async function testTrialReminder() {
+    setTrialReminderBusy(true);
+    const offering = await getCurrentOffering().catch(() => null);
+    const pkg = offering?.packages.find((item) => item.kind === "annual") ?? offering?.packages[0] ?? null;
+    const sent =
+      pkg === null ? false : await scheduleTestTrialReminder({ price: pkg.priceString, period: pkg.periodLabel }, 10_000);
+    setTrialReminderLine(
+      sent
+        ? "test: in 10 s"
+        : pkg === null
+          ? "test: nothing sent (no plans to read a price from)"
+          : "test: nothing sent (notifications are off or unavailable)",
+    );
+    setTrialReminderBusy(false);
+  }
+
+  async function clearTrialReminders() {
+    setTrialReminderBusy(true);
+    await clearTrialReminder();
+    setTrialReminderLine("trial reminders cleared");
+    setTrialReminderBusy(false);
   }
 
   // The session goes first, and the cleanup before it, as in Profile's own Sign out.
@@ -885,6 +915,14 @@ function DevToolsContent() {
             <DevButton label="Show (dev)" disabled={affirmationBusy} onPress={() => void showAffirmations(null)} />
             <DevButton label="Reschedule now (dev)" disabled={affirmationBusy} onPress={rescheduleAffirmations} />
             <DevButton label="Test in 10 s (dev)" disabled={affirmationBusy} onPress={testAffirmation} />
+          </View>
+        </View>
+        <View className="items-center gap-2">
+          <Text className="text-center text-body-sm text-mauve">Trial reminder (dev)</Text>
+          {trialReminderLine === null ? null : <Text className="text-center text-body-sm text-ink">{trialReminderLine}</Text>}
+          <View className="flex-row flex-wrap justify-center gap-2">
+            <DevButton label="Trial reminder in 10 s (dev)" disabled={trialReminderBusy} onPress={testTrialReminder} />
+            <DevButton label="Clear trial reminders (dev)" disabled={trialReminderBusy} onPress={clearTrialReminders} />
           </View>
         </View>
         <View className="gap-2">

@@ -71,12 +71,25 @@ function makeClient(token: string, host: string): PostHog {
 
 async function applySuperProperties(current: PostHog): Promise<void> {
   const tier = useEntitlementStore.getState().tier;
+  const source = useOnboardingStore.getState().acquisitionSource;
   await current.register({
     app_version: Constants.expoConfig?.version ?? "0",
     build: __DEV__ ? "development" : "release",
     ...(tier === null ? {} : { tier }),
+    ...(source === null ? {} : { acquisition_source: source }),
   });
   if (tier === null) await current.unregister("tier");
+  if (source === null) await current.unregister("acquisition_source");
+}
+
+// Onboarding's "How did you hear about GraceHush?" (2026-11-20): sent once per device, and only once the person has said
+// yes to sharing. An answer given while sharing is off waits on the phone until the yes; a later sign-out does not send
+// it again (the super property keeps it on every event instead).
+function sendAcquisitionOnce(): void {
+  const { acquisitionSource, acquisitionSent, markAcquisitionSent } = useOnboardingStore.getState();
+  if (acquisitionSource === null || acquisitionSent || client === null || !consented()) return;
+  track("acquisition_source_answered", { source: acquisitionSource });
+  markAcquisitionSent();
 }
 
 // Follows the consent: yes makes the client (once) and opts in; no opts out and drops what was still waiting to be sent,
@@ -86,6 +99,7 @@ function applyConsent(): void {
     client ??= makeClient(analyticsEnv.token, analyticsEnv.host);
     void client.optIn();
     void applySuperProperties(client);
+    sendAcquisitionOnce();
     return;
   }
   if (client !== null) {
@@ -119,6 +133,10 @@ export function startAnalytics(): void {
   if (started) return;
   started = true;
   useOnboardingStore.subscribe((state, previous) => {
+    if (state.acquisitionSource !== previous.acquisitionSource && client !== null && consented()) {
+      void applySuperProperties(client);
+      sendAcquisitionOnce();
+    }
     if (state.analyticsConsent === previous.analyticsConsent) return;
     // A devotional played while sharing was off was never sent: the first play after sharing turns on counts.
     if (state.analyticsConsent === "granted") playedEntryId = null;

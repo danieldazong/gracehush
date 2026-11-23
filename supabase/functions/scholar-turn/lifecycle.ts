@@ -2,9 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { listAllFiles, removeAll } from "../_shared/account/storageFiles.ts";
 import { AppError } from "../_shared/errors.ts";
-import { STRAY_RECORDING_MS } from "../_shared/scholar/constants.ts";
+import { SCHOLAR_CREDITS, STRAY_RECORDING_MS } from "../_shared/scholar/constants.ts";
 import type { FallbackVariant } from "../_shared/scholar/heavyChat.ts";
 import type { StoredBlock } from "../_shared/scholar/prompt.ts";
+import type { CreditsRow, FreeRow } from "../_shared/scholar/usage.ts";
 import type { HelpKind } from "../process-entry/contracts.ts";
 import { dbFailure } from "../process-entry/lifecycle.ts";
 
@@ -135,21 +136,27 @@ export async function listHistory(
   return (data as MessageRow[]).reverse();
 }
 
-// The person's usage rows from `fromDay` on. The day is the profile's local day, which is the UTC day, the day before or the day
-// after; the caller picks its row once it knows the zone.
-export async function readUsageRows(
-  admin: SupabaseClient,
-  userId: string,
-  fromDay: string,
-): Promise<{ day: string; messages: number; listens: number }[]> {
-  const { data, error } = await admin.from("scholar_usage").select("day, messages, listens")
-    .eq("user_id", userId).gte("day", fromDay);
-  if (error) throw dbFailure("scholar_usage", error);
-  return (data as { day: string; messages: number; listens: number }[]).map((row) => ({
-    day: String(row.day),
-    messages: Number(row.messages) || 0,
-    listens: Number(row.listens) || 0,
-  }));
+// The person's row of Scholar credits (2026-11-18), or null when they have never spent one. A Pro account spends from it; the
+// caller works out what is left (usage.ts, creditsUsage), because a window that has ended counts as a whole allowance.
+export async function readCredits(admin: SupabaseClient, userId: string): Promise<CreditsRow> {
+  const { data, error } = await admin.from("scholar_credits").select("used, allowance, renews_at")
+    .eq("user_id", userId).maybeSingle();
+  if (error) throw dbFailure("scholar_credits", error);
+  const row = data as { used?: number; allowance?: number; renews_at?: string } | null;
+  if (row === null || typeof row.renews_at !== "string") return null;
+  return { used: Number(row.used) || 0, allowance: Number(row.allowance) || 0, renewsAt: row.renews_at };
+}
+
+// The person's free conversation (scholar_free_use, 2026-11-20), or null while nothing has claimed it: the conversation that is
+// the free one and how many of its messages were answered for free. The row outlives the conversation, so a deleted free
+// conversation is still the one that was had.
+export async function readFreeUse(admin: SupabaseClient, userId: string): Promise<FreeRow> {
+  const { data, error } = await admin.from("scholar_free_use").select("conversation_id, messages")
+    .eq("user_id", userId).maybeSingle();
+  if (error) throw dbFailure("scholar_free_use", error);
+  const row = data as { conversation_id?: string; messages?: number } | null;
+  if (row === null || typeof row.conversation_id !== "string") return null;
+  return { conversationId: row.conversation_id, messages: Math.max(0, Number(row.messages) || 0) };
 }
 
 // When Scholar was closed for this account (scholar_closed_at, 2026-11-11: the person told it they are under 18), or null. Read
@@ -159,13 +166,6 @@ export async function readScholarClosedAt(admin: SupabaseClient, userId: string)
   if (error) throw dbFailure("scholar_closed", error);
   const value = (data as { scholar_closed_at?: string | null } | null)?.scholar_closed_at;
   return typeof value === "string" && value !== "" ? value : null;
-}
-
-// How many free messages were answered on one UTC day, across every account (the project-wide ceiling). No person in it.
-export async function readFreeAnswered(admin: SupabaseClient, day: string): Promise<number> {
-  const { data, error } = await admin.from("scholar_safety_daily").select("free_answered").eq("day", day).maybeSingle();
-  if (error) throw dbFailure("scholar_safety", error);
-  return Number((data as { free_answered?: number } | null)?.free_answered ?? 0) || 0;
 }
 
 // ---- Writes --------------------------------------------------------------------------------------------------------------
@@ -305,6 +305,44 @@ export async function finishMessage(
 
 // ---- The counters (after the response) -------------------------------------------------------------------------------------
 
+// What a Pro account's message or answer read aloud spent (spend_scholar_credits, the migration of 2026-11-18): a window that has
+// ended (or none) starts again a day ahead with this cost, a running one adds it and keeps its end. Only the server spends.
+export async function spendCredits(admin: SupabaseClient, userId: string, cost: number): Promise<void> {
+  const { error } = await admin.rpc("spend_scholar_credits", {
+    p_user: userId,
+    p_cost: cost,
+    p_allowance: SCHOLAR_CREDITS.allowance,
+    p_window_seconds: SCHOLAR_CREDITS.windowSeconds,
+  });
+  if (error) throw dbFailure("scholar_credits_spend", error);
+}
+
+// One message answered in the free conversation (use_scholar_free_message, the migration of 2026-11-20): the first one claims
+// the conversation, a later one in the same conversation is added, and one in another conversation changes nothing (the first of
+// two sent at once in two conversations is the free one). Only the server writes.
+export async function useFreeMessage(admin: SupabaseClient, userId: string, conversationId: string): Promise<void> {
+  const { error } = await admin.rpc("use_scholar_free_message", { p_user: userId, p_conversation: conversationId });
+  if (error) throw dbFailure("scholar_free_use_bump", error);
+}
+
+// A live talk in the free conversation (claim_scholar_free_conversation, the migration of 2026-11-20): it claims this conversation
+// when nothing has, with no message counted, and answers the conversation that holds the free one, whoever claimed it. Only the
+// server writes.
+export async function claimFreeConversation(
+  admin: SupabaseClient,
+  userId: string,
+  conversationId: string,
+): Promise<string | null> {
+  const { data, error } = await admin.rpc("claim_scholar_free_conversation", {
+    p_user: userId,
+    p_conversation: conversationId,
+  });
+  if (error) throw dbFailure("scholar_free_use_claim", error);
+  return typeof data === "string" ? data : null;
+}
+
+// A person's day of messages and answers read aloud (scholar_usage): a record, which no limit reads since the credits of
+// 2026-11-18.
 export async function bumpUsage(admin: SupabaseClient, userId: string, day: string, messages: number, listens: number) {
   const { error } = await admin.rpc("bump_scholar_usage", {
     p_user: userId,
@@ -323,8 +361,7 @@ export type SafetyCounter =
   | "flagged_blocked"
   | "flagged_writer"
   | "fallbacks"
-  | "screen_failed"
-  | "free_answered";
+  | "screen_failed";
 
 export async function bumpSafety(admin: SupabaseClient, day: string, counter: SafetyCounter) {
   const { error } = await admin.rpc("bump_scholar_safety", { p_day: day, p_counter: counter });

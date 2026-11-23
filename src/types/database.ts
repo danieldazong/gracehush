@@ -10,6 +10,8 @@ export type JournalEntryRow = GeneratedTables["journal_entries"]["Row"];
 export type DailyAffirmationRow = GeneratedTables["daily_affirmations"]["Row"];
 export type ScholarConversationRow = GeneratedTables["scholar_conversations"]["Row"];
 export type ScholarMessageRow = GeneratedTables["scholar_messages"]["Row"];
+export type ScholarCreditsRow = GeneratedTables["scholar_credits"]["Row"];
+export type ScholarFreeUseRow = GeneratedTables["scholar_free_use"]["Row"];
 
 // The columns the `authenticated` role is granted (supabase/migrations/20261022120100_gracehush_v1_schema.sql, section 6).
 // subscription_tier, created_at, updated_at and last_active_at are not here on purpose: only the server writes them.
@@ -35,8 +37,10 @@ export type DailyAffirmationUpdate = Pick<GeneratedTables["daily_affirmations"][
 
 // The shape supabase-js wants: the generated database with the app's five tables narrowed. `Insert: never` makes
 // `.insert()` and `.upsert()` on a table the app may not insert into a type error. Scholar's two tables (step 38) are the
-// server's to write: the app reads its own rows and deletes its own conversations, nothing else. Scholar's usage and safety
-// tables are not here at all: the app cannot touch them.
+// server's to write: the app reads its own rows and deletes its own conversations, nothing else. A Pro account's credits
+// (2026-11-18) are read-only: the app reads its own row to show what is left and when it renews. So is the free
+// conversation (2026-11-20): the app reads which conversation is free and how many of its messages were answered. Scholar's
+// usage and safety tables are not here at all: the app cannot touch them.
 export type Database = Omit<GeneratedDatabase, "public"> & {
   public: Omit<GeneratedDatabase["public"], "Tables"> & {
     Tables: {
@@ -57,6 +61,14 @@ export type Database = Omit<GeneratedDatabase, "public"> & {
         Update: never;
       };
       scholar_messages: Omit<GeneratedTables["scholar_messages"], "Insert" | "Update"> & {
+        Insert: never;
+        Update: never;
+      };
+      scholar_credits: Omit<GeneratedTables["scholar_credits"], "Insert" | "Update"> & {
+        Insert: never;
+        Update: never;
+      };
+      scholar_free_use: Omit<GeneratedTables["scholar_free_use"], "Insert" | "Update"> & {
         Insert: never;
         Update: never;
       };

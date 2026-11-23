@@ -18,9 +18,11 @@ import { safeStorage } from "./safeStorage";
 // - `aiWording` is which words of that permission the account allowed (step 38): AI_WORDING names Scholar beside the
 //   devotionals. Missing means the first words (2026-11-07), and an account that allowed under them sees a one-time note in its
 //   first Scholar conversation, which records the new words.
-// - `voicePermissionAt` (step 39) is when this account allowed its voice to go to ElevenLabs in a live talk, or missing for not
-//   yet. It lives only on this phone, like the AI permission, and a talk needs both.
-// - `scholarVoice` (step 39) is the voice this account chose for Scholar's live talk, or missing for the default. On this phone only.
+// - `voicePermissionAt` (step 39) is when this account allowed ElevenLabs (its voice in a live talk, and since 2026-11-19 the
+//   answers it chooses to hear with Listen, read in the chosen voice), or missing for not yet. It lives only on this phone, like
+//   the AI permission, and a talk needs both.
+// - `scholarVoice` (step 39) is the voice this account chose for Scholar (a live talk, and Listen while ElevenLabs is allowed),
+//   or missing for the default. On this phone only.
 // - `talkCaptions` (2026-11-16) is false when this account turned the live talk's captions off, and missing while they are on
 //   (the default). On this phone only.
 // No journal text is kept here.

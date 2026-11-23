@@ -576,8 +576,13 @@ function world({ platform = "ios", extraFakes = {} } = {}) {
     "react-native": { AppState: appState.module.AppState, Platform: { OS: platform } },
     "@supabase/supabase-js": { StorageApiError: storageJs.StorageApiError },
     "@/services/supabaseClient": { getSupabase: () => session.client, getSupabaseUserId: () => session.userId },
-    // The four square lock-screen scenes as asset modules 7 to 10 (and the card's crops, which nothing here draws).
-    "@/constants/images": { images: {}, playerScenes: [11, 12, 13, 14], playerSceneSquares: [7, 8, 9, 10] },
+    // The twenty square lock-screen scenes as asset modules 7 to 26 (scene n is module n + 7, its file player-scene-{n + 1}),
+    // and the card's crops, which nothing here draws, as 201 to 220.
+    "@/constants/images": {
+      images: {},
+      playerScenes: Array.from({ length: 20 }, (_, i) => 201 + i),
+      playerSceneSquares: Array.from({ length: 20 }, (_, i) => 7 + i),
+    },
     "@/constants/sounds": { sounds: SOUNDS },
     expo: { PermissionStatus: { GRANTED: "granted", DENIED: "denied", UNDETERMINED: "undetermined" } },
     ...extraFakes,
@@ -617,6 +622,7 @@ function track(n = 1, extra = {}) {
     subtitle: "GraceHush • Psalm 23:1–3",
     durationMs: 113_200,
     audioPath: `user_a/devotionals/entry-${n}.wav`,
+    scenes: [],
     ...extra,
   };
 }

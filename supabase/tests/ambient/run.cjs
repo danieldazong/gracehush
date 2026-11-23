@@ -359,6 +359,30 @@ const view = (store) => {
       assert.equal(ambient.released, false);
     });
 
+    await test(`${tag}: a reflection made on this phone plays with Gentle Piano at 100% under its voice, even when the session had the sound off, and the person can lower it`, async () => {
+      const w = rig({ platform });
+      const store = await loaded(w, OFF, 1);
+      await heard(w, store);
+      assert.equal(w.ambients().length, 0, "the sound was off");
+      // The mark alone changes nothing: the devotional that plays keeps its silence.
+      store.getState().markNewReflection("entry-2");
+      await W.advance(500);
+      assert.equal(w.ambients().length, 0, "a mark starts nothing");
+      assert.deepEqual(view(store), { entryId: "entry-1", status: "playing", isBuffering: false });
+      store.getState().load(W.track(2), OFF);
+      await W.advance(100);
+      assert.equal(view(store).status, "paused", "nothing starts by itself");
+      assert.equal(w.ambients().length, 0, "nothing plays before the voice does");
+      await heard(w, store);
+      const ambient = w.ambient();
+      assert.ok(ambient, "the bed plays under the new reflection");
+      assert.equal(ambient.source, W.SOUNDS["gentle-piano"]);
+      await W.advance(1000);
+      assert.ok(near(ambient.volume, gainOf(w, 1)), `at 100%: ${ambient.volume}`);
+      store.getState().setAmbientVolume(0.4);
+      assert.ok(near(ambient.volume, gainOf(w, 0.4)), "the person can lower it, heard at once");
+    });
+
     // ============================================================ C. away from the foreground, and the lock screen
     await test(`${tag}: away from the foreground a pause is at once, with no fade, and a fade that is running ends at once`, async () => {
       const w = rig({ platform });
@@ -823,6 +847,99 @@ const view = (store) => {
         assert.ok(ALLOWED.includes(license), `${sound}: ${license} is not an allowed license`);
         assert.equal(credit, "No", `${sound}: a license that needs a credit is not used in this step`);
       }
+    });
+
+    // 2026-11-20: every reflection made on this phone starts with Gentle Piano at 100% (services/newReflectionAmbient.ts).
+    await test("new reflection: a finished reflection marks its devotional and saves Gentle Piano at 100% as the default, a heavy moment too, and nothing else does", async () => {
+      const listeners = new Set();
+      const saved = [];
+      const w = rig({
+        extraFakes: {
+          "@/services/syncEngine": {
+            subscribe: (listener) => {
+              listeners.add(listener);
+              return () => void listeners.delete(listener);
+            },
+          },
+          "@/data/journalRepository": {
+            updateProfile: async (patch) => {
+              saved.push({ ...patch });
+              return { ok: true, data: undefined };
+            },
+          },
+        },
+      });
+      const service = w.env.use("@/services/newReflectionAmbient");
+      const store = w.store();
+      const emit = (event) => {
+        for (const listener of [...listeners]) listener(event);
+      };
+      const sound = () => [store.getState().ambientSound, store.getState().ambientVolume];
+      service.startNewReflectionAmbient();
+      service.startNewReflectionAmbient();
+      assert.equal(listeners.size, 1, "starting twice leaves one listener");
+      emit({ type: "stage", clientEntryId: "c-2", stage: "receiving" });
+      emit({ type: "settled", clientEntryId: "c-2" });
+      emit({ type: "changed" });
+      assert.deepEqual(saved, [], "only a finished reflection counts");
+      emit({ type: "finished", clientEntryId: "c-2", entryId: "entry-2", isCrisis: false, inputType: "text", scriptureVerified: true });
+      assert.deepEqual(saved, [{ ambientSound: "gentle-piano", ambientVolume: 1 }], "saved once as the default");
+      assert.deepEqual(view(store), { entryId: null, status: "idle", isBuffering: false }, "nothing starts by itself");
+      store.getState().load(W.track(2), OFF);
+      assert.deepEqual(sound(), ["gentle-piano", 1]);
+      // A heavy moment is a reflection like any other.
+      emit({ type: "finished", clientEntryId: "c-3", entryId: "entry-3", isCrisis: true, inputType: "audio", scriptureVerified: true });
+      assert.equal(saved.length, 2, "a heavy moment saves it too");
+      store.getState().setAmbient("off");
+      store.getState().load(W.track(3), OFF);
+      assert.deepEqual(sound(), ["gentle-piano", 1], "a heavy moment starts with it too");
+      // A devotional that is loaded and paused stays as it is when another reflection finishes: nothing starts by
+      // itself, and the sound on it is the person's.
+      store.getState().setAmbientVolume(0.4);
+      emit({ type: "finished", clientEntryId: "c-5", entryId: "entry-5", isCrisis: false, inputType: "text", scriptureVerified: true });
+      assert.equal(saved.length, 3);
+      assert.deepEqual(view(store), { entryId: "entry-3", status: "paused", isBuffering: false }, "a paused devotional stays paused");
+      assert.deepEqual(sound(), ["gentle-piano", 0.4], "and keeps the person's sound");
+      // Stopped with the session: no listener is left, and nothing is saved or marked any more.
+      service.stopNewReflectionAmbient();
+      assert.equal(listeners.size, 0);
+      emit({ type: "finished", clientEntryId: "c-4", entryId: "entry-4", isCrisis: false, inputType: "text", scriptureVerified: true });
+      assert.equal(saved.length, 3);
+      store.getState().setAmbient("soft-rain");
+      store.getState().load(W.track(4), OFF);
+      assert.equal(store.getState().ambientSound, "soft-rain", "an unmarked load keeps the session's choice");
+    });
+
+    await test("contract: a new reflection starts with Gentle Piano at 100%, the signed-in session starts and stops it, and only its service marks one", () => {
+      const w = rig();
+      const { NEW_REFLECTION_AMBIENT } = w.env.use("@/constants/audio");
+      assert.deepEqual({ ...NEW_REFLECTION_AMBIENT }, { ambientSound: "gentle-piano", ambientVolume: 1 });
+      // The auth bridge starts it with the signed-in session, beside the affirmation schedule, and stops it in that effect's cleanup.
+      const bridge = read("src/components/SupabaseAuthBridge.tsx").replace(/\r\n/g, "\n");
+      const count = (text, word) => text.split(word).length - 1;
+      assert.equal(count(bridge, "startNewReflectionAmbient();"), 1);
+      assert.equal(count(bridge, "stopNewReflectionAmbient();"), 1);
+      const start = bridge.indexOf("startNewReflectionAmbient();");
+      const cleanup = bridge.indexOf("return () => {", start);
+      const stop = bridge.indexOf("stopNewReflectionAmbient();");
+      assert.ok(
+        bridge.indexOf("startAffirmationSchedule(signedInUserId);") < start && start < cleanup && cleanup < stop,
+        "started in the signed-in effect, stopped only in its cleanup",
+      );
+      // It answers a finished reflection, a heavy moment included, and never starts a sound, logs or reports anything.
+      const service = read("src/services/newReflectionAmbient.ts");
+      assert.ok(service.includes('if (event.type !== "finished") return;'));
+      for (const word of ["isCrisis", ".play(", ".toggle(", "track(", "haptics", "console."]) {
+        assert.ok(!service.includes(word), `the service holds ${word}`);
+      }
+      assert.deepEqual(mentioning(/\.markNewReflection\(/), ["src/services/newReflectionAmbient.ts"]);
+      assert.deepEqual(mentioning(/from "@\/services\/newReflectionAmbient"/), ["src/components/SupabaseAuthBridge.tsx"]);
+      // Profile says what a new reflection starts with.
+      assert.ok(
+        read("src/constants/copy.ts").includes(
+          'helper: "Your new reflections start with Gentle Piano at 100%. Other devotionals start with the sound you choose here.",',
+        ),
+      );
     });
   }
 

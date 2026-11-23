@@ -23,21 +23,29 @@ export type RootStackParamList = {
   NowPlaying: { entryId: string };
   // Scholar (step 38). An existing conversation by its id, or a new one: from a reflection (`entryId`, which first looks for
   // that reflection's conversation), from a starter (sent once the AI permission is given), or from the ask bar (`compose`:
-  // the keyboard up, or Speak mode with nothing recorded until the mic is tapped).
+  // the keyboard up, or Speak mode with nothing recorded until the mic is tapped), or from the hero's button (`compose: "talk"`:
+  // the live talk's own order, once the AI permission is given).
   Conversation: {
     conversationId?: string;
     entryId?: string;
     starter?: "verse" | "anxious" | "pray";
-    compose?: "type" | "speak";
+    compose?: "type" | "speak" | "talk";
   };
+  // Every conversation, newest first, grouped by day and searchable by title (2026-11-16): the Scholar tab shows only the
+  // latest few and opens this from "See all".
+  ScholarHistory: undefined;
   // Scholar's live talk (step 39): a full-screen page over the conversation it belongs to. `entryId` only when that
   // conversation was opened from a reflection.
   ScholarTalk: { conversationId: string; entryId?: string };
   // `entryId` is the reflection the free limit stopped. When it is a heavy moment the Paywall replaces itself
   // with Reflection: a heavy moment is never paywalled.
   // `source: "scholar"` (step 38) comes from a Scholar limit: `reason` says which, today's messages, hearing an answer, or
-  // (step 39) a live talk.
-  Paywall: { source: "profile" | "limit" | "scholar"; entryId?: string; reason?: "messages" | "listen" | "talk" };
+  // (step 39) a live talk, or (2026-11-20) a free account's message after its free conversation, or a voice that is Pro.
+  Paywall: {
+    source: "profile" | "limit" | "scholar";
+    entryId?: string;
+    reason?: "messages" | "listen" | "talk" | "conversation" | "voice";
+  };
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> = NativeStackScreenProps<

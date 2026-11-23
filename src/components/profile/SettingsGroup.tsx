@@ -4,7 +4,8 @@ import { Text, View } from "react-native";
 import { shadows } from "@/constants/theme";
 
 type SettingsGroupProps = {
-  title: string;
+  // Without one the card stands alone, under a heading the screen draws itself (the Scholar tab's Fraunces headings).
+  title?: string;
   children: ReactNode;
 };
 
@@ -16,9 +17,11 @@ export function SettingsGroup({ title, children }: SettingsGroupProps) {
 
   return (
     <View>
-      <Text accessibilityRole="header" className="eyebrow mb-1 px-2">
-        {title}
-      </Text>
+      {title ? (
+        <Text accessibilityRole="header" className="eyebrow mb-1 px-2">
+          {title}
+        </Text>
+      ) : null}
       <View className="rounded-card border border-petal bg-card" style={shadows.card}>
         <View className="overflow-hidden rounded-card">
           {rows.map((row, index) => (

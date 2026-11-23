@@ -4,10 +4,16 @@ import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
 import { AppError, errorResponse, jsonResponse } from "../_shared/errors.ts";
 import { monthWindow } from "../_shared/limits/weekly.ts";
 import { blankLogLine, shortHash, writeLog } from "../_shared/log.ts";
-import { elapsedSeconds, monthSecondsUsed, talkLimits } from "../_shared/voice/allowance.ts";
+import { elapsedSeconds, freeTalkLimits, monthSecondsUsed, talkLimits } from "../_shared/voice/allowance.ts";
 import { type ElevenLabsConfig, readElevenLabsConfig } from "../_shared/voice/config.ts";
 import { endSweepTiming, VOICE_START } from "../_shared/voice/constants.ts";
-import { closeSession, findSession, listSessionsSince, markSessionHeavy } from "../_shared/voice/sessions.ts";
+import {
+  closeSession,
+  findSession,
+  listSessionsInConversation,
+  listSessionsSince,
+  markSessionHeavy,
+} from "../_shared/voice/sessions.ts";
 import { sweepBehind } from "../_shared/voice/sweep.ts";
 import type { ScholarVoiceEndResponse } from "../process-entry/contracts.ts";
 import { readProfile } from "../process-entry/lifecycle.ts";
@@ -15,7 +21,8 @@ import { readJsonBody } from "../process-entry/validate.ts";
 import { findConversation } from "../scholar-turn/lifecycle.ts";
 
 // scholar-voice-end (step 39): the phone says a live talk is over. The talk's row gets its end and its length, and the answer is
-// what is left of the month's talk time, so the app never counts for itself.
+// what is left of the month's talk time (for an account that is not Pro, what is left of its free conversation's talk time,
+// 2026-11-20), so the app never counts for itself.
 //
 // What a talk costs the person is decided in _shared/voice/allowance.ts: its time from the start to this call (which is later
 // than its last turn), never more than its own cap, and nothing in a heavy conversation. A talk nobody ended (the app was closed,
@@ -116,14 +123,23 @@ async function run(req: Request, context: Context): Promise<Response> {
       .filter((row) => Date.parse(row.started_at) >= window.start.getTime())
       .map((row) => (row.id === talkId ? { ...row, is_heavy: heavy } : row)),
   );
+  // An account that is not Pro has no month: what is left of its free conversation's talk time, over every talk held in the
+  // conversation this talk belonged to (the stored plan: a purchase made during the talk shows at the next start).
+  let limits = talkLimits({ heavy, monthSeconds, window });
   context.limitUsed = monthSeconds;
+  if (!heavy && profile.tier !== "pro") {
+    const held = await db(() => listSessionsInConversation(admin, userId, found.conversation_id));
+    const freeSeconds = monthSecondsUsed(held);
+    limits = freeTalkLimits(freeSeconds, window);
+    context.limitUsed = freeSeconds;
+  }
   context.ended = true;
   try {
     context.sweep = readElevenLabsConfig();
   } catch {
     context.sweep = null;
   }
-  const body: ScholarVoiceEndResponse = { limits: talkLimits({ heavy, monthSeconds, window }) };
+  const body: ScholarVoiceEndResponse = { limits };
   return jsonResponse(200, body, corsHeaders);
 }
 

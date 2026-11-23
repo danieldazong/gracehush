@@ -86,7 +86,6 @@ const SCHOLAR_ENV: Record<string, string> = {
 const SCHOLAR_NAMES = [
   ...Object.keys(SCHOLAR_ENV),
   "SCHOLAR_SCREEN_FIRST",
-  "SCHOLAR_FREE_DAILY_BUDGET",
   "GEMINI_THINKING_LEVEL",
 ];
 
@@ -108,7 +107,6 @@ function flow(work: (world: World) => Promise<void>) {
     const savedEnv = new Map(SCHOLAR_NAMES.map((name) => [name, Deno.env.get(name)]));
     for (const [name, value] of Object.entries(SCHOLAR_ENV)) Deno.env.set(name, value);
     Deno.env.delete("SCHOLAR_SCREEN_FIRST");
-    Deno.env.delete("SCHOLAR_FREE_DAILY_BUDGET");
     const savedTiming = { ...timing };
     const savedScholar = structuredClone(scholarTiming);
     const savedVoice = structuredClone(voiceTiming);

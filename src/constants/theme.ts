@@ -117,6 +117,34 @@ export const gradients = {
     colors: [colors.linen, `${colors.linen}00`],
     locations: [0, 1],
   },
+  // The Scholar tab (2026-11-16): the plum-deep the hero's painted scene melts into on its left (solid at the scene's edge, 60%
+  // a third of the way in, gone by two thirds, so the faces and the lamp stay clear), and the linen the list dissolves into
+  // behind the ask bar and the tab bar, so two glass pills never sit over a row of words.
+  scholarHeroFade: {
+    colors: [colors.plumDeep, `${colors.plumDeep}99`, `${colors.plumDeep}00`],
+    locations: [0, 0.35, 0.65],
+  },
+  askFade: {
+    colors: [`${colors.linen}00`, `${colors.linen}E6`],
+    locations: [0, 1],
+  },
+  // The Today tab's word card (2026-11-16): the hour's painted scene shows clear in the top quarter and melts into plum-deep
+  // behind the headline and the verse (72% at 40% of the height, 92% at 54%, 96% at the foot). Worked out against all four player
+  // scenes with the real fonts: the headline stays at 4.4:1 or better on the brightest pixel under it, the verse (90% white) at 8.3:1.
+  // The sixteen scenes of 2026-11-20, measured the same way: the usual card (one headline line) at 9.7:1 or better on the
+  // brightest pixel, the verse at 8.9:1 and the reference at 8.8:1; a two-line headline over a four-line verse reaches the
+  // light part of the fade, 2.8:1 on the brightest pixel and 4.3:1 on the 95th percentile, as the first four do (2.9:1).
+  wordFade: {
+    colors: [`${colors.plumDeep}00`, `${colors.plumDeep}00`, `${colors.plumDeep}B8`, `${colors.plumDeep}EB`, `${colors.plumDeep}F5`],
+    locations: [0, 0.26, 0.4, 0.54, 1],
+  },
+  // The plan tag on the profile picture (2026-11-19, PlanTag): a body lit from above (plum to plum-deep for Pro and a trial,
+  // blush to petal for Free) and a white shine over its top 60%, which with the rim and the drop shadow make the pill read as a
+  // raised, glossy chip.
+  planTagPro: { colors: [colors.plum, colors.plumDeep], locations: [0, 1] },
+  planTagFree: { colors: [colors.blush, colors.petal], locations: [0, 1] },
+  planTagShinePro: { colors: [`${colors.card}47`, `${colors.card}00`], locations: [0, 0.6] },
+  planTagShineFree: { colors: [`${colors.card}BF`, `${colors.card}00`], locations: [0, 0.6] },
 } as const;
 
 // iOS shadowRadius is half the CSS blur. iOS has no spread and Android has no offset, so both approximate the CSS shadow.
@@ -158,6 +186,29 @@ export const shadows = StyleSheet.create({
     boxShadow: [
       { offsetX: 0, offsetY: 2, blurRadius: 4, color: `${colors.card}F2`, inset: true },
       { offsetX: 0, offsetY: -3, blurRadius: 6, color: `${colors.ink}14`, inset: true },
+    ],
+  },
+  // The plan tag's lift (2026-11-19): a tight contact shadow and a softer one under it, stronger under the dark Pro pill than
+  // under the pale Free one, so both stand off the picture by the same amount.
+  planTagPro: {
+    boxShadow: [
+      { offsetX: 0, offsetY: 1, blurRadius: 2, color: `${colors.ink}59` },
+      { offsetX: 0, offsetY: 2, blurRadius: 5, color: `${colors.ink}26` },
+    ],
+  },
+  planTagFree: {
+    boxShadow: [
+      { offsetX: 0, offsetY: 1, blurRadius: 2, color: `${colors.ink}38` },
+      { offsetX: 0, offsetY: 2, blurRadius: 5, color: `${colors.ink}1A` },
+    ],
+  },
+  // Each card of the Today tab's deck (2026-11-20): a soft shadow (ink at 14%, 6 down, blur 16) and a tight contact edge (ink at
+  // 22%, 1 down, blur 4), so the top card lies on the one behind it. It reaches about 10 above a card and 22 under it, inside the
+  // room the deck's scroll view keeps (12 and 24).
+  deckCard: {
+    boxShadow: [
+      { offsetX: 0, offsetY: 6, blurRadius: 16, color: `${colors.ink}24` },
+      { offsetX: 0, offsetY: 1, blurRadius: 4, color: `${colors.ink}38` },
     ],
   },
 });

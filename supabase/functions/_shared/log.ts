@@ -32,26 +32,34 @@ export type CrisisSource = "phrase" | "model" | "uncertain" | "blocked";
 // or a retry of an entry that needed no speech). "bad_config" names the secret to look at, and "failed" holds Google's or
 // storage's short words only (tts_http_403:PERMISSION_DENIED/SERVICE_DISABLED, tts_timeout, storage...), never a message of
 // theirs. "background" (2026-11-09): the stage runs behind the answer, and a second line with the same requestId and the
-// reason "speech" says what it did, with its numbers.
+// reason "speech" says what it did, with its numbers. Listen in the chosen voice (scholar-speak, 2026-11-19): "voice" when
+// ElevenLabs read the part, and "voice_fallback:<its short words>" when the Google voice read it instead (the voice is never
+// named); a second line with the same requestId and the reason "voice:history_<word>" says that what ElevenLabs kept of a reading
+// could not be deleted.
 export type SpeechStatus =
   | "ok"
   | "off"
   | "background"
   | "skipped:time"
   | "skipped:script"
+  | "voice"
+  | `voice_fallback:${string}`
   | `bad_config:${string}`
   | `failed:${string}`;
 
 // What the free tier's check found (step 22). null: it did not run (the request ended before it, or it was a crisis).
 // "exempt" is a trial or Pro account, for which nothing is counted. ":bad_timezone": the profile's zone was not one Intl
-// knows, so the week was worked out in UTC. Scholar (step 38) counts a paying account too, so its answers add "pro_ok" and
-// "pro_blocked" (the day's messages, or the day's answers read aloud), and a heavy conversation logs "exempt".
+// knows, so the week was worked out in UTC. Scholar (step 38, credits since 2026-11-18) logs "free_blocked" and "trial_blocked"
+// for an account it is not part of, "pro_ok" and "pro_blocked" for a Pro account's credits (a live talk: its month's minutes),
+// and "exempt" for a heavy conversation.
 export type LimitStatus =
   | "exempt"
   | "free_ok"
   | "free_blocked"
   | "free_ok:bad_timezone"
   | "free_blocked:bad_timezone"
+  | "trial_ok"
+  | "trial_blocked"
   | "pro_ok"
   | "pro_blocked"
   | "pro_ok:bad_timezone"

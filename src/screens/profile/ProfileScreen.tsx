@@ -2,7 +2,7 @@ import { useAuth, useUser } from "@clerk/expo";
 import { useFocusEffect, useScrollToTop } from "@react-navigation/native";
 import Constants from "expo-constants";
 import type { SymbolViewProps } from "expo-symbols";
-import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import {
   Animated,
   Linking,
@@ -63,7 +63,7 @@ import { voiceSupported } from "@/services/voiceSupport";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
 import type { PermissionResult, ProfilePatch, TimeSlot } from "@/types";
-import { formatMonthYear, formatTime12, getFullName } from "@/utils/format";
+import { formatTime12, getFullName } from "@/utils/format";
 
 const { profile: text } = copy;
 const { rhythm } = copy.onboarding;
@@ -180,8 +180,11 @@ function Notice({
 }
 
 // The name, email and picture come from Clerk and need no profile data, so they show in every state. The picture is
-// UserAvatar, the same one the tab header shows: the photo, otherwise the initials, otherwise a person icon.
-function AccountHeader({ memberSince }: { memberSince: ReactNode }) {
+// UserAvatar, the same one the tab header shows: the photo, otherwise the initials, otherwise a person icon. The name
+// is the content's heading tier (text-section, 20/28), not the screen's headline: at 24 it filled the row, wrapped on a
+// 375 or 390 wide phone and outweighed the wordmark above it. There is no "member since" line: nothing in a private
+// journal gains from it.
+function AccountHeader() {
   const { user } = useUser();
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   const names = { firstName: user?.firstName, lastName: user?.lastName, email };
@@ -191,9 +194,8 @@ function AccountHeader({ memberSince }: { memberSince: ReactNode }) {
       {/* The name beside it says who this is, so the avatar is hidden from screen readers. */}
       <UserAvatar size={64} />
       <View className="flex-1">
-        <Text className="text-headline text-plum-deep">{getFullName(names) ?? text.account.friend}</Text>
+        <Text className="text-section text-plum-deep">{getFullName(names) ?? text.account.friend}</Text>
         {email ? <Text className="text-body-sm text-mauve">{email}</Text> : null}
-        {memberSince}
       </View>
     </View>
   );
@@ -363,7 +365,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
   // Scholar's live talk (step 39): the chosen voice and the ElevenLabs permission, kept on this phone only. Both rows show only in
   // a build that can hold a talk.
   const { allowed: voiceAllowed, setAllowed: setVoiceAllowed } = useVoicePermission();
-  const { voice, setVoice } = useScholarVoice();
+  const { voice, setVoice, locked: voicesLocked } = useScholarVoice();
   const showVoice = voiceSupported();
   const [voiceOpen, setVoiceOpen] = useState(false);
 
@@ -597,17 +599,6 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
     }
   }
 
-  const memberSince =
-    state.status === "ready" ? (
-      <Text className="text-body-sm text-mauve">
-        {text.account.memberSince(formatMonthYear(state.profile.createdAt))}
-      </Text>
-    ) : state.status === "loading" ? (
-      <View className="mt-1">
-        <Skeleton width={160} height={14} radius={7} />
-      </View>
-    ) : null;
-
   const dialogContent = DIALOGS[dialog];
   const { signOutUnsent } = text.dialogs;
   const dialogStrings =
@@ -656,7 +647,7 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
         }
       >
         <View className="screen__content gap-6 pt-4">
-          <AccountHeader memberSince={memberSince} />
+          <AccountHeader />
 
           {state.status === "loading" ? <LoadingSections /> : null}
           {state.status === "error" ? <ErrorCard onRetry={state.retry} /> : null}
@@ -792,7 +783,13 @@ export function ProfileScreen({ navigation }: MainTabScreenProps<"Profile">) {
                       {voiceOpen ? (
                         <View className="gap-2 pb-2">
                           <Text className="pl-[68px] pr-4 text-body-sm text-mauve">{text.scholarVoice.helper}</Text>
-                          <VoiceRows selected={voice} onSelect={setVoice} framed={false} />
+                          <VoiceRows
+                            selected={voice}
+                            onSelect={setVoice}
+                            framed={false}
+                            locked={voicesLocked}
+                            onLocked={() => navigation.navigate("Paywall", { source: "scholar", reason: "voice" })}
+                          />
                         </View>
                       ) : null}
                     </View>

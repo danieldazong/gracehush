@@ -1,20 +1,34 @@
 // Scholar (step 38): every limit, size and time budget of the conversation engine, in one place. The app holds no limit
 // number: each answer carries the numbers in its `usage`, so a limit changes with a function deploy.
 
-// Free accounts may send this many messages a day, to read. Pro and trial accounts this many, and have this many answers read
-// aloud. Everyone: at most rateMax messages in rateWindowMs. The day is the calendar day of the profile's time zone. A heavy
-// conversation is exempt from every count and limit but the rate.
+// Everyone: at most rateMax messages in rateWindowMs, the one limit in front of the safety screening. A heavy conversation is
+// exempt from every count, credit and plan, but not the rate.
 export const SCHOLAR_LIMITS = {
-  freeMessagesPerDay: 5,
-  proMessagesPerDay: 40,
-  proListensPerDay: 5,
   rateMax: 30,
   rateWindowMs: 600_000,
 } as const;
 
-// The project-wide ceiling on free messages a UTC day (SCHOLAR_FREE_DAILY_BUDGET when it is set). Above it a free account's
-// clear message gets the resting line; paying accounts and heavy conversations are never affected.
-export const DEFAULT_FREE_DAILY_BUDGET = 3_000;
+// Scholar is for paying Pro accounts (2026-11-18): the free plan and the free trial do not include it, but a heavy conversation is
+// answered for everyone and never counted. A Pro account spends credits from an allowance that renews windowSeconds after its
+// first spend (one row per person, scholar_credits): a message costs `message`, and an answer read aloud `listenPer100Chars` for
+// every 100 characters of its whole script (charged on part 0, so an answer started is never cut off). A credit stands for about
+// $0.001 of what the answer really costs (a message about $0.004, a typical answer read aloud about $0.027). Anything may be sent
+// while a credit is left, so the last message or listen may take the count past the allowance.
+export const SCHOLAR_CREDITS = {
+  allowance: 400,
+  windowSeconds: 86_400,
+  message: 4,
+  listenPer100Chars: 3,
+} as const;
+
+// One free conversation with Scholar (2026-11-20, the co-founder's plan): an account that is not Pro (the free plan and the free
+// trial) may have one conversation of up to `messages` answered messages, with its answers read aloud and up to `talkSeconds` of
+// live talk in it, ever. The first answered message (or the first talk) claims it (scholar_free_use, one row per person), and
+// deleting the conversation does not give it back. A heavy message is never counted, and a heavy conversation never claims it.
+export const SCHOLAR_FREE = {
+  messages: 8,
+  talkSeconds: 180,
+} as const;
 
 // A request: its body, a typed message and a spoken one. A recording is never in a body: it is read from storage.
 export const SCHOLAR_REQUEST = {

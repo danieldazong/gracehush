@@ -305,17 +305,31 @@ function makeServer() {
     // Step 39: the live talks the fake started, the month's talk seconds left for every account (the server's number), what
     // each talk costs when it ends, and when the month's time returns.
     voiceTalks: [],
-    talkMonthLeft: 1800,
+    talkMonthLeft: 3600,
     talkSecondsPerTalk: 60,
     talkResetsAt: "2026-12-01T00:00:00.000000+00:00",
-    // Step 38: Scholar's two tables, in database shape (supabase/migrations/20261111120000_scholar_conversations.sql), the
-    // uploads the app made (the world links its upload calls here, so a spoken message's recording can be found), and the day's
-    // limits the fake applies (the server's numbers: the app holds none).
+    // Step 38: Scholar's two tables, in database shape (supabase/migrations/20261111120000_scholar_conversations.sql), and the
+    // uploads the app made (the world links its upload calls here, so a spoken message's recording can be found).
     scholarConversations: [],
     scholarMessages: [],
     uploads: [],
-    scholarFreeLimit: 5,
-    scholarProLimit: 40,
+    // 2026-11-18: Scholar is for Pro alone. The free plan and a free trial are refused by their plan, a trial with the day its
+    // plan begins (serverPlanEnds: the server's subscription_expires_at). A Pro account spends credits (scholar_credits in
+    // database shape, supabase/migrations/20261118120000_scholar_credits.sql) from a window that renews scholarWindowMs after
+    // its first spend: a message costs scholarMessageCost, an answer read aloud scholarListenCost on its part 0, and anything
+    // may be sent while a credit is left. These are the server's numbers: the app holds none.
+    scholarCreditRows: [],
+    scholarAllowance: 400,
+    scholarMessageCost: 4,
+    scholarListenCost: 6,
+    scholarWindowMs: 86_400_000,
+    // 2026-11-20: an account that is not Pro has one free conversation (scholar_free_use in database shape,
+    // supabase/migrations/20261120120000_scholar_free.sql): its first scholarFreeMessages messages answered, its answers read
+    // aloud, and scholarFreeTalkSeconds of live talk, in the one conversation that claimed it. Deleting it gives nothing back.
+    scholarFreeUse: [],
+    scholarFreeMessages: 8,
+    scholarFreeTalkSeconds: 180,
+    serverPlanEnds: {},
     functionCalls: [],
     // The ids delete-entry deleted (step 29b), in order.
     deletedEntries: [],
@@ -332,7 +346,14 @@ function makeServer() {
     revenueCatPlans: {},
     serverPlans: {},
     // Answers for the REST tables: the next request of that table is answered with this instead (a Response, or a function).
-    rest: { journal_entries: [], daily_affirmations: [], scholar_conversations: [], scholar_messages: [] },
+    rest: {
+      journal_entries: [],
+      daily_affirmations: [],
+      scholar_conversations: [],
+      scholar_messages: [],
+      scholar_credits: [],
+      scholar_free_use: [],
+    },
     // What a process-entry call with no scripted answer makes of the entry.
     makeEntry: readyResult,
     // The prayer updates the server took (step 29): the body and the rows it changed.
@@ -361,6 +382,20 @@ function makeServer() {
     return count;
   }
 
+  function ilikeRegExp(pattern) {
+    let source = "";
+    for (let i = 0; i < pattern.length; i += 1) {
+      const char = pattern[i];
+      if (char === "\\" && i + 1 < pattern.length) {
+        i += 1;
+        source += pattern[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      } else if (char === "%") source += ".*";
+      else if (char === "_") source += ".";
+      else source += char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+    return new RegExp(`^${source}$`, "is");
+  }
+
   function applyFilters(rows, params) {
     let out = rows;
     for (const [key, value] of params) {
@@ -372,11 +407,15 @@ function makeServer() {
         out = out.filter((row) => parts.some(([, column, operand]) => String(row[column]) === operand));
         continue;
       }
-      const m = /^(eq|neq|lt|lte|gt|gte|in)\.(.*)$/s.exec(value);
+      const m = /^(eq|neq|lt|lte|gt|gte|in|ilike)\.(.*)$/s.exec(value);
       if (!m) throw new Error(`the fake server does not know the filter ${key}=${value}`);
       const [, op, operand] = m;
+      // ilike (the Conversations screen's search, 2026-11-16): case-insensitive, % any run, _ any one character, and a
+      // backslash makes the next character literal, as Postgres reads it; a null cell never matches.
+      const ilike = op === "ilike" ? ilikeRegExp(operand) : null;
       out = out.filter((row) => {
         const cell = row[key];
+        if (ilike !== null) return typeof cell === "string" && ilike.test(cell);
         if (op === "eq") return String(cell) === operand;
         if (op === "neq") return String(cell) !== operand;
         if (op === "in") return operand.replace(/^\(|\)$/g, "").split(",").includes(String(cell));
@@ -403,6 +442,8 @@ function makeServer() {
     daily_affirmations: "affirmations",
     scholar_conversations: "scholarConversations",
     scholar_messages: "scholarMessages",
+    scholar_credits: "scholarCreditRows",
+    scholar_free_use: "scholarFreeUse",
   };
 
   async function rest(table, method, url, headers, body, sub) {
@@ -482,10 +523,11 @@ function makeServer() {
 
   // ---- Scholar (step 38): the two functions as the real ones answer, without a model. An answer is fixed text after a verified
   // passage; a message that holds the test word HEAVY is a heavy moment (ABUSE: one whose help line is the domestic violence
-  // line), answered whatever the count, never counted, with no usage; one that holds HELLO is a greeting, answered with a welcome
+  // line), answered for every plan, never counted, with no usage; one that holds HELLO is a greeting, answered with a welcome
   // (scholar-v3: its words alone, no title), and only a welcome carries the welcome field, as a function from before scholar-v3
-  // sends none on any answer; the day's limit counts the answered messages of
-  // conversations that are not heavy. A spoken message needs its recording uploaded (chat-{messageId}), and its words are fixed.
+  // sends none on any answer. Outside a heavy conversation Scholar is for Pro alone (2026-11-18): any other plan is refused by
+  // its plan, and a Pro account spends credits. A spoken message needs its recording uploaded (chat-{messageId}), and its words
+  // are fixed.
   const SCHOLAR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const SCHOLAR_KEYS = ["conversationId", "messageId", "input", "entryId", "region"];
   const SPOKEN_WORDS = "These are the words the recording held";
@@ -528,20 +570,89 @@ function makeServer() {
     };
   }
 
-  function scholarUsage(sub) {
-    const paid = state.serverPlans[sub] === "pro" || state.serverPlans[sub] === "trial";
-    const limit = paid ? state.scholarProLimit : state.scholarFreeLimit;
-    const heavy = new Set(state.scholarConversations.filter((row) => row.is_heavy).map((row) => row.id));
-    const used = state.scholarMessages.filter(
-      (row) => row.user_id === sub && row.role === "scholar" && row.status === "ready" && !heavy.has(row.conversation_id),
-    ).length;
-    return {
-      kind: paid ? "pro_day" : "free_day",
-      used,
-      limit,
-      remaining: Math.max(0, limit - used),
-      resetsAt: new RealDate(clock.now + 86_400_000).toISOString(),
-    };
+  // The plan as the server holds it, and when Scholar opens for a trial still running (its end), else null.
+  function scholarTier(sub) {
+    return state.serverPlans[sub] ?? "free";
+  }
+
+  function scholarOpensAt(sub) {
+    if (scholarTier(sub) !== "trial") return null;
+    const ends = Date.parse(state.serverPlanEnds[sub] ?? "");
+    return Number.isFinite(ends) && ends > clock.now ? new RealDate(ends).toISOString() : null;
+  }
+
+  // The refusal for an account Scholar is not part of: no numbers, and the day it opens for a trial (usage.ts planUsage).
+  function scholarPlanUsage(kind, sub) {
+    return { kind, used: 0, limit: 0, remaining: 0, resetsAt: scholarOpensAt(sub) };
+  }
+
+  // A Pro account's credits as they stand (usage.ts creditsUsage): a window that has ended, or none, is a whole allowance with
+  // no renewal yet.
+  function scholarCreditsUsage(sub) {
+    const limit = state.scholarAllowance;
+    const row = state.scholarCreditRows.find((item) => item.user_id === sub);
+    const ends = row === undefined ? NaN : Date.parse(row.renews_at);
+    if (!Number.isFinite(ends) || ends <= clock.now) return { kind: "credits", used: 0, limit, remaining: limit, resetsAt: null };
+    const used = Math.max(0, row.used);
+    return { kind: "credits", used, limit, remaining: Math.max(0, limit - used), resetsAt: new RealDate(ends).toISOString() };
+  }
+
+  // The free conversation (2026-11-20): the person's row, or null while none is claimed; whether this conversation may be it; its
+  // messages as the answer carries them (usage.ts freeUsage); and the claim, as the server's claim does it (the first conversation
+  // claims it; another conversation changes nothing).
+  function scholarFreeRow(sub) {
+    return state.scholarFreeUse.find((row) => row.user_id === sub) ?? null;
+  }
+
+  function scholarFreeOpen(sub, conversationId) {
+    const row = scholarFreeRow(sub);
+    return row === null || row.conversation_id === conversationId;
+  }
+
+  function scholarFreeUsage(messages) {
+    const limit = state.scholarFreeMessages;
+    const used = Math.max(0, messages);
+    return { kind: "free", used, limit, remaining: Math.max(0, limit - used), resetsAt: null };
+  }
+
+  function claimScholarFree(sub, conversationId, message) {
+    let row = scholarFreeRow(sub);
+    if (row === null) {
+      row = { user_id: sub, conversation_id: conversationId, messages: 0, created_at: stamp(clock.now), updated_at: stamp(clock.now) };
+      state.scholarFreeUse.push(row);
+    }
+    if (row.conversation_id === conversationId && message) {
+      row.messages += 1;
+      row.updated_at = stamp(clock.now);
+    }
+  }
+
+  // The free conversation's talk seconds so far: the talks that have ended in it.
+  function scholarFreeTalkUsed(sub, conversationId) {
+    return state.voiceTalks
+      .filter((row) => row.sub === sub && row.conversationId === conversationId && row.free && row.ended)
+      .reduce((sum, row) => sum + row.seconds, 0);
+  }
+
+  function scholarFreeTalkLeft(sub, conversationId) {
+    const left = Math.max(0, state.scholarFreeTalkSeconds - scholarFreeTalkUsed(sub, conversationId));
+    return left >= 30 ? left : 0;
+  }
+
+  // A spend, as spend_scholar_credits does it: a new row, and a row whose window has ended, start a window of their own
+  // (used = the cost, renews_at = now + the window); a window that still runs adds the cost.
+  function spendScholarCredits(sub, cost) {
+    const fresh = { used: cost, renews_at: stamp(clock.now + state.scholarWindowMs) };
+    let row = state.scholarCreditRows.find((item) => item.user_id === sub);
+    if (row === undefined) {
+      row = { user_id: sub, ...fresh, allowance: state.scholarAllowance, updated_at: stamp(clock.now) };
+      state.scholarCreditRows.push(row);
+      return;
+    }
+    if (Date.parse(row.renews_at) > clock.now) row.used += cost;
+    else Object.assign(row, fresh);
+    row.allowance = state.scholarAllowance;
+    row.updated_at = stamp(clock.now);
   }
 
   function scholarTurn(body, sub) {
@@ -557,11 +668,18 @@ function makeServer() {
     if (answered !== undefined) {
       const conversation = state.scholarConversations.find((row) => row.id === answered.conversation_id);
       const message = state.scholarMessages.find((row) => row.id === messageId);
+      const free = scholarFreeRow(sub);
       return json(200, {
         conversation: scholarConversationModel(conversation),
         message: scholarMessageModel(message),
         answer: scholarMessageModel(answered),
-        usage: conversation.is_heavy ? null : scholarUsage(sub),
+        usage: conversation.is_heavy
+          ? null
+          : scholarTier(sub) === "pro"
+          ? scholarCreditsUsage(sub)
+          : free !== null && free.conversation_id === conversation.id
+          ? scholarFreeUsage(free.messages)
+          : null,
       });
     }
     let conversation = state.scholarConversations.find((row) => row.id === conversationId);
@@ -612,9 +730,15 @@ function makeServer() {
     state.scholarMessages = state.scholarMessages.filter((row) => row.id !== messageId);
     state.scholarMessages.push(personRow);
     if (heavyNow) conversation.is_heavy = true;
+    // An account that is not Pro: answered in its free conversation while a free message is left (2026-11-20), and told by its
+    // plan otherwise. A heavy conversation is never counted.
+    let freeMessage = false;
     if (!conversation.is_heavy) {
-      const usage = scholarUsage(sub);
-      if (usage.remaining <= 0) {
+      const pro = scholarTier(sub) === "pro";
+      const freeRow = scholarFreeRow(sub);
+      freeMessage = !pro && scholarFreeOpen(sub, conversation.id) && (freeRow?.messages ?? 0) < state.scholarFreeMessages;
+      const usage = pro ? scholarCreditsUsage(sub) : scholarPlanUsage("scholar_plan", sub);
+      if ((!pro && !freeMessage) || (pro && usage.remaining <= 0)) {
         personRow.status = "failed";
         personRow.error_code = "LIMIT_REACHED";
         return json(402, { error: { code: "LIMIT_REACHED", message: "A fixed message", requestId: "req-1" }, usage });
@@ -646,30 +770,54 @@ function makeServer() {
       conversation.title = "A question about peace";
     }
     if (conversation.is_heavy) conversation.title = null;
+    let usage = null;
+    if (!conversation.is_heavy && freeMessage) {
+      claimScholarFree(sub, conversation.id, true);
+      usage = scholarFreeUsage(scholarFreeRow(sub).messages);
+    } else if (!conversation.is_heavy) {
+      spendScholarCredits(sub, state.scholarMessageCost);
+      usage = scholarCreditsUsage(sub);
+    }
     return json(200, {
       conversation: scholarConversationModel(conversation),
       message: scholarMessageModel(personRow),
       answer: scholarMessageModel(answer),
-      usage: conversation.is_heavy ? null : scholarUsage(sub),
+      usage,
     });
   }
 
-  // One part of a saved answer read aloud: two parts per answer. A free account hears nothing outside a heavy conversation.
+  // One part of a saved answer read aloud: two parts per answer. Outside a heavy conversation only Pro hears it (a trial is told
+  // the day it opens), and part 0 checks and spends the credits, so an answer already started is never cut off. Since 2026-11-19
+  // a request may name the voice to read it in (one lowercase word, as the real function checks), and the part's bytes say which
+  // voice read it, so a check can tell the parts apart; the credits are the same in every voice.
   function scholarSpeak(body, sub) {
     const object = body !== null && typeof body === "object" && !Array.isArray(body);
-    if (!object || Object.keys(body).some((key) => !["messageId", "part", "region"].includes(key))) return fnError(400, "INVALID_REQUEST");
+    if (!object || Object.keys(body).some((key) => !["messageId", "part", "region", "voice"].includes(key))) {
+      return fnError(400, "INVALID_REQUEST");
+    }
+    if (body.voice !== undefined && (typeof body.voice !== "string" || !/^[a-z]{1,32}$/.test(body.voice))) {
+      return fnError(400, "INVALID_REQUEST");
+    }
     const answer = state.scholarMessages.find((row) => row.id === body.messageId && row.user_id === sub && row.role === "scholar");
     if (answer === undefined || answer.status !== "ready") return fnError(404, "NOT_FOUND");
     if (!Number.isInteger(body.part) || body.part < 0 || body.part > 1) return fnError(400, "INVALID_REQUEST");
     const conversation = state.scholarConversations.find((row) => row.id === answer.conversation_id);
-    const paid = state.serverPlans[sub] === "pro" || state.serverPlans[sub] === "trial";
-    if (!conversation.is_heavy && !paid) {
-      return json(402, {
-        error: { code: "LIMIT_REACHED", message: "A fixed message", requestId: "req-1" },
-        usage: { kind: "listen_plan", used: 0, limit: 0, remaining: 0, resetsAt: null },
-      });
+    if (!conversation.is_heavy) {
+      const refuse = (usage) =>
+        json(402, { error: { code: "LIMIT_REACHED", message: "A fixed message", requestId: "req-1" }, usage });
+      if (scholarTier(sub) !== "pro") {
+        // The free conversation's answers are read aloud free (2026-11-20); any other conversation is told by its plan.
+        const free = scholarFreeRow(sub);
+        if (free === null || free.conversation_id !== conversation.id) return refuse(scholarPlanUsage("listen_plan", sub));
+      } else if (body.part === 0) {
+        const usage = scholarCreditsUsage(sub);
+        if (usage.remaining <= 0) return refuse(usage);
+        spendScholarCredits(sub, state.scholarListenCost);
+      }
     }
-    const audio = Buffer.from(`RIFF-part-${body.part}`).toString("base64");
+    // The free plan hears the default voice whatever it asks for (2026-11-20); a trial and Pro hear the voice they asked for.
+    const voice = body.voice === undefined ? "standard" : scholarTier(sub) === "free" ? "warm" : body.voice;
+    const audio = Buffer.from(`RIFF-${voice}-part-${body.part}`).toString("base64");
     return json(200, { part: body.part, parts: 2, audioBase64: audio, durationMs: 1500 });
   }
 
@@ -690,14 +838,22 @@ function makeServer() {
       conversation = state.scholarConversations.find((row) => row.entry_id === fromEntry.id && row.user_id === sub);
     }
     const heavy = conversation?.is_heavy === true || (conversation === undefined && fromEntry?.is_crisis === true);
-    const paid = state.serverPlans[sub] === "pro" || state.serverPlans[sub] === "trial";
     const limitError = (kind, resetsAt) =>
       json(402, {
         error: { code: "LIMIT_REACHED", message: "A fixed message", requestId: "req-1" },
         usage: { kind, used: 0, limit: 0, remaining: 0, resetsAt },
       });
-    if (!paid) return limitError("talk_plan", null);
-    if (!heavy && state.talkMonthLeft < 30) return limitError("talk_month", state.talkResetsAt);
+    // A live talk is part of Pro (a trial is told the day its plan begins), with the free conversation's few minutes for an
+    // account that is not Pro (2026-11-20): never in a heavy conversation, never in another conversation, and only while its
+    // talk time lasts (under half a minute counts as used up).
+    const tier = scholarTier(sub);
+    const conversationKey = conversation?.id ?? body.conversationId;
+    let freeLeft = 0;
+    if (tier !== "pro") {
+      freeLeft = !heavy && scholarFreeOpen(sub, conversationKey) ? scholarFreeTalkLeft(sub, conversationKey) : 0;
+      if (freeLeft === 0) return limitError("talk_plan", scholarOpensAt(sub));
+    }
+    if (tier === "pro" && !heavy && state.talkMonthLeft < 30) return limitError("talk_month", state.talkResetsAt);
     if (conversation === undefined) {
       const at = stamp(clock.now);
       conversation = {
@@ -711,9 +867,12 @@ function makeServer() {
       };
       state.scholarConversations.push(conversation);
     }
+    // The free conversation is claimed by a talk in it, and the free plan has the default voice whatever it asks for.
+    const free = tier !== "pro";
+    if (free) claimScholarFree(sub, conversation.id, false);
     const talkId = `talk-${state.voiceTalks.length + 1}`;
-    const voice = VOICE_KEYS.includes(body.voice) ? body.voice : "warm";
-    state.voiceTalks.push({ id: talkId, sub, conversationId: conversation.id, voice, heavy, ended: false });
+    const voice = tier === "free" ? "warm" : VOICE_KEYS.includes(body.voice) ? body.voice : "warm";
+    state.voiceTalks.push({ id: talkId, sub, conversationId: conversation.id, voice, heavy, ended: false, free, seconds: 0 });
     return json(200, {
       talkId,
       conversationId: conversation.id,
@@ -723,6 +882,8 @@ function makeServer() {
       heavy,
       limits: heavy
         ? { talkSeconds: null, monthSecondsLeft: null, resetsAt: state.talkResetsAt }
+        : free
+        ? { talkSeconds: freeLeft, monthSecondsLeft: null, resetsAt: state.talkResetsAt }
         : { talkSeconds: Math.min(600, state.talkMonthLeft), monthSecondsLeft: state.talkMonthLeft, resetsAt: state.talkResetsAt },
     });
   }
@@ -733,8 +894,15 @@ function makeServer() {
     if (!object || Object.keys(body).some((key) => key !== "talkId")) return fnError(400, "INVALID_REQUEST");
     const talk = state.voiceTalks.find((row) => row.id === body.talkId && row.sub === sub);
     if (talk === undefined) return fnError(404, "NOT_FOUND");
-    if (!talk.ended && !talk.heavy) state.talkMonthLeft = Math.max(0, state.talkMonthLeft - state.talkSecondsPerTalk);
+    if (!talk.ended && !talk.heavy && talk.free) talk.seconds = state.talkSecondsPerTalk;
+    else if (!talk.ended && !talk.heavy) state.talkMonthLeft = Math.max(0, state.talkMonthLeft - state.talkSecondsPerTalk);
     talk.ended = true;
+    // An account that is not Pro has no month: what is left of its free conversation's talk time (2026-11-20).
+    if (talk.free) {
+      return json(200, {
+        limits: { talkSeconds: scholarFreeTalkLeft(sub, talk.conversationId), monthSecondsLeft: null, resetsAt: state.talkResetsAt },
+      });
+    }
     return json(200, {
       limits: talk.heavy
         ? { talkSeconds: null, monthSecondsLeft: null, resetsAt: state.talkResetsAt }
@@ -846,7 +1014,15 @@ function makeServer() {
       if (typeof body?.tz !== "string") return json(400, { code: "PGRST202", message: "no such function", details: null, hint: null });
       return json(200, streakOf(sub, body.tz));
     }
-    for (const table of ["journal_entries", "daily_affirmations", "scholar_conversations", "scholar_messages"]) {
+    const tables = [
+      "journal_entries",
+      "daily_affirmations",
+      "scholar_conversations",
+      "scholar_messages",
+      "scholar_credits",
+      "scholar_free_use",
+    ];
+    for (const table of tables) {
       if (url.pathname === `/rest/v1/${table}`) {
         const scripted = state.rest[table].shift();
         if (scripted !== undefined) return withAbort(init.signal, Promise.resolve(typeof scripted === "function" ? scripted() : scripted));
@@ -924,6 +1100,19 @@ function makeLiveWorld({
   const { react, renderHook } = shared;
   const realFetch = globalThis.fetch;
   globalThis.fetch = server.fake;
+  // The screen's focus (2026-11-18). By default the screen is in front; a check covers it with `world.setFocused(false)` and shows
+  // it again with `true`. Like the real useFocusEffect, the effect runs while the screen is focused, its cleanup runs when the
+  // screen is covered or unmounted, and it runs again when the screen is shown.
+  let focused = true;
+  const focusListeners = new Set();
+  const useFocusEffectFake = (effect) => {
+    const [isFocused, setIsFocused] = react.useState(focused);
+    react.useEffect(() => {
+      focusListeners.add(setIsFocused);
+      return () => void focusListeners.delete(setIsFocused);
+    }, []);
+    react.useEffect(() => (isFocused ? effect() : undefined), [effect, isFocused]);
+  };
   const fakes = {
     "expo-sqlite": sqlite.module,
     "expo-crypto": crypto,
@@ -932,15 +1121,21 @@ function makeLiveWorld({
     "react-native": appState.module,
     "@/services/recordingFiles": recordings.module,
     "@/services/mediaUpload": upload.module,
-    "@react-navigation/native": { useFocusEffect: (effect) => react.useEffect(() => effect(), [effect]) },
+    "@react-navigation/native": { useFocusEffect: useFocusEffectFake },
     react,
   };
   // Step 28: Journal asks the affirmation notifications to be planned again after its first page. The scheduler needs
   // expo-notifications, which plain Node cannot load, so it is counted here (supabase/tests/notifications checks it).
+  // 2026-11-17: the screen also follows the scheduler's word calendar; here a check fires it by hand (`world.calendarChanged()`).
   let affirmationRequests = 0;
+  const calendarListeners = new Set();
   fakes["@/services/affirmationScheduler"] = {
     requestAffirmationReschedule: () => {
       affirmationRequests += 1;
+    },
+    subscribeWordCalendar: (listener) => {
+      calendarListeners.add(listener);
+      return () => void calendarListeners.delete(listener);
     },
   };
   // Step 34: the analytics service imports PostHog and expo-constants, which plain Node cannot load. A stand-in records
@@ -985,6 +1180,31 @@ function makeLiveWorld({
     holdAwake: (on) => void talkAudio.calls.push(on ? "awake" : "asleep"),
     restorePlaybackMode: async () => void talkAudio.calls.push("playback mode"),
   };
+  // 2026-11-18: the trial-end reminder needs expo-notifications behind services/notifications.ts, which plain Node cannot load
+  // (supabase/tests/trial-reminder checks the real service). The paywall hook, sign-out and the plan watch only call these, so a
+  // stand-in records what they asked for. By default the phone offers no reminder, so no other suite sees a switch.
+  const trialReminderCalls = { cleared: 0, reconciled: [], scheduled: [], tests: 0 };
+  fakes["@/services/trialReminder"] = {
+    __esModule: true,
+    canOfferTrialReminder: async () => false,
+    scheduleTrialReminder: async (endsAtMs) => {
+      trialReminderCalls.scheduled.push(endsAtMs);
+      return { status: "skipped" };
+    },
+    clearTrialReminder: async () => void (trialReminderCalls.cleared += 1),
+    reconcileTrialReminder: async (trial) => void trialReminderCalls.reconciled.push(trial),
+    scheduleTestTrialReminder: async () => void (trialReminderCalls.tests += 1),
+  };
+  // 2026-11-20: the picture of the Today tab's word card needs expo-file-system and react-native, which plain Node cannot load
+  // (supabase/tests/share-card checks the real service). Sign-out only deletes the pictures, so a stand-in counts that, and no
+  // picture can be made here, as in Expo Go.
+  const wordPictures = { deleted: 0 };
+  fakes["@/services/wordCardShare"] = {
+    __esModule: true,
+    canShareWordPicture: () => false,
+    makeWordPicture: async () => null,
+    deleteWordPictures: () => void (wordPictures.deleted += 1),
+  };
   // The account has allowed Google's AI in every suite but supabase/tests/ai-permission, which checks the real answer.
   // Step 39: and its voice to ElevenLabs, in the default voice.
   if (aiPermission === "fake") {
@@ -1017,7 +1237,15 @@ function makeLiveWorld({
     hapticsCalls,
     scholarAudio,
     talkAudio,
+    trialReminderCalls,
+    wordPictures,
     affirmationRequests: () => affirmationRequests,
+    calendarChanged: () => [...calendarListeners].forEach((listener) => listener()),
+    calendarListeners: () => calendarListeners.size,
+    setFocused: (value) => {
+      focused = value;
+      [...focusListeners].forEach((setIsFocused) => setIsFocused(value));
+    },
     renderHook,
     logs,
     userId,

@@ -62,6 +62,7 @@ function serviceFakes() {
     playerStops: 0,
     audioDeletes: 0,
     notificationClears: 0,
+    trialReminderClears: 0,
     revenueCatLogouts: 0,
     // Apple's sheet (step 35): what it was asked, and what it answers.
     expoGo: false,
@@ -92,6 +93,11 @@ function serviceFakes() {
       __esModule: true,
       requestAffirmationReschedule: () => undefined,
       clearAffirmations: async () => void (state.notificationClears += 1),
+    },
+    // 2026-11-18: the trial-end reminder goes with the account (expo-notifications cannot load in plain Node).
+    "@/services/trialReminder": {
+      __esModule: true,
+      clearTrialReminder: async () => void (state.trialReminderClears += 1),
     },
     "@/services/revenuecat": {
       __esModule: true,
@@ -273,6 +279,8 @@ async function deleteChecks() {
       [w.services.playerStops, w.services.audioDeletes, w.services.notificationClears, w.services.revenueCatLogouts],
       [1, 1, 1, 1],
     );
+    assert.equal(w.services.trialReminderClears, 1, "the trial-end reminder goes with the account");
+    assert.equal(w.wordPictures.deleted, 1, "and so does the picture of the word card made for the last share");
     assert.equal(prefsOf(w), undefined);
     assert.ok(!w.services.order.some((step) => step.startsWith("start plan watch")), "nothing was started again");
     assert.equal(engine(w).isSyncEngineStarted(), false);
@@ -292,6 +300,8 @@ async function deleteChecks() {
     assert.equal(dbOpen(w), true);
     assert.ok(prefsOf(w), "the account's settings are still on the phone");
     assert.deepEqual([w.services.playerStops, w.services.audioDeletes, w.services.notificationClears], [0, 0, 0]);
+    assert.equal(w.services.trialReminderClears, 0, "a failed deletion leaves the trial-end reminder");
+    assert.equal(w.wordPictures.deleted, 0, "and the picture of the word card");
     await profileSync(w).syncProfile();
     assert.ok(profileRequests(w) >= 1, "the profile sync works again");
     // No answer at all is a failure too.
@@ -308,6 +318,7 @@ async function deleteChecks() {
     assert.equal(dbOpen(w), false);
     assert.equal(prefsOf(w), undefined);
     assert.equal(w.services.notificationClears, 1);
+    assert.equal(w.services.trialReminderClears, 1);
   });
 
   await test("delete: with no session at all nothing is sent, and the phone is cleared the same way", async (w) => {

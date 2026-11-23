@@ -407,7 +407,8 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
     const lock = (w) => w.env.use("@/services/lockScreen");
     const OPTIONS = { showSeekForward: true, showSeekBackward: true, seekForwardIntervalSeconds: 15, seekBackwardIntervalSeconds: 15 };
     const newPlayer = (w) => w.expoAudio.createAudioPlayer({ uri: "file:///x.wav" }, {});
-    const info = { title: "Peace in the midst", subtitle: "GraceHush • Psalm 23:1–3" };
+    // A track with no scene of its own (`scenes` empty) shows the hour's scene, so these checks read the clock.
+    const info = { title: "Peace in the midst", subtitle: "GraceHush • Psalm 23:1–3", scenes: [] };
     // The picture follows the hour the phone reads, so each check says which hour it is.
     const atHour = async (hour, run) => {
       const real = Date.prototype.getHours;
@@ -441,6 +442,23 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
         { title: "Peace in the midst", artist: "GraceHush • Psalm 23:1–3", artworkUrl: "file:///assets/player-scene-2-square.jpg" },
       ]);
       assert.deepEqual(w.asset.calls.fromModule, [8], "the square crop of the first-light scene, from constants/images");
+    }));
+
+    await test("lock: the reflection's own first scene wins over the hour, and is looked up once", () => atHour(7, async () => {
+      const w = rig();
+      const a = newPlayer(w);
+      lock(w).activateLockScreen(a, { ...info, scenes: [13, 4] });
+      await W.advance(10);
+      assert.equal(a.calls.updateMeta[0].artworkUrl, "file:///assets/player-scene-14-square.jpg", "scene 13 is the 14th file");
+      assert.deepEqual(w.asset.calls.fromModule, [20], "the square crop of scene 13, never the hour's");
+      const b = newPlayer(w);
+      lock(w).activateLockScreen(b, { ...info, scenes: [19] });
+      await W.advance(10);
+      assert.equal(b.calls.updateMeta[0].artworkUrl, "file:///assets/player-scene-20-square.jpg", "the last of the twenty");
+      const c = newPlayer(w);
+      lock(w).activateLockScreen(c, { ...info, scenes: [13] });
+      assert.equal(c.calls.setActive[0].metadata.artworkUrl, "file:///assets/player-scene-14-square.jpg", "already looked up");
+      assert.deepEqual(w.asset.calls.fromModule, [20, 26]);
     }));
 
     await test("lock: a second devotional in the same part of the day gets the artwork in its first call, with no second lookup", () => atHour(7, async () => {
@@ -556,6 +574,18 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       assert.equal(player.calls.setActive[0].metadata.title, "Peace in the midst 1");
       assert.equal(player.calls.play, 0, "loading never starts the sound");
       assert.deepEqual(view(store), { entryId: "entry-1", status: "paused", positionMs: 0, isBuffering: false, error: null });
+    });
+
+    await test(`${tag}: load keeps the track's scenes for the card, another devotional brings its own, and stop forgets them`, async () => {
+      const w = rig({ platform });
+      const store = w.store();
+      assert.deepEqual(store.getState().scenes, []);
+      store.getState().load(W.track(1, { scenes: [13, 4, 0] }), AMBIENT);
+      assert.deepEqual(store.getState().scenes, [13, 4, 0]);
+      store.getState().load(W.track(2, { scenes: [8] }), AMBIENT);
+      assert.deepEqual(store.getState().scenes, [8]);
+      store.getState().stop();
+      assert.deepEqual(store.getState().scenes, []);
     });
 
     await test(`${tag}: loading the same devotional again does nothing`, async () => {
@@ -1314,7 +1344,7 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
   });
 
   // ============================================================ E. the store's shape and the ambient choice
-  await test("store: the state and the actions of step 12 are all still there, with isBuffering and error added", async () => {
+  await test("store: the state and the actions of step 12 are all still there, with isBuffering, error and scenes added", async () => {
     const w = rig();
     const state = w.store().getState();
     assert.deepEqual(Object.keys(state).sort(), [
@@ -1325,11 +1355,13 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       "error",
       "isBuffering",
       "load",
+      "markNewReflection",
       "pause",
       "play",
       "positionMs",
       "rate",
       "reseedAmbient",
+      "scenes",
       "seekTo",
       "setAmbient",
       "setAmbientVolume",
@@ -1363,6 +1395,40 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
     assert.deepEqual([store.getState().ambientSound, store.getState().ambientVolume], ["soft-rain", 0.9], "the next account starts from its own profile");
   });
 
+  await test("store: a reflection made on this phone starts with Gentle Piano at 100% on its first load, whatever the caller or the session had, and the person's choice stands after that", async () => {
+    const w = rig();
+    const store = w.store();
+    const sound = () => [store.getState().ambientSound, store.getState().ambientVolume];
+    // A mark changes nothing by itself; the first load takes Gentle Piano at 100%, not the profile, and the session keeps it.
+    store.getState().markNewReflection("entry-1");
+    assert.deepEqual(sound(), ["off", 0.5]);
+    store.getState().load(W.track(1), { ambientSound: "off", ambientVolume: 0.5 });
+    assert.deepEqual(sound(), ["gentle-piano", 1]);
+    store.getState().load(W.track(2), { ambientSound: "soft-rain", ambientVolume: 0.3 });
+    assert.deepEqual(sound(), ["gentle-piano", 1], "the session keeps it, and the profile is not copied again");
+    // The person turns the sound off and plays on. A reflection made now leaves the playing devotional's sound alone...
+    store.getState().setAmbient("off");
+    await W.advance(100);
+    await playFor(w, store, 1000);
+    store.getState().markNewReflection("entry-3");
+    assert.deepEqual(sound(), ["off", 1]);
+    assert.equal(store.getState().status, "playing");
+    // ...and its own first load starts with Gentle Piano at 100% again, paused: nothing starts by itself.
+    store.getState().load(W.track(3), { ambientSound: "off", ambientVolume: 0.2 });
+    assert.deepEqual(sound(), ["gentle-piano", 1]);
+    assert.equal(store.getState().status, "paused");
+    // The mark is used once: the person lowers the volume, plays another devotional, comes back, and their choice stands.
+    store.getState().setAmbientVolume(0.4);
+    store.getState().load(W.track(4), { ambientSound: "morning-birds", ambientVolume: 0.7 });
+    store.getState().load(W.track(3), { ambientSound: "off", ambientVolume: 0.2 });
+    assert.deepEqual(sound(), ["gentle-piano", 0.4]);
+    // Signing out forgets the marks: the next account starts from its own profile.
+    store.getState().markNewReflection("entry-5");
+    store.getState().stop();
+    store.getState().load(W.track(5), { ambientSound: "soft-rain", ambientVolume: 0.9 });
+    assert.deepEqual(sound(), ["soft-rain", 0.9]);
+  });
+
   // ============================================================ F. a devotional is a track only with a path and a length
   await test("track: getPlaybackTrack carries the audio path, a heavy moment's too; an unfinished entry or one with no audio is no track", async () => {
     const w = rig();
@@ -1375,13 +1441,25 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
       devotional: { title: "Peace", audioPath: PATH(1), durationMs: 113_200, ...devotional },
       ...patch,
     });
-    assert.deepEqual(getPlaybackTrack(entry()), {
+    const { scenes, ...rest } = getPlaybackTrack(entry());
+    assert.deepEqual(rest, {
       entryId: "entry-1",
       title: "Peace",
       subtitle: "GraceHush • Psalm 23:1–3",
       durationMs: 113_200,
       audioPath: PATH(1),
     });
+    // The card drifts through the reflection's five best scenes, best first (utils/sceneMatch.ts).
+    const { rankScenes, UNIVERSAL_SCENES } = w.env.use("@/utils/sceneMatch");
+    assert.deepEqual(scenes, rankScenes(entry()).slice(0, 5));
+    assert.equal(new Set(scenes).size, 5, "five different scenes");
+    assert.ok(scenes.every((scene) => UNIVERSAL_SCENES.includes(scene)), "words that name no situation show only the quiet scenes");
+    const hospital = getPlaybackTrack(
+      entry({ id: "entry-2", transcript: "Waiting for my mother's scan result at the hospital." }, { title: "Waiting Room" }),
+    );
+    assert.equal(hospital.scenes[0], 13, "a reflection about a hospital opens on the hospital");
+    const heavy = getPlaybackTrack(entry({ id: "entry-3", isCrisis: true, transcript: "Waiting at the hospital again." }));
+    assert.ok(heavy.scenes.every((scene) => UNIVERSAL_SCENES.includes(scene)), "a heavy moment never shows its situation");
     // A heavy moment is a whole reflection since 2026-11-08, so its devotional plays like any other.
     assert.equal(getPlaybackTrack(entry({ isCrisis: true }))?.audioPath, PATH(1));
     // One saved before then has no devotional, so nothing plays.
@@ -1494,6 +1572,17 @@ const storageApi = (status, statusCode, message = "m", code) => new StorageApiEr
         const logs = text.match(/console\.[a-z]+\([^;]*;/g) ?? [];
         for (const call of logs) assert.ok(!/(url|uri|path|title|entryId|subtitle|link)/i.test(call.replace(/the \$\{mode\} session mode/, "")), `${file}: ${call}`);
       }
+    });
+
+    await test("contract: the mini player's play starts the devotional and opens Now Playing, its pause stays in place, and a second press waits until the reflection is focused again", () => {
+      const card = fs.readFileSync(path.join(REPO, "src/components/MiniPlayerCard.tsx"), "utf8");
+      const handler = card.slice(card.indexOf("function playOrPause()"), card.indexOf("function open()"));
+      assert.ok(card.includes("onPress={playOrPause}") && handler.length > 0, "the play button runs playOrPause");
+      assert.match(handler, /if \(opening\.current\) return;\s*if \(isPlaying\) \{\s*playback\.pause\(\);\s*return;\s*\}/, "pause stays in place");
+      assert.match(handler, /opening\.current = true;\s*load\(\);\s*playback\.play\(\);\s*onOpen\(\);/, "play loads, starts and opens");
+      assert.match(card, /useEffect\(\(\) => \{\s*if \(isFocused\) \{\s*opening\.current = false;\s*\}\s*\}, \[isFocused\]\);/, "the guard resets on focus");
+      assert.match(card, /accessibilityHint=\{isPlaying \? undefined : player\.playHint\}/);
+      assert.ok(!/\.toggle\(\)/.test(card), "the button does what it shows");
     });
 
     await test("contract: the old mock is gone from the store, and no track-player is used", () => {

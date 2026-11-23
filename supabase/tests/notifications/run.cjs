@@ -96,17 +96,42 @@ function source(entryId = "entry-1", headlines) {
   return { entryId, affirmations: W.affirmationsFor(entryId, headlines) };
 }
 
+// The Word Deck is pure and has no clock of its own: one copy serves every check.
+let deckCache = null;
+function deck() {
+  deckCache ??= W.world().use("@/utils/wordDeck");
+  return deckCache;
+}
+
+// One reflection of the pool, from the old shape ({ entryId, affirmations }): its words as the app deals them.
+function reflectionOf(src, tier = "week") {
+  return { entryId: src.entryId, tier, words: deck().deckWordsOf(src.affirmations) };
+}
+
+// A reflection with headlines of its own, so a notification says which reflection and which word it came from.
+function made(entryId, tier = "week") {
+  return reflectionOf(
+    source(entryId, { morning: `${entryId} morning`, afternoon: `${entryId} afternoon`, evening: `${entryId} evening` }),
+    tier,
+  );
+}
+
+// What dealWords gives for a pool: the old plan checks pass `source`, the new ones `reflections` and a `history`.
+function dealFor(overrides = {}) {
+  const { source: src = source(), reflections, history = [], now = new Date(T0), timeZone = "America/New_York", days, reminders } = overrides;
+  return deck().dealWords({
+    now,
+    timeZone,
+    reminders: reminders ?? { ...REMINDERS },
+    reflections: reflections ?? (src === null ? [] : [reflectionOf(src)]),
+    history,
+    ...(days === undefined ? {} : { days }),
+  });
+}
+
 function planInput(overrides = {}) {
-  return {
-    now: new Date(T0),
-    timeZone: "America/New_York",
-    reminders: { ...REMINDERS },
-    enabled: true,
-    permission: "granted",
-    source: source(),
-    userHash: HASH_A,
-    ...overrides,
-  };
+  const { enabled = true, permission = "granted", userHash = HASH_A } = overrides;
+  return { enabled, permission, deal: dealFor(overrides), userHash };
 }
 
 const planned = (w) => w.notifications.ours().filter((id) => /^aff-(morning|afternoon|evening)-/.test(id));
@@ -183,25 +208,33 @@ async function zoneChecks() {
 
 // ================================================================== the plan
 async function planChecks() {
-  await test("plan: nothing while the switch is off, the phone will not show it, there is no reflection, or the newest has no affirmations", async () => {
+  await test("plan: nothing while the switch is off, the phone will not show it, or no reflection has a word to send", async () => {
     const p = planner();
     assert.equal(p.planAffirmations(planInput({ enabled: false })).length, 0);
     assert.equal(p.planAffirmations(planInput({ permission: "denied" })).length, 0);
     assert.equal(p.planAffirmations(planInput({ permission: "undetermined" })).length, 0);
     assert.equal(p.planAffirmations(planInput({ source: null })).length, 0);
-    // A heavy moment saved before 2026-11-08 has no affirmations, so nothing is sent while it is the newest.
+    // A reflection with no affirmations has no word: nothing is dealt from it.
     assert.equal(p.planAffirmations(planInput({ source: { entryId: "entry-2", affirmations: [] } })).length, 0);
-    // One since then has its three, written to speak hope: they are planned like any other reflection's.
+    // A heavy moment since 2026-11-08 has its three, written to speak hope: they are planned like any other reflection's.
     assert.equal(p.planAffirmations(planInput({ source: source("entry-2") })).length, 21);
     assert.equal(p.planAffirmations(planInput()).length, 21);
   });
 
-  await test("plan: a reflection without all three headlines, a blank headline or a bad account hash plans nothing", async () => {
+  await test("plan: a blank headline leaves its word out and a reflection with fewer words still fills every reminder; a bad account hash plans nothing", async () => {
     const p = planner();
+    // Two words (the evening one is gone): the 21 reminders are still all planned, from those two, and never the missing one.
     const two = source();
     two.affirmations = two.affirmations.filter((item) => item.slot !== "evening");
-    assert.equal(p.planAffirmations(planInput({ source: two })).length, 0);
-    assert.equal(p.planAffirmations(planInput({ source: source("entry-1", { afternoon: "   " }) })).length, 0);
+    const fromTwo = p.planAffirmations(planInput({ source: two }));
+    assert.equal(fromTwo.length, 21);
+    assert.deepEqual([...new Set(fromTwo.map((item) => item.body))].sort(), ["You are held this afternoon", "You are held this morning"]);
+    // A blank headline is no word: the other two go on.
+    const blank = p.planAffirmations(planInput({ source: source("entry-1", { afternoon: "   " }) }));
+    assert.equal(blank.length, 21);
+    assert.ok(blank.every((item) => item.body.trim() !== "" && item.body !== "You are held this afternoon"));
+    // Three blank headlines leave nothing to send.
+    assert.equal(p.planAffirmations(planInput({ source: source("entry-1", { morning: " ", afternoon: " ", evening: " " }) })).length, 0);
     assert.equal(p.planAffirmations(planInput({ userHash: "user_a" })).length, 0);
   });
 
@@ -377,8 +410,367 @@ async function planChecks() {
   });
 }
 
+// ================================================================== the Word Deck
+async function deckChecks() {
+  const walls = (deal) => deal.map((item) => wallOf(item.fireAt.getTime(), "America/New_York"));
+  const entriesOf = (deal) => deal.map((item) => item.word.entryId);
+  const wordsOf = (deal) => deal.map((item) => item.word.id);
+  const rowsOf = (deal) => deal.map((item) => deck().toHistoryRow(item));
+  const H = 3_600_000;
+  const DAY = 24 * H;
+
+  await test("deck: a lone reflection with its three best words is the old plan exactly: each reminder carries its own slot's word, for 21 reminders", async () => {
+    const deal = dealFor();
+    assert.equal(deal.length, 21);
+    assert.equal(walls(deal)[0], "2026-10-28 08:00");
+    assert.equal(walls(deal)[20], "2026-11-03 20:00");
+    for (const item of deal) {
+      assert.equal(item.word.entryId, "entry-1");
+      assert.equal(item.word.slot, item.slot, "its own slot's word");
+      assert.equal(item.word.id, `entry-1-${item.slot}`);
+    }
+    for (let i = 1; i < deal.length; i += 1) assert.ok(deal[i].fireAt > deal[i - 1].fireAt, "in time order");
+  });
+
+  await test("deck: the reflections of the week take turns newest first, three a day, and each word of a reflection is heard before one repeats", async () => {
+    const deal = dealFor({ reflections: [made("entry-a"), made("entry-b"), made("entry-c")] });
+    assert.equal(deal.length, 21);
+    assert.deepEqual(entriesOf(deal).slice(0, 6), ["entry-a", "entry-b", "entry-c", "entry-a", "entry-b", "entry-c"]);
+    for (const id of ["entry-a", "entry-b", "entry-c"]) {
+      const mine = deal.filter((item) => item.word.entryId === id);
+      assert.equal(mine.length, 7);
+      // Inside a reflection the words cycle: any three turns in a row are three different words.
+      const ids = mine.map((item) => item.word.id);
+      for (let i = 0; i + 3 <= ids.length; i += 3) assert.equal(new Set(ids.slice(i, i + 3)).size, 3, `${id} ${ids.slice(i, i + 3)}`);
+    }
+    // The first turn of the first reflection is its morning word, because it is a morning reminder.
+    assert.equal(deal[0].word.id, "entry-a-morning");
+    assert.equal(deal[1].word.id, "entry-b-afternoon");
+    assert.equal(deal[2].word.id, "entry-c-evening");
+  });
+
+  await test("deck: a word is never dealt twice in a row, and no reflection has two turns running, whatever the size of the week", async () => {
+    for (const size of [2, 3, 4, 7, 14]) {
+      const pool = Array.from({ length: size }, (_, i) => made(`entry-${String.fromCharCode(97 + i)}`));
+      const deal = dealFor({ reflections: pool });
+      for (let i = 1; i < deal.length; i += 1) {
+        assert.notEqual(deal[i].word.entryId, deal[i - 1].word.entryId, `${size} reflections, reminder ${i}`);
+        assert.notEqual(deal[i].word.id, deal[i - 1].word.id);
+      }
+    }
+    // A week of seven reflections gives each of them three turns in 21 reminders and no word twice.
+    const seven = dealFor({ reflections: Array.from({ length: 7 }, (_, i) => made(`entry-${i}`)) });
+    for (let i = 0; i < 7; i += 1) assert.equal(seven.filter((item) => item.word.entryId === `entry-${i}`).length, 3);
+    assert.equal(new Set(wordsOf(seven)).size, 21, "a week of seven reflections hears 21 different words");
+  });
+
+  await test("deck: a new reflection plays at the very next reminder, and the others keep their places in line", async () => {
+    // Yesterday A played in the morning and evening, B in the afternoon.
+    const at = (day, hour) => Date.UTC(2026, 9, day, hour);
+    const history = [
+      { day: 20261027, slot: "morning", fireAt: at(27, 12), entryId: "entry-a", affirmationId: "entry-a-morning" },
+      { day: 20261027, slot: "afternoon", fireAt: at(27, 17), entryId: "entry-b", affirmationId: "entry-b-afternoon" },
+      { day: 20261027, slot: "evening", fireAt: at(28, 0), entryId: "entry-a", affirmationId: "entry-a-evening" },
+    ];
+    const before = dealFor({ reflections: [made("entry-a"), made("entry-b")], history });
+    assert.deepEqual(entriesOf(before).slice(0, 4), ["entry-b", "entry-a", "entry-b", "entry-a"], "B has waited longest");
+    const after = dealFor({ reflections: [made("entry-n"), made("entry-a"), made("entry-b")], history });
+    assert.deepEqual(entriesOf(after).slice(0, 4), ["entry-n", "entry-b", "entry-a", "entry-n"]);
+    assert.equal(after[0].word.id, "entry-n-morning");
+  });
+
+  await test("deck: the rotation goes on across days from what the calendar says was sent, and a plan made again with nothing new gives the same words", async () => {
+    const pool = [made("entry-a"), made("entry-b"), made("entry-c")];
+    const first = dealFor({ reflections: pool });
+    // Two days later: the reminders that have passed are the history.
+    const later = T0 + 2 * DAY;
+    const history = rowsOf(first).filter((row) => row.fireAt <= later);
+    assert.equal(history.length, 6);
+    const second = dealFor({ reflections: pool, history, now: new Date(later) });
+    for (const item of second) {
+      const same = first.find((candidate) => candidate.fireAt.getTime() === item.fireAt.getTime());
+      if (same !== undefined) assert.equal(item.word.id, same.word.id, `${wallOf(item.fireAt.getTime(), "America/New_York")}`);
+    }
+    assert.ok(second.length > 0 && second.length <= 21);
+    // The same deal again: byte for byte the same.
+    assert.deepEqual(rowsOf(dealFor({ reflections: pool, history, now: new Date(later) })), rowsOf(second));
+    // A reminder the calendar says already fired is never dealt again; rows ahead of now are ignored (they are dealt afresh).
+    const ahead = rowsOf(first).map((row) => ({ ...row, entryId: "entry-c", affirmationId: "entry-c-evening" }));
+    const ignored = dealFor({ reflections: pool, history: ahead.filter((row) => row.fireAt > T0), now: new Date(T0) });
+    assert.deepEqual(rowsOf(ignored), rowsOf(first), "history from the future changes nothing");
+  });
+
+  await test("deck: the best three are heard first, then the words the person added in the order they were made; a slot's own word is the tie-break", async () => {
+    const extras = [4, 5].map((position) => ({
+      ...W.affirmationsFor("entry-1")[0],
+      id: `entry-1-extra-${position}`,
+      slot: null,
+      position,
+      headline: `An added word ${position}`,
+    }));
+    // The order of the array is not the order the words are dealt: the extras come first here, and one best word is out of place.
+    const base = W.affirmationsFor("entry-1");
+    const reflection = reflectionOf({ entryId: "entry-1", affirmations: [...extras.reverse(), base[2], base[0], base[1]] });
+    assert.deepEqual(reflection.words.map((word) => word.id), [
+      "entry-1-morning",
+      "entry-1-afternoon",
+      "entry-1-evening",
+      "entry-1-extra-4",
+      "entry-1-extra-5",
+    ]);
+    const deal = dealFor({ reflections: [reflection] });
+    assert.deepEqual(wordsOf(deal).slice(0, 8), [
+      "entry-1-morning",
+      "entry-1-afternoon",
+      "entry-1-evening",
+      "entry-1-extra-4",
+      "entry-1-extra-5",
+      "entry-1-morning",
+      "entry-1-afternoon",
+      "entry-1-evening",
+    ]);
+    // Never dealt, a word of the part of the day comes first: an evening reminder whose reflection has not been heard picks its
+    // evening word, a morning reminder its morning word, whatever the order (a reminder time that moves the order of the day).
+    const odd = dealFor({ reflections: [reflection], reminders: { morning: "21:30", afternoon: "13:00", evening: "07:00" } });
+    assert.deepEqual(odd.slice(0, 3).map((item) => [item.slot, item.word.slot]), [["evening", "evening"], ["afternoon", "afternoon"], ["morning", "morning"]]);
+  });
+
+  await test("deck: the week and its top-up: seven reflections in all when the week has fewer, the week's before older ones, at most fourteen from the week", async () => {
+    const d = deck();
+    const mk = (id, iso) => ({ id, createdAt: iso });
+    const now = new Date(T0); // Wednesday 28 October, 06:00 in New York: the week is 22 to 28 October there
+    const entries = [
+      mk("e1", "2026-10-28T08:00:00.000Z"),
+      mk("e2", "2026-10-26T15:00:00.000Z"),
+      mk("e3", "2026-10-22T05:00:00.000Z"), // 01:00 on the 22nd in New York: the first day of the week
+      mk("e4", "2026-10-22T03:00:00.000Z"), // 23:00 on the 21st: one day too old
+      mk("e5", "2026-10-15T12:00:00.000Z"),
+      mk("e6", "2026-10-10T12:00:00.000Z"),
+      mk("e7", "2026-10-05T12:00:00.000Z"),
+      mk("e8", "2026-10-01T12:00:00.000Z"),
+      mk("e9", "2026-09-20T12:00:00.000Z"),
+    ];
+    const picked = d.selectPoolEntries(entries, now, "America/New_York");
+    assert.deepEqual(picked.map((item) => [item.entry.id, item.tier]), [
+      ["e1", "week"], ["e2", "week"], ["e3", "week"], ["e4", "older"], ["e5", "older"], ["e6", "older"], ["e7", "older"],
+    ]);
+    // The same instants in UTC: the 22nd at 03:00 is already in the week.
+    assert.deepEqual(d.selectPoolEntries(entries, now, "UTC").map((item) => item.entry.id), ["e1", "e2", "e3", "e4", "e5", "e6", "e7"]);
+    assert.equal(d.selectPoolEntries(entries, now, "UTC").filter((item) => item.tier === "week").length, 4);
+    // A week with seven or more reflections takes no older one; with more than fourteen only the newest fourteen.
+    const many = Array.from({ length: 20 }, (_, i) => mk(`m${i}`, "2026-10-27T12:00:00.000Z"));
+    assert.deepEqual(d.selectPoolEntries(many.slice(0, 9), now, "America/New_York").map((item) => item.tier), Array(9).fill("week"));
+    const capped = d.selectPoolEntries(many, now, "America/New_York");
+    assert.equal(capped.length, 14);
+    assert.deepEqual(capped.map((item) => item.entry.id), many.slice(0, 14).map((item) => item.id));
+    // A time that cannot be read is not this week's, and a zone that does not exist is read as UTC.
+    assert.equal(d.selectPoolEntries([mk("x", "not a date")], now, "America/New_York")[0].tier, "older");
+    assert.equal(d.selectPoolEntries([mk("y", "2026-10-28T08:00:00.000Z")], now, "Not/AZone")[0].tier, "week");
+    assert.deepEqual(d.selectPoolEntries([], now, "UTC"), []);
+  });
+
+  await test("deck: a never-played older reflection waits behind a never-played one of this week", async () => {
+    const deal = dealFor({ reflections: [made("entry-w"), made("entry-o", "older")] });
+    assert.deepEqual(entriesOf(deal).slice(0, 4), ["entry-w", "entry-o", "entry-w", "entry-o"]);
+    const flipped = dealFor({ reflections: [made("entry-o", "older"), made("entry-w")] });
+    assert.equal(flipped[0].word.entryId, "entry-w", "the tier decides before the order of the list");
+  });
+
+  await test("deck: a word is only its headline and verse; blank headlines and half verses are cleaned, and a reflection with no word is skipped", async () => {
+    const base = W.affirmationsFor("entry-1");
+    const words = deck().deckWordsOf([
+      { ...base[0], headline: "   " },
+      { ...base[1], verse: { reference: "  ", text: "x" } },
+      { ...base[2], headline: "  Rest  ", verse: { reference: " Psalm 4:8 ", text: "In peace" } },
+    ]);
+    assert.deepEqual(words.map((word) => word.id), ["entry-1-afternoon", "entry-1-evening"]);
+    assert.equal(words[0].verse, null);
+    assert.deepEqual(words[1].verse, { reference: "Psalm 4:8", text: "In peace" });
+    assert.equal(words[1].headline, "Rest");
+    for (const word of words) assert.deepEqual(Object.keys(word).sort(), ["entryId", "headline", "id", "slot", "verse"], "nothing of the person's words");
+    const skipped = dealFor({ reflections: [{ entryId: "empty", tier: "week", words: [] }, made("entry-a")] });
+    assert.ok(entriesOf(skipped).every((id) => id === "entry-a"));
+    assert.deepEqual(dealFor({ reflections: [{ entryId: "empty", tier: "week", words: [] }] }), []);
+  });
+
+  await test("deck: a word without a verse is titled by the slot it is delivered at, and its tap opens its own reflection", async () => {
+    const p = planner();
+    // A holds only a morning word, with no verse, and B only an evening one: A's word reaches the evening reminder too.
+    const a = reflectionOf({ entryId: "entry-a", affirmations: W.affirmationsFor("entry-a").filter((item) => item.slot === "morning") });
+    const b = reflectionOf({ entryId: "entry-b", affirmations: W.affirmationsFor("entry-b").filter((item) => item.slot === "evening") });
+    const plan = p.planAffirmations({ enabled: true, permission: "granted", deal: dealFor({ reflections: [a, b] }), userHash: HASH_A });
+    const first = plan.slice(0, 3);
+    assert.deepEqual(first.map((item) => item.data.entryId), ["entry-a", "entry-b", "entry-a"]);
+    assert.deepEqual(first.map((item) => item.title), ["Morning affirmation", "Afternoon affirmation", "Evening affirmation"]);
+    assert.deepEqual(first.map((item) => item.data.slot), ["morning", "afternoon", "evening"], "the slot it is delivered at");
+    assert.deepEqual(first.map((item) => item.body), ["You are held this morning", "You are held this evening", "You are held this morning"]);
+    // The identifier follows the slot of the delivery, so a word dealt to another slot is another notification.
+    assert.ok(first[2].identifier.startsWith("aff-evening-"));
+  });
+
+  await test("deck: rows for the calendar are the whole deal: one per reminder, the slot it is delivered at, the entry and the word", async () => {
+    const deal = dealFor({ reflections: [made("entry-a"), made("entry-b")] });
+    const rows = rowsOf(deal);
+    assert.equal(rows.length, 21);
+    assert.equal(new Set(rows.map((row) => `${row.day}-${row.slot}`)).size, 21, "one row for each day and slot");
+    assert.deepEqual(rows[0], { day: 20261028, slot: "morning", fireAt: Date.UTC(2026, 9, 28, 12), entryId: "entry-a", affirmationId: "entry-a-morning" });
+    assert.deepEqual(Object.keys(rows[0]).sort(), ["affirmationId", "day", "entryId", "fireAt", "slot"]);
+  });
+}
+
 // ================================================================== the scheduler
 async function scheduleChecks() {
+  // A reflection of the week as the repository's fake takes it: its affirmations carry headlines of their own.
+  const pooled = (id, tier = "week") => ({
+    entryId: id,
+    tier,
+    affirmations: W.affirmationsFor(id, { morning: `${id} morning`, afternoon: `${id} afternoon`, evening: `${id} evening` }),
+  });
+  const bodies = (w) =>
+    planned(w)
+      .map((id) => ({ at: scheduledAt(w, id), content: w.notifications.scheduled.get(id).content }))
+      .sort((a, b) => a.at - b.at);
+  async function withWeek(reflections, options = {}) {
+    const w = W.world(options);
+    W.clock.now = options.now ?? T0;
+    w.repository.state.reflections = reflections;
+    await w.signIn(options.userId ?? "user_a", options);
+    return w;
+  }
+
+  await test("schedule (Word Deck): the reflections of the week take turns on the lock screen, and the notification carries its own reflection's id", async () => {
+    const w = await withWeek([pooled("entry-a"), pooled("entry-b"), pooled("entry-c")]);
+    const list = bodies(w);
+    assert.equal(list.length, 21);
+    assert.deepEqual(list.slice(0, 6).map((item) => item.content.data.entryId), ["entry-a", "entry-b", "entry-c", "entry-a", "entry-b", "entry-c"]);
+    assert.deepEqual(list.slice(0, 3).map((item) => item.content.body), ["entry-a morning", "entry-b afternoon", "entry-c evening"]);
+    assert.deepEqual(list.slice(0, 3).map((item) => item.content.title), ["Morning affirmation", "Afternoon affirmation", "Evening affirmation"]);
+    // The calendar holds the deal, one row for each reminder.
+    assert.equal(w.repository.state.calendar.length, 21);
+    assert.deepEqual(w.repository.state.calendar.slice(0, 3).map((row) => row.entryId), ["entry-a", "entry-b", "entry-c"]);
+  });
+
+  await test("schedule (Word Deck): a new reflection plays at the next reminder, and the rest of the week is dealt around it", async () => {
+    const w = await withWeek([pooled("entry-a"), pooled("entry-b")]);
+    w.repository.state.reflections = [pooled("entry-n"), pooled("entry-a"), pooled("entry-b")];
+    w.sync.finished("entry-n");
+    await W.advance(1_000);
+    const list = bodies(w);
+    assert.equal(list.length, 21);
+    assert.equal(list[0].content.data.entryId, "entry-n");
+    assert.equal(list[0].content.body, "entry-n morning");
+    assert.deepEqual(list.slice(0, 4).map((item) => item.content.data.entryId), ["entry-n", "entry-a", "entry-b", "entry-n"]);
+    // What was waiting before is replaced, never doubled.
+    assert.equal(planned(w).length, 21);
+  });
+
+  await test("schedule (Word Deck): a day later the rotation goes on from what the calendar says arrived, and nothing already scheduled is touched", async () => {
+    const w = await withWeek([pooled("entry-a"), pooled("entry-b"), pooled("entry-c")]);
+    W.clock.now = T0 + 86_400_000;
+    w.notifications.deliverDue();
+    assert.equal(w.notifications.presented.length, 3);
+    const scheduledBefore = w.notifications.calls.schedule.length;
+    w.appState.emit("active");
+    await W.advance(1_000);
+    // Yesterday's three reminders are history in the calendar; today's first goes to A again, with the word A has not yet played.
+    const history = w.repository.state.calendar.filter((row) => row.fireAt <= W.clock.now);
+    assert.deepEqual(history.map((row) => row.entryId), ["entry-a", "entry-b", "entry-c"]);
+    const list = bodies(w);
+    assert.equal(list.length, 21);
+    assert.equal(list[0].content.data.entryId, "entry-a");
+    assert.equal(list[0].content.body, "entry-a afternoon");
+    assert.equal(w.notifications.calls.schedule.length - scheduledBefore, 3, "only the new day's three");
+    assert.equal(w.notifications.calls.cancel.length, 0, "the deal did not change what was already planned");
+  });
+
+  await test("schedule (Word Deck): a reflection that is deleted leaves the week, and the others fill its turns at the next plan", async () => {
+    const w = await withWeek([pooled("entry-a"), pooled("entry-b"), pooled("entry-c")]);
+    w.repository.state.reflections = [pooled("entry-a"), pooled("entry-c")];
+    w.scheduler().requestAffirmationReschedule();
+    await W.advance(1_000);
+    const list = bodies(w);
+    assert.equal(list.length, 21);
+    assert.ok(list.every((item) => item.content.data.entryId !== "entry-b"));
+    assert.deepEqual(list.slice(0, 4).map((item) => item.content.data.entryId), ["entry-a", "entry-c", "entry-a", "entry-c"]);
+    assert.ok(w.repository.state.calendar.every((row) => row.entryId !== "entry-b"), "its rows ahead went from the calendar");
+  });
+
+  await test("schedule (Word Deck): the calendar is written whatever the notifications do: switch off, no permission, or a build with none; an unknown switch writes nothing", async () => {
+    const off = await withWeek([pooled("entry-a"), pooled("entry-b")]);
+    off.stores().prefs.getState().saveUnsent("user_a", { affirmationsEnabled: false });
+    await W.advance(1_000);
+    assert.equal(planned(off).length, 0);
+    assert.equal(off.repository.state.calendar.length, 21, "Today's card still has its word of the day");
+    const denied = await withWeek([pooled("entry-a")]);
+    denied.notifications.state.permission = { granted: false, status: "denied", canAskAgain: false, ios: { status: 1 } };
+    denied.appState.emit("active");
+    await W.advance(1_000);
+    assert.equal(planned(denied).length, 0);
+    assert.equal(denied.repository.state.calendar.length, 21);
+    // The profile has never been read on this phone: nothing is dealt, nothing is written, nothing is cancelled.
+    const unknown = W.world();
+    W.clock.now = T0;
+    await unknown.hydrate();
+    unknown.stores().offline.getState().setDatabase("ready");
+    unknown.scheduler().startAffirmationSchedule("user_a");
+    await W.advance(2_000);
+    assert.equal(unknown.repository.state.saves.length, 0);
+    assert.equal(unknown.repository.state.calendar.length, 0);
+  });
+
+  await test("schedule (Word Deck): a calendar that cannot be written does not stop the notifications, and one that cannot be read changes nothing", async () => {
+    const w = W.world();
+    W.clock.now = T0;
+    w.repository.state.calendarFails = true;
+    await w.signIn("user_a");
+    assert.equal(planned(w).length, 21);
+    assert.ok(output.some((line) => line === "[affirmations] calendar_failed"));
+    w.repository.state.calendarFails = false;
+    w.repository.state.readFails = true;
+    w.repository.state.reflections = [pooled("entry-z")];
+    const before = w.notifications.calls.schedule.length;
+    w.appState.emit("active");
+    await W.advance(1_000);
+    assert.equal(planned(w).length, 21);
+    assert.equal(w.notifications.calls.cancel.length, 0);
+    assert.equal(w.notifications.calls.schedule.length, before);
+  });
+
+  await test("schedule (Word Deck): a reminder time that changes re-deals what is ahead and leaves what has passed in the calendar", async () => {
+    const w = await withWeek([pooled("entry-a"), pooled("entry-b")]);
+    W.clock.now = T0 + 86_400_000;
+    w.notifications.deliverDue();
+    w.appState.emit("active");
+    await W.advance(1_000);
+    const history = w.repository.state.calendar.filter((row) => row.fireAt <= W.clock.now).map((row) => ({ ...row }));
+    assert.equal(history.length, 3);
+    w.stores().onboarding.getState().setReminder("morning", "07:30");
+    await W.advance(1_000);
+    assert.deepEqual(w.repository.state.calendar.filter((row) => row.fireAt <= W.clock.now), history, "what already arrived is untouched");
+    const mornings = w.repository.state.calendar.filter((row) => row.slot === "morning" && row.fireAt > W.clock.now);
+    assert.equal(mornings.length, 7, "Thursday 07:30 is still ahead at six in the morning");
+    for (const row of mornings) assert.equal(wallOf(row.fireAt, "America/New_York").slice(11), "07:30");
+    assert.equal(planned(w).length, 21);
+  });
+
+  await test("schedule (Word Deck): subscribers hear of each deal, and a failing listener does not stop the others or the run", async () => {
+    const w = await withWeek([pooled("entry-a")]);
+    let heard = 0;
+    const stop = w.scheduler().subscribeWordCalendar(() => void (heard += 1));
+    const stopBad = w.scheduler().subscribeWordCalendar(() => {
+      throw new Error("a listener broke");
+    });
+    w.scheduler().requestAffirmationReschedule();
+    await W.advance(1_000);
+    assert.equal(heard, 1);
+    stop();
+    stopBad();
+    w.scheduler().requestAffirmationReschedule();
+    await W.advance(1_000);
+    assert.equal(heard, 1, "no longer listening");
+    assert.equal(planned(w).length, 21);
+  });
+
   for (const platform of ["ios", "android"]) {
     await test(`schedule (${platform}): signing in schedules the week, each a date trigger with its title, headline, sound and channel`, async () => {
       const w = await signedIn({ platform });
@@ -423,6 +815,11 @@ async function scheduleChecks() {
     assert.equal(w.notifications.calls.schedule.length - scheduledBefore, 7);
     assert.equal(after.filter((id) => !before.has(id)).length, 7);
     for (const id of after.filter((item) => item.startsWith("aff-morning-"))) assert.equal(wallOf(scheduledAt(w, id), "America/New_York").slice(11), "07:30");
+    // The calendar follows: still one row for each reminder, the morning ones at the new time.
+    const morning = w.repository.state.calendar.filter((row) => row.slot === "morning");
+    assert.equal(w.repository.state.calendar.length, 21);
+    assert.equal(morning.length, 7);
+    for (const row of morning) assert.equal(wallOf(row.fireAt, "America/New_York").slice(11), "07:30");
   });
 
   await test("schedule: the Daily Affirmations switch off cancels them all and on brings them back, from Profile or from another phone", async () => {
@@ -454,12 +851,14 @@ async function scheduleChecks() {
     assert.equal(planned(w).length, 21);
   });
 
-  await test("schedule: a newest reflection with no affirmations (a heavy moment saved before 2026-11-08) stops every notification, and the next reflection brings them back with its own headlines", async () => {
+  await test("schedule: a newest reflection that is a heavy moment saved before 2026-11-08 keeps the app quiet, and the next reflection brings the notifications back with its own headlines", async () => {
     const w = await signedIn();
-    w.repository.state.source = { entryId: "entry-2", affirmations: [] };
+    // The pool says so: the newest finished reflection has only the person's words (it is a legacy heavy moment).
+    w.repository.state.quiet = true;
     w.sync.finished("entry-2", true);
     await W.advance(1_000);
     assert.equal(planned(w).length, 0);
+    w.repository.state.quiet = false;
     w.repository.state.source = source("entry-3", { morning: "A new morning" });
     w.sync.finished("entry-3");
     await W.advance(1_000);
@@ -495,6 +894,7 @@ async function scheduleChecks() {
     await W.advance(1_000);
     assert.equal(planned(w).length, 0, "the profile was never read on this phone");
     assert.equal(w.notifications.calls.list, 0, "an unknown switch changes nothing: it does not even look");
+    assert.equal(w.repository.state.saves.length, 0, "and it writes nothing to the calendar either");
     w.stores().prefs.getState().saveSnapshot("user_a", {
       createdAt: "2026-10-01T12:00:00.000Z",
       subscriptionTier: "free",
@@ -608,6 +1008,8 @@ async function scheduleChecks() {
     assert.equal(w.notifications.calls.list, 0);
     await w.scheduler().clearAffirmations();
     assert.equal(w.notifications.calls.cancel.length, 0);
+    // The deal does not need notifications: the calendar, which Today's card reads, was still written.
+    assert.equal(w.repository.state.calendar.length, 21);
   });
 
   await test("schedule: signing out waits for a run in the air, then cancels every notification of ours and clears the notification center", async () => {
@@ -803,33 +1205,148 @@ async function repositoryChecks() {
     assert.fail(`${label}: never reached`);
   }
 
-  await test("repository: the source is the newest finished reflection on the phone with its affirmations, a heavy moment's included; one saved before 2026-11-08 has none", async () => {
+  const NOW = () => new Date(J.BASE);
+  const DAY = 86_400_000;
+  const idOf = (n) => J.serverRow(n).id;
+  const affOf = (n, slot) => `aff-${idOf(n).slice(-12)}-${slot}`;
+
+  await test("repository (Word Deck): the pool is the week's finished reflections with their words, newest first, a heavy moment's included; one saved before 2026-11-08 keeps it quiet", async () => {
     await live(async (w) => {
       const repo = w.use("@/data/journalRepository");
-      assert.equal(await repo.readAffirmationSource(), null);
-      await cacheRows(w, [J.serverRow(5)]);
-      const got = await repo.readAffirmationSource();
-      assert.equal(got.entryId, J.serverRow(5).id);
-      assert.deepEqual(Object.keys(got).sort(), ["affirmations", "entryId"]);
-      assert.deepEqual(got.affirmations.map((item) => item.slot), ["morning", "afternoon", "evening"]);
-      // A newer failed entry is not a reflection; a newer heavy moment saved before 2026-11-08 is the source, with no affirmations.
-      await cacheRows(w, [J.serverRow(4, { processing_status: "failed", error_code: "AI_UNAVAILABLE" })]);
-      assert.equal((await repo.readAffirmationSource()).entryId, J.serverRow(5).id);
-      // A reflection still being prepared (on another phone, minutes ago) has no affirmations yet: it must not stop them.
+      assert.deepEqual(await repo.readWordPool(NOW(), "UTC"), { reflections: [], quiet: false, missing: [] });
+      await cacheRows(w, [J.serverRow(5), J.serverRow(3)]);
+      let pool = await repo.readWordPool(NOW(), "UTC");
+      assert.deepEqual(pool.reflections.map((item) => [item.entryId, item.tier]), [[idOf(3), "week"], [idOf(5), "week"]]);
+      assert.deepEqual(pool.reflections[0].words.map((word) => word.slot), ["morning", "afternoon", "evening"]);
+      assert.deepEqual(Object.keys(pool.reflections[0].words[0]).sort(), ["entryId", "headline", "id", "slot", "verse"]);
+      assert.equal(pool.quiet, false);
+      assert.deepEqual(pool.missing, []);
+      const ids = () => pool.reflections.map((item) => item.entryId);
+      // A newer failed entry is not a reflection, and neither is one still being prepared (on another phone, minutes ago).
+      await cacheRows(w, [J.serverRow(2, { processing_status: "failed", error_code: "AI_UNAVAILABLE" })]);
       const preparing = { processing_status: "processing", updated_at: J.stamp(J.BASE - 60_000), devotional_script: null };
       await cacheRows(w, [J.serverRow(4, preparing)]);
-      assert.equal((await repo.readAffirmationSource()).entryId, J.serverRow(5).id);
-      await cacheRows(w, [J.serverRow(3, CRISIS)]);
-      assert.deepEqual(await repo.readAffirmationSource(), { entryId: J.serverRow(3).id, affirmations: [] });
-      // A heavy moment since then is the source with its three affirmations, like any other reflection.
-      await cacheRows(w, [J.serverRow(2, { is_crisis: true })]);
-      const heavy = await repo.readAffirmationSource();
-      assert.equal(heavy.entryId, J.serverRow(2).id);
-      assert.deepEqual(heavy.affirmations.map((item) => item.slot), ["morning", "afternoon", "evening"]);
+      pool = await repo.readWordPool(NOW(), "UTC");
+      assert.deepEqual(ids(), [idOf(3), idOf(5)]);
+      // An older heavy moment saved before 2026-11-08 has no words: it is no reflection of the deck and stops nothing.
+      await cacheRows(w, [J.serverRow(8, CRISIS)]);
+      pool = await repo.readWordPool(NOW(), "UTC");
+      assert.deepEqual(ids(), [idOf(3), idOf(5)]);
+      assert.equal(pool.quiet, false);
+      assert.deepEqual(pool.missing, [], "an entry with no devotional is not a reflection of the deck, so nothing is fetched for it");
+      // A heavy moment since then is a whole reflection with its three words, like any other.
+      await cacheRows(w, [J.serverRow(1, { is_crisis: true })]);
+      pool = await repo.readWordPool(NOW(), "UTC");
+      assert.deepEqual(ids(), [idOf(1), idOf(3), idOf(5)]);
+      assert.equal(pool.reflections[0].words.length, 3);
+      // A reflection still being prepared that is the NEWEST entry is not "the newest finished": it neither keeps the app quiet
+      // nor joins the pool.
+      await cacheRows(w, [J.serverRow(0, preparing)]);
+      pool = await repo.readWordPool(NOW(), "UTC");
+      assert.deepEqual(ids(), [idOf(1), idOf(3), idOf(5)]);
+      assert.equal(pool.quiet, false, "the newest entry is still being prepared");
+      assert.deepEqual(pool.missing, []);
+      // One saved the old way as the NEWEST finished entry keeps the app quiet, and no older reflection's words are used.
+      await cacheRows(w, [J.serverRow(0, CRISIS)]);
+      assert.deepEqual(await repo.readWordPool(NOW(), "UTC"), { reflections: [], quiet: true, missing: [] });
     });
   });
 
-  await test("repository: a cache that is not open throws (so nothing is cancelled), and the switch is read from the phone with no waiting", async () => {
+  await test("repository (Word Deck): older reflections top the week up to seven, newest first", async () => {
+    await live(async (w) => {
+      const repo = w.use("@/data/journalRepository");
+      const older = (n, ago) => J.serverRow(n, { created_at: J.stamp(J.BASE - ago * DAY), updated_at: J.stamp(J.BASE - ago * DAY) });
+      await cacheRows(w, [J.serverRow(1), J.serverRow(2), J.serverRow(3), ...[0, 1, 2, 3, 4, 5].map((i) => older(30 + i, 10 + i))]);
+      const pool = await repo.readWordPool(NOW(), "UTC");
+      assert.deepEqual(
+        pool.reflections.map((item) => item.tier),
+        ["week", "week", "week", "older", "older", "older", "older"],
+      );
+      assert.deepEqual(pool.reflections.slice(3).map((item) => item.entryId), [30, 31, 32, 33].map(idOf));
+    });
+  });
+
+  await test("repository (Word Deck): more than fourteen reflections in the week are capped at the newest fourteen", async () => {
+    await live(async (w) => {
+      await cacheRows(w, Array.from({ length: 16 }, (_, i) => J.serverRow(i + 1)));
+      const pool = await w.use("@/data/journalRepository").readWordPool(NOW(), "UTC");
+      assert.deepEqual(pool.reflections.map((item) => item.entryId), Array.from({ length: 14 }, (_, i) => idOf(i + 1)));
+      assert.ok(pool.reflections.every((item) => item.tier === "week"));
+    });
+  });
+
+  await test("repository (Word Deck): a reflection the phone has no affirmations for is missing, and one request brings its words; offline changes nothing", async () => {
+    await live(async (w) => {
+      const repo = w.use("@/data/journalRepository");
+      const cache = w.use("@/db/cache");
+      const mappers = w.use("@/data/mappers");
+      await cacheRows(w, [J.serverRow(3)]);
+      await cache.upsertEntry(mappers.toJournalEntry(J.serverRow(1)));
+      await cache.upsertEntry(mappers.toJournalEntry(J.serverRow(2)));
+      let pool = await repo.readWordPool(NOW(), "UTC");
+      assert.deepEqual(pool.reflections.map((item) => item.entryId), [idOf(3)]);
+      assert.deepEqual([...pool.missing].sort(), [idOf(1), idOf(2)].sort());
+      // Offline: nothing is fetched and nothing written.
+      w.server.state.offline = true;
+      assert.equal(await repo.hydrateWordPool(NOW()), false);
+      w.server.state.offline = false;
+      assert.equal((await repo.readWordPool(NOW(), "UTC")).missing.length, 2);
+      // Online: the server has their affirmations: one request for both, in the order of their positions.
+      for (const n of [1, 2]) w.server.state.affirmations.push(...J.affirmationRows(idOf(n)));
+      const before = w.server.state.requests.filter((request) => request.path.endsWith("/daily_affirmations")).length;
+      assert.equal(await repo.hydrateWordPool(NOW()), true);
+      const requests = w.server.state.requests.filter((request) => request.path.endsWith("/daily_affirmations")).length - before;
+      assert.equal(requests, 1, "one request for every reflection that lacks its words");
+      pool = await repo.readWordPool(NOW(), "UTC");
+      assert.deepEqual(pool.reflections.map((item) => item.entryId), [idOf(1), idOf(2), idOf(3)]);
+      assert.deepEqual(pool.missing, []);
+      assert.deepEqual(pool.reflections[0].words.map((word) => word.slot), ["morning", "afternoon", "evening"]);
+      // Nothing missing: no request at all.
+      const after = w.server.state.requests.length;
+      assert.equal(await repo.hydrateWordPool(NOW()), false);
+      assert.equal(w.server.state.requests.length, after);
+    });
+  });
+
+  await test("repository (Word Deck): the calendar keeps what the reminders carried: ahead is rewritten, what has passed stays, two weeks on it goes; the current word is the one that last arrived", async () => {
+    await live(async (w) => {
+      const repo = w.use("@/data/journalRepository");
+      await cacheRows(w, [J.serverRow(5), J.serverRow(3)]);
+      const H = 3_600_000;
+      const now = J.BASE;
+      const row = (n, slot, at, day = 20261025) => ({ day, slot, fireAt: at, entryId: idOf(n), affirmationId: affOf(n, slot) });
+      assert.equal(await repo.readCurrentWord(now), null, "an empty calendar has no word");
+      await repo.saveWordCalendar([row(5, "morning", now - 4 * H), row(5, "afternoon", now + H)], now);
+      assert.deepEqual((await repo.readWordCalendar()).map((item) => item.slot), ["morning", "afternoon"]);
+      // The current word is the newest row that has fired, with its reflection and the slot it was delivered at.
+      const current = await repo.readCurrentWord(now);
+      assert.equal(current.affirmation.id, affOf(5, "morning"));
+      assert.equal(current.entry.id, idOf(5));
+      assert.equal(current.slot, "morning");
+      assert.equal(current.fireAt, now - 4 * H);
+      assert.equal((await repo.readCurrentWord(now + 2 * H)).affirmation.id, affOf(5, "afternoon"));
+      // A word dealt at a slot that is not its own keeps the slot it was delivered at.
+      await repo.saveWordCalendar([row(3, "evening", now + 3 * H)], now + 2 * H);
+      assert.deepEqual((await repo.readWordCalendar()).map((item) => item.slot), ["morning", "afternoon", "evening"]);
+      // A save rewrites what is ahead (the evening row goes), keeps what has passed, and a row of the same day and slot is replaced.
+      await repo.saveWordCalendar([row(5, "evening", now + 4 * H)], now + 2 * H);
+      const saved = await repo.readWordCalendar();
+      assert.deepEqual(saved.map((item) => [item.slot, item.entryId]), [["morning", idOf(5)], ["afternoon", idOf(5)], ["evening", idOf(5)]]);
+      await repo.saveWordCalendar([row(3, "afternoon", now + H)], now + 30 * 60_000);
+      assert.equal((await repo.readWordCalendar()).find((item) => item.slot === "afternoon").entryId, idOf(3));
+      // A word older than 26 hours is not today's word: the card goes back to the newest reflection's.
+      assert.equal((await repo.readCurrentWord(now + H + 26 * H)).affirmation.id, affOf(3, "afternoon"));
+      assert.equal(await repo.readCurrentWord(now + H + 26 * H + 1), null);
+      // A word the phone no longer holds (its reflection was deleted) is no word, and never an error.
+      await w.use("@/data/entriesLive").forgetEntry(idOf(3));
+      assert.equal(await repo.readCurrentWord(now + 2 * H), null);
+      // Rows more than two weeks old are dropped by the next save.
+      await repo.saveWordCalendar([], now + 15 * DAY);
+      assert.deepEqual(await repo.readWordCalendar(), []);
+    });
+  });
+
+  await test("repository: a cache that is not open throws (so nothing is cancelled), the current word is simply none, and the switch is read from the phone with no waiting", async () => {
     await live(async (w) => {
       const repo = w.use("@/data/journalRepository");
       assert.equal(repo.getKnownAffirmationsEnabled("user_a"), true);
@@ -837,17 +1354,23 @@ async function repositoryChecks() {
       assert.equal(repo.getKnownAffirmationsEnabled("user_a"), false, "an unsent change wins");
       assert.equal(repo.getKnownAffirmationsEnabled("user_nobody"), null, "never read on this phone");
       await w.use("@/db/database").closeUserDatabase();
-      await assert.rejects(() => repo.readAffirmationSource());
+      await assert.rejects(() => repo.readWordPool(NOW(), "UTC"));
+      await assert.rejects(() => repo.readWordCalendar());
+      assert.equal(await repo.readCurrentWord(J.BASE), null);
+      assert.equal(await repo.hydrateWordPool(NOW()), false);
     });
   });
 
-  await test("repository: with the mock data the source is the newest finished mock reflection, and the switch is the mock row's", async () => {
+  await test("repository: with the mock data the pool is the mock reflections' words, the current word is none, and the switch is the mock row's", async () => {
     await live(async (w) => {
       w.use("@/store/devStore").useDevStore.getState().setDataSource("mock");
       const repo = w.use("@/data/journalRepository");
-      const got = await repo.readAffirmationSource();
-      assert.equal(typeof got.entryId, "string");
-      assert.ok(got.affirmations.length === 0 || got.affirmations.length === 3);
+      const pool = await repo.readWordPool(NOW(), "UTC");
+      assert.equal(typeof pool.quiet, "boolean");
+      assert.deepEqual(pool.missing, []);
+      assert.ok(pool.reflections.every((item) => item.words.length === 0 || item.words.length === 3));
+      assert.equal(await repo.readCurrentWord(J.BASE), null);
+      assert.equal(await repo.hydrateWordPool(NOW()), false);
       assert.equal(typeof repo.getKnownAffirmationsEnabled("user_a"), "boolean");
     });
   });
@@ -937,6 +1460,7 @@ async function contractChecks() {
 (async () => {
   await zoneChecks();
   await planChecks();
+  await deckChecks();
   await scheduleChecks();
   await tapChecks();
   await repositoryChecks();

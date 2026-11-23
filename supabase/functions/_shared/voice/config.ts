@@ -8,6 +8,12 @@ import { readVoiceAgents, type VoiceKey } from "./voices.ts";
 // SCHOLAR_VOICE_ENABLED is read on every request: anything but "true" is off, and then no talk starts and no voice secret is read.
 export const voiceEnabled = (): boolean => optionalEnv("SCHOLAR_VOICE_ENABLED") === "true";
 
+// SCHOLAR_LISTEN_VOICE_ENABLED (2026-11-19) is read on every Listen request: "true" reads an answer aloud in the voice the person
+// chose, through ElevenLabs; anything else keeps the devotional's Google voice. It is apart from SCHOLAR_VOICE_ENABLED, so either
+// can be switched alone. Switch it on only once the key may delete what ElevenLabs keeps of a reading (scholar-speak deletes it
+// at once) and the Privacy Policy names it.
+export const listenVoiceEnabled = (): boolean => optionalEnv("SCHOLAR_LISTEN_VOICE_ENABLED") === "true";
+
 function secret(name: string, pattern: RegExp): string {
   const value = optionalEnv(name);
   if (value === undefined || !pattern.test(value)) throw new AppError("INTERNAL", `bad_config:${name}`);
@@ -20,9 +26,13 @@ export const readSessionSecret = (): string => secret("SCHOLAR_VOICE_SESSION_SEC
 // What ElevenLabs sends with every turn, stored at ElevenLabs as the agents' custom LLM key (agent_setup.ts).
 export const readLlmSecret = (): string => secret("ELEVENLABS_LLM_SECRET", /^[A-Za-z0-9_-]{32,256}$/);
 
-// The workspace's API key (ElevenAgents write, Voices read, Text to Speech) and each voice's agent.
+// The workspace's API key: ElevenAgents write and Voices read for a talk, and for Listen in the chosen voice (2026-11-19) Text to
+// Speech and History write too (scholar-speak deletes each reading from ElevenLabs' history).
+export const readElevenLabsKey = (): string => secret("ELEVENLABS_API_KEY", /^sk_[A-Za-z0-9]{20,}$/);
+
+// The key and each voice's agent.
 export type ElevenLabsConfig = { apiKey: string; agents: Record<VoiceKey, string> };
 
 export function readElevenLabsConfig(): ElevenLabsConfig {
-  return { apiKey: secret("ELEVENLABS_API_KEY", /^sk_[A-Za-z0-9]{20,}$/), agents: readVoiceAgents() };
+  return { apiKey: readElevenLabsKey(), agents: readVoiceAgents() };
 }

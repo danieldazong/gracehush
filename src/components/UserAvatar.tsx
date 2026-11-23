@@ -5,7 +5,9 @@ import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { Icon } from "@/components/Icon";
+import { PlanTag } from "@/components/PlanTag";
 import { colors } from "@/constants/theme";
+import { usePlanTier } from "@/hooks/usePlanTier";
 import { useReduceMotion } from "@/hooks/useReduceMotion";
 import { getInitials } from "@/utils/format";
 
@@ -25,8 +27,11 @@ const PHOTO_FADE: ImageTransition = { duration: 200, skipOnCacheHit: "all" };
 // header and Profile always agree, and a new photo reaches both together. The initials stay under the photo until it has
 // loaded, so the circle is never empty and a photo that cannot load leaves the initials. The photo is kept in memory and on
 // disk, so each screen that mounts one shows it in its first frame, offline too. Decorative: the screen names the person.
+// Since 2026-11-19 the plan's tag (Free, Trial or Pro) hangs on the circle's bottom edge, once the plan is known; it sits
+// outside the circle, which clips, so the tag is never cut.
 export function UserAvatar({ size }: { size: keyof typeof SIZES }) {
   const { user } = useUser();
+  const tier = usePlanTier();
   const reduceMotion = useReduceMotion();
   const [loadedPhoto, setLoadedPhoto] = useState<string | null>(null);
   const { circle, initials: initialsClass, icon } = SIZES[size];
@@ -38,30 +43,29 @@ export function UserAvatar({ size }: { size: keyof typeof SIZES }) {
   });
 
   return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      className={`${circle} items-center justify-center overflow-hidden rounded-full border border-petal bg-blush`}
-    >
-      {/* Taken away once the photo is on screen, so a photo with transparent parts never shows the letters through it. */}
-      {photo !== null && loadedPhoto === photo ? null : initials ? (
-        // A picture, not text: it keeps its size in its fixed circle whatever the system text size.
-        <Text allowFontScaling={false} className={`${initialsClass} text-plum-deep`}>
-          {initials}
-        </Text>
-      ) : (
-        <Icon name={person} size={icon} color={colors.plum} />
-      )}
-      {photo ? (
-        <Image
-          source={{ uri: photo }}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={reduceMotion ? null : PHOTO_FADE}
-          onLoad={() => setLoadedPhoto(photo)}
-          style={StyleSheet.absoluteFill}
-        />
-      ) : null}
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" className="items-center">
+      <View className={`${circle} items-center justify-center overflow-hidden rounded-full border border-petal bg-blush`}>
+        {/* Taken away once the photo is on screen, so a photo with transparent parts never shows the letters through it. */}
+        {photo !== null && loadedPhoto === photo ? null : initials ? (
+          // A picture, not text: it keeps its size in its fixed circle whatever the system text size.
+          <Text allowFontScaling={false} className={`${initialsClass} text-plum-deep`}>
+            {initials}
+          </Text>
+        ) : (
+          <Icon name={person} size={icon} color={colors.plum} />
+        )}
+        {photo ? (
+          <Image
+            source={{ uri: photo }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={reduceMotion ? null : PHOTO_FADE}
+            onLoad={() => setLoadedPhoto(photo)}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : null}
+      </View>
+      {tier !== null ? <PlanTag size={size} tier={tier} /> : null}
     </View>
   );
 }

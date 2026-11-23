@@ -13,6 +13,7 @@ import { HelpLine } from "@/components/HelpLine";
 import { Icon } from "@/components/Icon";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { TalkCaptions } from "@/components/scholar/TalkCaptions";
+import { VoiceAvatar } from "@/components/scholar/VoiceAvatar";
 import { type OrbState, type OrbTrack, VoiceOrb } from "@/components/scholar/VoiceOrb";
 import { SCHOLAR_TALK_WARNING_S, SUPPORT_EMAIL } from "@/constants/app";
 import { copy } from "@/constants/copy";
@@ -113,6 +114,10 @@ function failureView(failure: NonNullable<TalkState["failure"]>): { text: string
     case "LIMIT_REACHED":
       if (failure.usage?.kind === "talk_month" && failure.usage.resetsAt !== null) {
         return { text: talk.monthUsed(formatResetDay(failure.usage.resetsAt)), retry: false };
+      }
+      // A trial (2026-11-18): Scholar, its talk included, opens when the plan begins. No paywall: the person chose a plan.
+      if (failure.usage?.kind === "talk_plan" && failure.usage.resetsAt !== null) {
+        return { text: notices.opens(formatResetDay(failure.usage.resetsAt)), retry: false };
       }
       return { text: talk.failed.start, retry: false };
     case "RATE_LIMITED":
@@ -320,9 +325,10 @@ function TalkBody({ navigation, route }: RootStackScreenProps<"ScholarTalk">) {
   useEffect(() => () => resetCaptions(), []);
   const captions = useTalkCaptions();
 
-  // A free account: the Paywall in this page's place.
+  // A free account: the Paywall in this page's place. A trial is told the day its plan begins instead (failureView).
   const failure = state.phase === "failed" ? state.failure : null;
-  const needsPro = failure?.code === "LIMIT_REACHED" && failure.usage?.kind === "talk_plan";
+  const needsPro =
+    failure?.code === "LIMIT_REACHED" && failure.usage?.kind === "talk_plan" && failure.usage.resetsAt === null;
   useEffect(() => {
     if (needsPro) navigation.replace("Paywall", { source: "scholar", reason: "talk" });
   }, [needsPro, navigation]);
@@ -413,7 +419,9 @@ function TalkBody({ navigation, route }: RootStackScreenProps<"ScholarTalk">) {
         <Text accessibilityRole="header" className="text-section text-plum-deep">
           {talk.title}
         </Text>
-        <View className="min-h-5 justify-center">
+        {/* The voice's portrait beside its name, but not in a heavy talk, whose page the readers approved as it is. */}
+        <View className="min-h-5 flex-row items-center justify-center gap-1.5">
+          {state.voice !== null && !state.heavy ? <VoiceAvatar voice={state.voice} size={20} /> : null}
           {voiceName !== null ? <Text className="text-body-sm text-mauve">{talk.voice(voiceName)}</Text> : null}
         </View>
         {showControls ? (

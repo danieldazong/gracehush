@@ -17,6 +17,18 @@ export type SubscriptionTier = "free" | "trial" | "pro";
 export type ProcessingStatus = "pending" | "uploading" | "processing" | "ready" | "failed";
 export type EmotionKey = "anxious" | "weary" | "grateful" | "grieving" | "hopeful";
 export type AmbientSound = "off" | "soft-rain" | "gentle-piano" | "morning-birds";
+// Where a new person heard about GraceHush (2026-11-20, onboarding's second step), or "skipped".
+export type AcquisitionSource =
+  | "tiktok"
+  | "instagram"
+  | "facebook"
+  | "youtube"
+  | "google"
+  | "app_store"
+  | "friend_family"
+  | "church"
+  | "other"
+  | "skipped";
 // A sound that has a file to loop (step 27): every choice but "off".
 export type AmbientLoop = Exclude<AmbientSound, "off">;
 export type PrayerCategory =
@@ -96,7 +108,14 @@ export interface Affirmation {
 
 // What the affirmation notifications are made from (step 28): the newest finished reflection on the phone and, when it is not
 // a crisis entry, its affirmations (a crisis entry has none).
-export type AffirmationSource = { entryId: string; affirmations: Affirmation[] };
+// Today's word (2026-11-17): the affirmation the last reminder carried, from the Word Deck's calendar, with the reflection it is
+// from (null when the phone no longer holds it) and the slot it was delivered at, which is not always its own.
+export type CurrentWord = {
+  affirmation: Affirmation;
+  entry: JournalEntry | null;
+  slot: TimeSlot;
+  fireAt: number;
+};
 
 // The tabs of Reflection's carousel. A notification opens Reflection on "affirmations" (step 28).
 export type ReflectionTab = "devotional" | "affirmations" | "prayer";
@@ -173,8 +192,12 @@ export type PurchaseErrorCode =
   | "NOT_ALLOWED"
   | "ALREADY_OWNED"
   | "UNKNOWN";
+// What RevenueCat says about a trial the account is in (2026-11-18): when it ends (milliseconds), and whether it turns into a paid
+// plan. A trial cancelled in the store stays active until its end, with willRenew false.
+export type TrialStatus = { endsAt: number; willRenew: boolean };
+// trialEndsAt is set only by a trial purchase: the trial's end, which the trial-end reminder is planned from.
 export type PurchaseResult =
-  | { ok: true; tier: "trial" | "pro" }
+  | { ok: true; tier: "trial" | "pro"; trialEndsAt?: number | null }
   | { ok: false; code: PurchaseErrorCode; message: string };
 export type RestoreResult =
   | { ok: true; restored: boolean; tier: SubscriptionTier }
@@ -380,8 +403,12 @@ export interface ScholarConversation {
   createdAt: string;
 }
 
-// talk_plan and talk_month (step 39): a live talk needs trial or Pro, and has its own time a calendar month.
-export type ScholarUsageKind = "free_day" | "pro_day" | "listen_day" | "listen_plan" | "talk_plan" | "talk_month";
+// What `usage` counts (2026-11-18). "credits": a Pro account's window, what is used and left of its allowance and when it renews
+// (resetsAt null until a spend starts a window). "scholar_plan", "listen_plan" and "talk_plan": Scholar is not part of this
+// account's plan (no numbers; for a free trial, resetsAt is the day its Pro plan begins). "talk_month": a live talk's own time a
+// calendar month (step 39). "free" (2026-11-20): an account that is not Pro, in its one free conversation: how many of its free
+// messages are answered and left (resetsAt null: they do not renew).
+export type ScholarUsageKind = "credits" | "free" | "scholar_plan" | "listen_plan" | "talk_plan" | "talk_month";
 
 export interface ScholarUsage {
   kind: ScholarUsageKind;
@@ -422,7 +449,9 @@ export interface ScholarLimitError {
   usage: ScholarUsage;
 }
 
-export type ScholarSpeakRequest = { messageId: string; part: number; region?: string };
+// `voice` (2026-11-19): one of the eight voices of a live talk, to read the part in (the app sends it only once the person has
+// allowed ElevenLabs); with none, the devotional's Google voice reads it.
+export type ScholarSpeakRequest = { messageId: string; part: number; region?: string; voice?: string };
 export type ScholarSpeakResponse = { part: number; parts: number; audioBase64: string; durationMs: number };
 export type ScholarSpeakErrorCode =
   | "INVALID_REQUEST"
@@ -560,13 +589,16 @@ export type PlaybackRate = 0.8 | 1 | 1.2;
 // would not open ("unavailable"). The next play tries again.
 export type PlaybackError = "offline" | "unavailable";
 // `subtitle` is "Gracehush • Philippians 4:6–7", the same string step 26 puts on the lock screen. `audioPath` is where the
-// file is in Storage (step 22): the player downloads it once and plays it from the phone.
+// file is in Storage (step 22): the player downloads it once and plays it from the phone. `scenes` are the painted scenes that
+// interpret the reflection best, best first, as indexes into `playerScenes` (2026-11-20, utils/sceneMatch.ts): Now Playing's
+// card drifts through them and the lock screen shows the first.
 export type PlaybackTrack = {
   entryId: string;
   title: string;
   subtitle: string;
   durationMs: number;
   audioPath: string;
+  scenes: readonly number[];
 };
 export type AmbientDefault = Pick<UserProfile, "ambientSound" | "ambientVolume">;
 

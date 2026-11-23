@@ -34,7 +34,7 @@ import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 import type {
   Affirmation,
-  AffirmationSource,
+  CurrentWord,
   HomeEntry,
   JournalEntry,
   MarkAnsweredInput,
@@ -52,6 +52,7 @@ import type {
 import { byPosition } from "@/utils/affirmationOrder";
 import { answeredDateToTimestamp, isValidAnsweredDate } from "@/utils/prayerDates";
 import { weekWindow } from "@/utils/week";
+import { deckWordsOf, selectPoolEntries, type DeckHistoryRow } from "@/utils/wordDeck";
 import { calendarDayIn, isTimeZone } from "@/utils/zonedTime";
 
 // Where the real server answers: the free limit is checked before the devotional is written, so a "limit" outcome stops
@@ -143,10 +144,17 @@ export async function getProfile(): Promise<UserProfile> {
 // What the screens show as the plan (step 30): what RevenueCat last reported for the signed-in account, otherwise the server's
 // plan (getKnownTier). RevenueCat's answer arrives first after a purchase, so the screens follow it at once.
 function shownTier(): SubscriptionTier | null {
-  const userId = getSupabaseUserId();
+  return shownTierFor(getSupabaseUserId());
+}
+
+// The same plan for a given account (2026-11-19: the picture's tag reads it with Clerk's own user id, which equals the
+// Supabase session's once the session is set). On the mock data source it is the mock plan, as Profile's plan card shows it.
+// Null until RevenueCat has answered for this account or the first profile sync has read the server's plan.
+export function shownTierFor(userId: string | null): SubscriptionTier | null {
+  if (getDataSource() === "mock") return getMockSubscriptionTier();
   const entitlement = useEntitlementStore.getState();
   if (userId !== null && entitlement.userId === userId && entitlement.tier !== null) return entitlement.tier;
-  return getKnownTier();
+  return knownTierFor(userId);
 }
 
 // What Profile and the Paywall show of the plan. The mock data says what the Profile design says ("2 of 3 audio devotionals
@@ -235,17 +243,79 @@ export async function readCachedLatestAffirmations(): Promise<Affirmation[]> {
   return getDataSource() === "mock" ? [] : live.readCachedLatestAffirmations();
 }
 
-// What the affirmation notifications are made from (step 28): the newest finished entry this phone has, with its affirmations
-// (a heavy moment's are sent like any other's; one saved before 2026-11-08 has none, so nothing is scheduled after it). Null when
-// there is none. It reads this phone only, never the network, and the real source throws when the cache cannot be read, so the
-// scheduler then changes nothing. The mock data's own rows in development.
-export async function readAffirmationSource(): Promise<AffirmationSource | null> {
+// What the affirmation notifications are made from (step 28; the Word Deck since 2026-11-17): the reflections of the week, with
+// their words, from this phone only, never the network (utils/wordDeck.ts has the rules). A heavy moment's affirmations are
+// sent like any other's; one saved before 2026-11-08 has none, and nothing is sent while it is the newest reflection (`quiet`).
+// The real source throws when the cache cannot be read, so the scheduler then changes nothing. The mock data's own rows in
+// development.
+export type WordPool = live.WordPool;
+
+export async function readWordPool(now: Date, timeZone: string): Promise<WordPool> {
   if (getDataSource() === "mock") {
-    const latest = readEntries().find((entry) => entry.status === "ready");
-    if (latest === undefined) return null;
-    return { entryId: latest.id, affirmations: readAffirmations(latest.id) };
+    const finished = readEntries().filter((entry) => entry.status === "ready");
+    const newest = finished[0];
+    if (newest === undefined) return { reflections: [], quiet: false, missing: [] };
+    if (newest.devotional === null) return { reflections: [], quiet: true, missing: [] };
+    const picked = selectPoolEntries(
+      finished.filter((entry) => entry.devotional !== null),
+      now,
+      timeZone,
+    );
+    return {
+      reflections: picked.map(({ entry, tier }) => ({
+        entryId: entry.id,
+        tier,
+        words: deckWordsOf(readAffirmations(entry.id)),
+      })),
+      quiet: false,
+      missing: [],
+    };
   }
-  return live.readCachedAffirmationSource();
+  return live.readCachedWordPool(now, timeZone);
+}
+
+// What each reminder carried or will carry (the local table word_calendar): the scheduler reads it before a deal and writes the
+// new deal after. The calendar is the phone's, whatever the data source, and a bad read throws (the scheduler then changes nothing).
+export function readWordCalendar(): Promise<DeckHistoryRow[]> {
+  return live.readCachedWordCalendar();
+}
+
+export function saveWordCalendar(rows: readonly DeckHistoryRow[], nowMs: number): Promise<void> {
+  return live.writeWordCalendar(rows, nowMs);
+}
+
+// The word that last arrived, for Today's card: from the calendar, with the reflection it is from. Null when there is none (the
+// card then shows the newest reflection's word for the current slot), and always null for the mock data, whose rows are not in
+// the cache. It never throws.
+export async function readCurrentWord(nowMs: number): Promise<CurrentWord | null> {
+  return getDataSource() === "mock" ? null : live.readCachedCurrentWord(nowMs);
+}
+
+// Fetches the affirmations of the pool's reflections that this phone has none cached for, in one request, and writes them to the
+// cache: Journal does it after its first page, before the notifications are planned again, so the deal sees the whole week. True
+// when something was written. Nothing is fetched for the mock data, and with no answer nothing changes.
+export async function hydrateWordPool(now: Date): Promise<boolean> {
+  return getDataSource() === "mock" ? false : live.hydrateWordPool(now, getDeviceTimezone());
+}
+
+// The Today tab's deck of words (2026-11-20) shows one card for each reflection the Journal lists, so it needs the affirmations
+// of all of them. What this phone holds for these entries, by entry id, each list in position order; an entry it holds none for
+// is left out. The mock data's own rows in development. It never throws.
+export async function readCachedWords(entryIds: readonly string[]): Promise<Record<string, Affirmation[]>> {
+  if (getDataSource() !== "mock") return live.readCachedWords(entryIds);
+  const words: Record<string, Affirmation[]> = {};
+  for (const entryId of entryIds) {
+    const list = readAffirmations(entryId);
+    if (list.length > 0) words[entryId] = list;
+  }
+  return words;
+}
+
+// Fetches, in one request, the affirmations of those of these entries that this phone has none cached for, and writes them to
+// the cache: Journal does it for each page it has shown, so the deck can go on through the whole history. True when something was
+// written. Nothing is fetched for the mock data, and with no answer nothing changes. It never throws.
+export async function hydrateWords(entryIds: readonly string[]): Promise<boolean> {
+  return getDataSource() === "mock" ? false : live.hydrateWords(entryIds);
 }
 
 // The Daily Affirmations switch as this phone knows it, with no waiting: null until the profile has been read on this phone
@@ -325,8 +395,11 @@ export async function countUnsentItems(): Promise<number> {
 // It follows the server only, never RevenueCat's answer on this phone (step 30): only the server decides a 402. The mock data
 // source has its own plan (step 16).
 export function getKnownTier(): SubscriptionTier | null {
+  return knownTierFor(getSupabaseUserId());
+}
+
+function knownTierFor(userId: string | null): SubscriptionTier | null {
   if (getDataSource() === "mock") return getMockSubscriptionTier();
-  const userId = getSupabaseUserId();
   return userId === null ? null : (readLocalProfile(userId)?.subscriptionTier ?? null);
 }
 

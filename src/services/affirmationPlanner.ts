@@ -1,22 +1,21 @@
-import { AFFIRMATION_DAYS_AHEAD } from "@/constants/app";
 import { copy } from "@/constants/copy";
-import type { AffirmationSource, PermissionResult, TimeSlot } from "@/types";
+import type { PermissionResult, TimeSlot } from "@/types";
 import { flowVerse, quoteVerse } from "@/utils/format";
-import { addDays, calendarDayIn, instantAt, isTimeZone } from "@/utils/zonedTime";
+import type { DealtWord } from "@/utils/wordDeck";
 
 // Which affirmation notifications the phone should hold (step 28), worked out with no side effect: the scheduler compares
-// this plan with what is scheduled and changes only the difference.
+// this plan with what is scheduled and changes only the difference. Which word each reminder carries is the Word Deck's
+// (utils/wordDeck.ts, 2026-11-17): the reminders take turns between the reflections of the week. This file only turns that
+// deal into notifications.
 //
 // An identifier names the slot, the local day and time, and a short hash of everything else the notification carries (its
 // instant, title, body, entry and account). iOS reports a scheduled date trigger back as a time interval, so the phone cannot
 // be asked when a notification will fire: the identifier says it instead, and any change (a reminder time, the time zone,
-// a newer reflection, another account) is a new identifier. The same plan gives the same identifiers, so a run that finds
+// a new reflection's turn, another account) is a new identifier. The same deal gives the same identifiers, so a run that finds
 // nothing changed schedules and cancels nothing.
 
 export const AFFIRMATION_ID_PREFIX = "aff-";
-const SLOTS: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
 const PLANNED_ID = /^aff-(morning|afternoon|evening)-\d{8}-\d{4}-[0-9a-f]{8}$/;
-const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const USER_HASH = /^[0-9a-f]{16}$/;
 
 // What a notification carries for its tap (notificationRouting.ts reads it back with readTapData).
@@ -34,14 +33,11 @@ export type PlannedAffirmation = {
 };
 
 export type PlanInput = {
-  now: Date;
-  timeZone: string;
-  reminders: Record<TimeSlot, string>;
   enabled: boolean; // Profile's Daily Affirmations switch
   permission: PermissionResult;
-  source: AffirmationSource | null; // the newest finished reflection on the phone, and its affirmations
+  // The word each reminder ahead carries, in time order (dealWords): the reminders that have passed are not in it.
+  deal: readonly DealtWord[];
   userHash: string;
-  days?: number;
 };
 
 // FNV-1a, 32 bits: short, stable and enough to tell two plans apart (a collision only means one notification is kept).
@@ -56,57 +52,31 @@ function fnv1a(text: string): string {
 
 const pad = (value: number, size: number) => String(value).padStart(size, "0");
 
-// Nothing is planned while the switch is off, the phone will not show notifications, or there is no finished reflection. A heavy
-// moment's affirmations are sent like any other's (2026-11-08: they are written to speak hope). The newest reflection without all
-// three headlines (a heavy moment saved before then has none) sends nothing at all until a newer one is ready, and an older
-// reflection's affirmations are not used either.
+// Nothing is planned while the switch is off, the phone will not show notifications, or the deal is empty (no reflection has a
+// word, or the newest one is a heavy moment saved before 2026-11-08, which keeps the app quiet: the pool says so). A heavy
+// moment's affirmations are sent like any other's (2026-11-08: they are written to speak hope). Each reminder carries its dealt
+// word: an affirmation with a verse is its headline as the title and the verse with its reference as the body; one without
+// keeps step 28's form, "Morning affirmation" over the headline, the slot being the one it is delivered at. The tap opens the
+// word's own reflection.
 export function planAffirmations(input: PlanInput): PlannedAffirmation[] {
-  const { source } = input;
-  if (!input.enabled || input.permission !== "granted" || source === null) return [];
+  if (!input.enabled || input.permission !== "granted") return [];
   if (!USER_HASH.test(input.userHash)) return [];
-  const headlines = new Map<TimeSlot, string>();
-  const verses = new Map<TimeSlot, string>();
-  for (const affirmation of source.affirmations) {
-    // Only the three that carry a slot reach the lock screen (2026-11-09): an added affirmation has none unless the model moved one
-    // onto it, and then the one it took it from has none.
-    if (affirmation.slot === null) continue;
-    headlines.set(affirmation.slot, affirmation.headline.trim());
-    const verse = affirmation.verse ?? null;
-    if (verse && verse.text.trim() && verse.reference.trim()) {
-      verses.set(
-        affirmation.slot,
-        copy.notifications.affirmationVerse(quoteVerse(flowVerse(verse.text)), verse.reference.trim()),
-      );
-    }
-  }
-  if (SLOTS.some((slot) => !headlines.get(slot))) return [];
-
-  const zone = isTimeZone(input.timeZone) ? input.timeZone : "UTC";
-  const today = calendarDayIn(input.now, zone);
-  const plan: PlannedAffirmation[] = [];
-  for (let offset = 0; offset < (input.days ?? AFFIRMATION_DAYS_AHEAD); offset += 1) {
-    const day = addDays(today, offset);
-    for (const slot of SLOTS) {
-      const time = input.reminders[slot];
-      if (!TIME.test(time)) continue;
-      const fireAt = instantAt(day, time, zone);
-      if (fireAt.getTime() <= input.now.getTime()) continue;
-      const headline = headlines.get(slot) ?? "";
-      const verse = verses.get(slot);
-      const title = verse ? headline : copy.notifications.affirmationTitle(copy.onboarding.rhythm.slots[slot].name);
-      const body = verse ?? headline;
-      const hash = fnv1a([fireAt.getTime(), title, body, source.entryId, input.userHash].join("|"));
-      const stamp = `${day.year}${pad(day.month, 2)}${pad(day.day, 2)}-${time.replace(":", "")}`;
-      plan.push({
-        identifier: `${AFFIRMATION_ID_PREFIX}${slot}-${stamp}-${hash}`,
-        fireAt,
-        title,
-        body,
-        data: { kind: "affirmation", entryId: source.entryId, slot, userHash: input.userHash },
-      });
-    }
-  }
-  return plan.sort((a, b) => a.fireAt.getTime() - b.fireAt.getTime());
+  return input.deal.map(({ day, slot, time, fireAt, word }) => {
+    const verse = word.verse
+      ? copy.notifications.affirmationVerse(quoteVerse(flowVerse(word.verse.text)), word.verse.reference.trim())
+      : null;
+    const title = verse ? word.headline : copy.notifications.affirmationTitle(copy.onboarding.rhythm.slots[slot].name);
+    const body = verse ?? word.headline;
+    const hash = fnv1a([fireAt.getTime(), title, body, word.entryId, input.userHash].join("|"));
+    const stamp = `${day.year}${pad(day.month, 2)}${pad(day.day, 2)}-${time.replace(":", "")}`;
+    return {
+      identifier: `${AFFIRMATION_ID_PREFIX}${slot}-${stamp}-${hash}`,
+      fireAt,
+      title,
+      body,
+      data: { kind: "affirmation" as const, entryId: word.entryId, slot, userHash: input.userHash },
+    };
+  });
 }
 
 // An identifier the planner made. The scheduler only ever cancels these (and, at sign-out, anything with the prefix), never a

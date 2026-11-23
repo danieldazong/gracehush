@@ -18,7 +18,7 @@ import {
   type RevenueCatKeyChoice,
 } from "@/constants/env";
 import { useEntitlementStore } from "@/store/entitlementStore";
-import type { SubscriptionTier } from "@/types";
+import type { SubscriptionTier, TrialStatus } from "@/types";
 
 // The only file that imports react-native-purchases (step 30). RevenueCat knows each person by their Clerk user id: it is
 // configured only after sign-in, with that id, so there is never an anonymous customer of ours, and it logs out at sign-out.
@@ -90,10 +90,22 @@ export function tierFromCustomerInfo(info: Pick<CustomerInfo, "entitlements">): 
   return String(pro.periodType).toUpperCase() === "TRIAL" ? "trial" : "pro";
 }
 
+// Pure: the trial a CustomerInfo says the account is in, for the trial-end reminder (2026-11-18): when it ends, and whether it
+// renews (false once the person cancelled it in the store, though it stays active until its end). null when the account is not
+// in a trial, or RevenueCat gave no end date.
+export function trialStatusFromCustomerInfo(info: Pick<CustomerInfo, "entitlements">): TrialStatus | null {
+  const pro = info.entitlements.active[PRO_ENTITLEMENT_ID] as CustomerInfo["entitlements"]["active"][string] | undefined;
+  if (pro === undefined || String(pro.periodType).toUpperCase() !== "TRIAL") return null;
+  const endsAt = typeof pro.expirationDate === "string" ? Date.parse(pro.expirationDate) : Number.NaN;
+  return Number.isFinite(endsAt) ? { endsAt, willRenew: pro.willRenew === true } : null;
+}
+
 // Writes what a CustomerInfo says into the store, for the account RevenueCat is logged in as, and gives the tier.
 export function recordCustomerInfo(info: CustomerInfo): SubscriptionTier {
   const tier = tierFromCustomerInfo(info);
-  if (loggedInAs !== null) useEntitlementStore.getState().setEntitlement(loggedInAs, tier, info.managementURL ?? null);
+  if (loggedInAs !== null) {
+    useEntitlementStore.getState().setEntitlement(loggedInAs, tier, info.managementURL ?? null, trialStatusFromCustomerInfo(info));
+  }
   return tier;
 }
 

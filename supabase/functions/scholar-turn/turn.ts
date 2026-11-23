@@ -13,6 +13,7 @@ import {
   ANSWER_MAX_OUTPUT_TOKENS,
   HEAVY_THINKING_LEVEL,
   SCHOLAR_CLAIM_LEASE_MS,
+  SCHOLAR_CREDITS,
   SCHOLAR_LIMITS,
   scholarTiming,
   TITLE_LIMITS,
@@ -52,10 +53,12 @@ import {
 } from "../_shared/scholar/prompt.ts";
 import {
   allowanceStatus,
-  checkAllowance,
-  currentUsage,
-  freeBudgetLeft,
-  readFreeBudget,
+  checkMessage,
+  creditsAfterSpend,
+  type CreditsRow,
+  creditsUsage,
+  type FreeRow,
+  freeUsage,
   type ScholarUsage,
 } from "../_shared/scholar/usage.ts";
 import { countTalkTurns } from "../_shared/voice/allowance.ts";
@@ -98,15 +101,17 @@ import {
   markMessageHeavy,
   type MessageContent,
   type MessageRow,
-  readFreeAnswered,
+  readCredits,
+  readFreeUse,
   readScholarClosedAt,
-  readUsageRows,
   reclaimMessage,
   removeRecording,
   type SafetyCounter,
   saveWords,
+  spendCredits,
   sweepStrayRecordings,
   touchConversation,
+  useFreeMessage,
 } from "./lifecycle.ts";
 import { blocksOf, toScholarConversation, toScholarMessage, wordsOf } from "./response.ts";
 
@@ -115,9 +120,10 @@ import { blocksOf, toScholarConversation, toScholarMessage, wordsOf } from "./re
 // and it is what keeps a person safe: one read of everything the request needs; a replay; the switch; the rate limit; the
 // conversation; the claim of the message; the screening (with a typed message's everyday answer written at the same time and
 // held until the screening says clear); then either the heavy answer (the heavy model only, under the heavy rules, or the written
-// fallback) or, after the plan, the day's allowance and the free budget, the everyday answer. Nothing is ever written for a
-// message that was not screened, and a message the phrase list, the screening or the writer flagged never gets LIMIT_REACHED,
-// AI_UNAVAILABLE or SCHOLAR_UNAVAILABLE: it gets an answer, or the written fallback. The counters run after the response.
+// fallback) or, after the plan and the credits (Scholar is for Pro since 2026-11-18), the everyday answer. Nothing is ever written
+// for a message that was not screened, and a message the phrase list, the screening or the writer flagged never gets
+// LIMIT_REACHED, AI_UNAVAILABLE or SCHOLAR_UNAVAILABLE: it gets an answer, or the written fallback. The credits and the counters
+// are spent after the response.
 //
 // scholar-v2 (2026-11-11, after the readers' review): a heavy answer is written with more thinking, under rules that make it answer
 // this person, with a passage from the readers' list and a <heavy_moment> block that carries the help line for their situation and
@@ -129,8 +135,8 @@ import { blocksOf, toScholarConversation, toScholarMessage, wordsOf } from "./re
 //
 // A live talk (step 39): `talk` is null for a typed or recorded message. For a turn of a talk it changes exactly five things, each
 // marked "talk:" below. (1) The message is stored as a spoken one with its words at once: there is no recording. (2) The rate
-// limit, the day's allowance, the free budget and the plan re-read are skipped (the plan and the month's time were checked when
-// the talk started), and nothing is added to the day's count. (3) The everyday writer's turn carries the <spoken> block and ends
+// limit, the plan re-read and the credits are skipped (the plan and the month's time were checked when the talk started), and
+// nothing is spent or added to the day's record. (3) The everyday writer's turn carries the <spoken> block and ends
 // by the talk's answerDeadlineAt. (4) The request's deadline is the talk's heavyDeadlineAt, and the heavy block and the written
 // answers take their spoken forms. (5) A turn that another request is already answering is waited for, never refused with
 // ALREADY_PROCESSING. And one thing the caller may ask for (`refuse`): a turn past the talk's cap, or after voice was switched
@@ -141,7 +147,6 @@ import { blocksOf, toScholarConversation, toScholarMessage, wordsOf } from "./re
 // the engine is the context below: the numbers of the log line, and the work that runs after the response.
 
 const MODEL_NAME = /^[a-z0-9][a-z0-9._-]{1,63}$/i;
-const DAY_MS = 86_400_000;
 
 export type TurnContext = {
   requestId: string;
@@ -231,7 +236,6 @@ type EnabledConfig = {
   heavyModel: string;
   thinkingLevel: string;
   screenFirst: boolean;
-  freeBudget: number;
 };
 export type ScholarConfig = { enabled: false } | EnabledConfig;
 
@@ -259,7 +263,6 @@ export function readScholarConfig(): ScholarConfig {
     heavyModel,
     thinkingLevel,
     screenFirst: optionalEnv("SCHOLAR_SCREEN_FIRST") === "true",
-    freeBudget: readFreeBudget(optionalEnv),
   };
 }
 
@@ -380,8 +383,10 @@ type Turn = {
   config: ScholarConfig;
   profile: StoredProfile;
   window: DayWindow;
-  messagesToday: number;
-  freeAnswered: number;
+  // The person's row of Scholar credits as the request found it (null: none spent yet).
+  credits: CreditsRow;
+  // The person's free conversation as the request found it (null: not claimed yet), 2026-11-20.
+  free: FreeRow;
   utcDay: string;
   conversation: ConversationRow;
   reflection: EntryRow | null;
@@ -437,27 +442,26 @@ async function answerMessage(turn: Turn, context: TurnContext): Promise<ScholarT
   );
   const writtenBefore = answers.some((row) => row.content?.fallback !== undefined);
   const helpBefore = conversationHelp(turn.history, turn.reflection);
-  // What this request learns as it goes: the message's words (a spoken one's, once heard), whether it was flagged and by which
-  // layer, the plan as confirmed, and the day's allowance for a clear message.
+  // What this request learns as it goes: the message's words (a spoken one's, once heard), and whether it was flagged and by
+  // which layer.
   const state: {
     words: string | null;
     flaggedBy: SafetyCounter | null;
     // The help line this message's flag chose (the screening's, the phrase list's, or the 988 line for the writer's own flag).
     help: HelpKind | null;
-    tier: StoredProfile["tier"];
-    allowance: ScholarUsage | null;
     // The person said they are under 18: Scholar closes for the account once this answer is saved.
     closeAfter: boolean;
     // The everyday reply still repeated a passage's words after the one retry, and is kept (scholar:answered:typed_verse).
     typedVerseKept: boolean;
+    // The message is answered in the account's free conversation (2026-11-20): it counts one free message, not credits.
+    free: boolean;
   } = {
     words: request.input.type === "text" ? request.input.text : wordsOf(turn.message),
     flaggedBy: null,
     help: null,
-    tier: turn.profile.tier,
-    allowance: null,
     closeAfter: false,
     typedVerseKept: false,
+    free: false,
   };
   const helpNow = (): HelpKind => state.help ?? helpBefore ?? "crisis";
   let outcome: Outcome | null = null;
@@ -554,19 +558,20 @@ async function answerMessage(turn: Turn, context: TurnContext): Promise<ScholarT
       }, context.writerStats);
 
     // 10. The screening. A typed message's everyday answer is written at the same time and held until the screening says clear,
-    // unless the switch says screen first, the conversation is already heavy, the phrase list matched, the stored plan has nothing
-    // left today, or Scholar is closed for the account (that answer would only be thrown away).
-    const storedAllowance = checkAllowance({
+    // unless the switch says screen first, the conversation is already heavy, the phrase list matched, the stored plan does not
+    // include Scholar or has no credit left (or no free message, for an account that is not Pro), or Scholar is closed for the
+    // account (that answer would only be thrown away).
+    const storedAllowance = checkMessage({
       heavy: false,
-      tier: turn.profile.tier,
-      messagesToday: turn.messagesToday,
-      window: turn.window,
+      plan: { tier: turn.profile.tier, expiresAt: turn.profile.expiresAt },
+      credits: turn.credits,
+      free: turn.free,
+      conversationId: turn.conversation.id,
+      now: Date.now(),
     });
-    const storedBudget = turn.profile.tier !== "free" || freeBudgetLeft(turn.freeAnswered, config.freeBudget);
-    // talk: a talk's turn has no day's allowance and no free budget to look at; one the caller will not answer (refuse) gets
-    // no early answer either.
+    // talk: a talk's turn has no credits to look at; one the caller will not answer (refuse) gets no early answer either.
     const early = screenInput.kind === "text" && !config.screenFirst && !heavyBefore && !phrase && !turn.closed &&
-        (talk !== null ? talk.refuse === null : (storedAllowance.kind === "ok" && storedBudget))
+        (talk !== null ? talk.refuse === null : storedAllowance.kind === "ok")
       ? settle(writeEveryday(screenInput.text, null))
       : null;
 
@@ -640,26 +645,29 @@ async function answerMessage(turn: Turn, context: TurnContext): Promise<ScholarT
     }
 
     if (outcome === null && !heavyAnswer) {
-      // 13. Clear: the plan (a paid row whose end date has passed is read again), the day's allowance, the free budget. talk: a
-      // talk's turn skips all three (its plan and its time were checked when the talk started).
+      // 13. Clear: the plan (a paid row whose end date has passed is read again), then the credits. Scholar is for Pro: the free
+      // plan and the free trial have one free conversation (2026-11-20), and outside it, or past its free messages, are told so by
+      // their plan (a trial with the day it opens); the message keeps its words for Try again. talk: a talk's turn skips both (its
+      // plan and its time were checked when the talk started).
       if (talk === null) {
         const confirmed = await confirmPaidPlan(admin, userId, turn.profile);
         context.billing = confirmed.billing;
         context.billingMs = confirmed.billingMs;
-        state.tier = confirmed.profile.tier;
-        const allowance = checkAllowance({
+        const allowance = checkMessage({
           heavy: false,
-          tier: state.tier,
-          messagesToday: turn.messagesToday,
-          window: turn.window,
+          plan: { tier: confirmed.profile.tier, expiresAt: confirmed.profile.expiresAt },
+          credits: turn.credits,
+          free: turn.free,
+          conversationId: turn.conversation.id,
+          now: Date.now(),
         });
-        context.limit = allowanceStatus(allowance, turn.window);
-        context.limitUsed = turn.messagesToday;
+        context.limit = allowanceStatus(allowance, confirmed.profile.tier);
+        context.limitUsed = allowance.kind !== "exempt" &&
+            (allowance.usage.kind === "credits" || allowance.usage.kind === "free")
+          ? allowance.usage.used
+          : null;
         if (allowance.kind === "blocked") throw new AppError("LIMIT_REACHED", "limit", { usage: allowance.usage });
-        if (allowance.kind === "ok") state.allowance = allowance.usage;
-        if (state.tier === "free" && !freeBudgetLeft(turn.freeAnswered, config.freeBudget)) {
-          throw new AppError("SCHOLAR_UNAVAILABLE", "scholar:budget");
-        }
+        state.free = allowance.kind === "ok" && allowance.usage.kind === "free";
       } else if (talk.refuse === "cap") {
         // talk: the talk's own cap, as the day's limit above: only after a clear screening, and the turn keeps its words.
         throw new AppError("LIMIT_REACHED", "voice:cap");
@@ -877,14 +885,25 @@ async function answerMessage(turn: Turn, context: TurnContext): Promise<ScholarT
   // The emergency answer is not a failure to write one, so it is not counted as a fallback.
   if (done.kind === "fallback" && done.why !== "emergency") context.counters.push("fallbacks");
   context.heavy = heavy;
+  // What the answer carries: nothing in a heavy conversation or a talk, the free conversation's messages once this one is counted,
+  // and a Pro account's credits once this message is spent.
+  let usage: ScholarUsage | null = null;
   if (heavy) {
     context.limit = "exempt";
     context.limitUsed = null;
-  } else if (talk === null) {
-    // 16 (after the response): the person's day, and the free budget for a free account. talk: a talk's turn counts in neither
-    // (a talk has its own time: scholar_voice_sessions).
+  } else if (talk === null && state.free) {
+    // 16 (after the response): one free message of the free conversation, which the first one claims, and the person's day (a
+    // record). The conversation id is the one the message belongs to.
+    const conversationId = turn.conversation.id;
+    context.after.push(() => useFreeMessage(admin, userId, conversationId));
     context.after.push(() => bumpUsage(admin, userId, turn.window.day, 1, 0));
-    if (state.tier === "free") context.counters.push("free_answered");
+    usage = freeUsage((turn.free === null ? 0 : turn.free.messages) + 1);
+  } else if (talk === null) {
+    // 16 (after the response): the credits this message spent, and the person's day (a record). talk: a talk's turn spends
+    // neither (a talk has its own time: scholar_voice_sessions).
+    context.after.push(() => spendCredits(admin, userId, SCHOLAR_CREDITS.message));
+    context.after.push(() => bumpUsage(admin, userId, turn.window.day, 1, 0));
+    usage = creditsAfterSpend(turn.credits, SCHOLAR_CREDITS.message, Date.now());
   }
   context.outcome = done.kind === "fallback"
     ? done.why === "emergency" ? "scholar:emergency" : `scholar:fallback:${done.why}`
@@ -900,7 +919,7 @@ async function answerMessage(turn: Turn, context: TurnContext): Promise<ScholarT
     conversation: toScholarConversation(conversation),
     message: toScholarMessage(question),
     answer: toScholarMessage(saved),
-    usage: heavy ? null : state.allowance,
+    usage,
   };
   return body;
 }
@@ -926,9 +945,9 @@ async function insertAnswerRow(
 }
 
 // 4. The answer already exists (the phone sent the message again, or another request answered it first): it is returned as it
-// is, with no model call and nothing counted.
+// is, with no model call and nothing spent.
 async function replay(
-  turn: Pick<Turn, "admin" | "userId" | "request" | "profile" | "window" | "messagesToday" | "talk">,
+  turn: Pick<Turn, "admin" | "userId" | "request" | "profile" | "credits" | "free" | "talk">,
   context: TurnContext,
 ): Promise<ScholarTurnResponse> {
   const { admin, userId, request } = turn;
@@ -948,10 +967,15 @@ async function replay(
     conversation: toScholarConversation(conversation),
     message: toScholarMessage(question),
     answer: toScholarMessage(answer),
-    // talk: a talk's turn carries no usage (nothing of it is counted in the day).
+    // talk: a talk's turn carries no usage (it spends no credits). An account that is not Pro has no credits to show, only its
+    // free conversation's messages there.
     usage: conversation.is_heavy || turn.talk !== null
       ? null
-      : currentUsage({ tier: turn.profile.tier, messagesToday: turn.messagesToday, window: turn.window }),
+      : turn.profile.tier === "pro"
+      ? creditsUsage(turn.credits, Date.now())
+      : turn.free !== null && turn.free.conversationId === conversation.id
+      ? freeUsage(turn.free.messages)
+      : null,
   };
   return body;
 }
@@ -1005,7 +1029,7 @@ export async function runTurn(args: TurnArgs): Promise<ScholarTurnResponse> {
 
   // 3. One read of everything the request needs.
   await db(() => ensureProfile(admin, userId));
-  const [profile, byId, byEntry, message, answer, recent, history, usageRows, freeAnswered, entry, closedAt] = await db(
+  const [profile, byId, byEntry, message, answer, recent, history, credits, entry, closedAt, free] = await db(
     () =>
       Promise.all([
         readProfile(admin, userId),
@@ -1020,19 +1044,18 @@ export async function runTurn(args: TurnArgs): Promise<ScholarTurnResponse> {
           request.messageId,
         ),
         listHistory(admin, userId, request.conversationId, WRITER_CONTEXT.messages + 1),
-        // The profile's day is the UTC day, the day before or the day after: its row is picked once the zone is known.
-        readUsageRows(admin, userId, new Date(now - DAY_MS).toISOString().slice(0, 10)),
-        readFreeAnswered(admin, new Date(now).toISOString().slice(0, 10)),
+        readCredits(admin, userId),
         request.entryId === null ? Promise.resolve(null) : findEntryById(admin, userId, request.entryId),
         readScholarClosedAt(admin, userId),
+        readFreeUse(admin, userId),
       ]),
   );
+  // The profile's day, for the day's record (scholar_usage).
   const window = dayWindow(new Date(now), profile.timezone);
-  const messagesToday = usageRows.find((row) => row.day === window.day)?.messages ?? 0;
 
   // 4. Replay.
   if (answer !== null && message !== null) {
-    return await replay({ admin, userId, request, profile, window, messagesToday, talk }, context);
+    return await replay({ admin, userId, request, profile, credits, free, talk }, context);
   }
 
   // 7 (what it will be). The conversation this message belongs to: the one with this id, else the person's conversation about
@@ -1134,7 +1157,7 @@ export async function runTurn(args: TurnArgs): Promise<ScholarTurnResponse> {
     if (talk === null || !(error instanceof AppError) || error.code !== "ALREADY_PROCESSING") throw error;
     context.joined = true;
     const joined = await joinTurn(
-      { admin, userId, request, profile, window, messagesToday, talk },
+      { admin, userId, request, profile, credits, free, talk },
       context,
       resolved.id,
     );
@@ -1158,8 +1181,8 @@ export async function runTurn(args: TurnArgs): Promise<ScholarTurnResponse> {
     config,
     profile,
     window,
-    messagesToday,
-    freeAnswered,
+    credits,
+    free,
     utcDay: new Date(now).toISOString().slice(0, 10),
     conversation: conversationNow,
     reflection,
@@ -1245,7 +1268,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 // a hard moment never ends in silence. Two answers cannot be saved: a question has at most one (the table's own rule), and
 // the request that comes second replays the first one's.
 async function joinTurn(
-  turn: Pick<Turn, "admin" | "userId" | "request" | "profile" | "window" | "messagesToday"> & { talk: TalkTurn },
+  turn: Pick<Turn, "admin" | "userId" | "request" | "profile" | "credits" | "free"> & { talk: TalkTurn },
   context: TurnContext,
   conversationId: string,
 ): Promise<{ answered: ScholarTurnResponse } | { claimed: MessageRow }> {

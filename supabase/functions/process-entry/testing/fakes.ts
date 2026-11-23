@@ -4,7 +4,8 @@ import { bibleTiming, clearChapterCache } from "../../_shared/bible/helloao.ts";
 import { clearTokenCache } from "../../_shared/tts/googleAuth.ts";
 import { ttsTiming } from "../../_shared/tts/synthesize.ts";
 import { makeServiceAccount, synthOk, tokenOk } from "../../_shared/tts/testing.ts";
-import { VOICE_KEYS, type VoiceKey } from "../../_shared/voice/voices.ts";
+import { listenSpeechTiming } from "../../_shared/voice/constants.ts";
+import { VOICE_KEYS, type VoiceKey, VOICES } from "../../_shared/voice/voices.ts";
 import { speechTiming } from "../constants.ts";
 import type { EntryRow } from "../lifecycle.ts";
 
@@ -48,6 +49,44 @@ export const FIXTURE_WAV = Deno.readFileSync(
 );
 export const FIXTURE_WAV_MS = 1282;
 
+// What ElevenLabs answers a reading with (Listen in the chosen voice, 2026-11-19): a WAV of its own shape, as its wav_24000
+// answers are (PCM, 24 kHz, mono, 16-bit, with a LIST chunk naming its encoder between "fmt " and "data"). 24,000 bytes of
+// silence: half a second, ELEVEN_WAV_MS.
+export const ELEVEN_WAV = elevenLabsWav(24_000);
+export const ELEVEN_WAV_MS = 500;
+
+function elevenLabsWav(dataBytes: number): Uint8Array<ArrayBuffer> {
+  const encoder = new TextEncoder().encode("Lavf60.16.100\0");
+  const list = 4 + 4 + 4 + encoder.length; // "INFO", "ISFT", its size and the encoder's name
+  const size = 4 + (8 + 16) + (8 + list) + (8 + dataBytes);
+  const bytes = new Uint8Array(8 + size);
+  const view = new DataView(bytes.buffer);
+  const ascii = (at: number, word: string) => {
+    for (let index = 0; index < word.length; index += 1) bytes[at + index] = word.charCodeAt(index);
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, size, true);
+  ascii(8, "WAVE");
+  ascii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, 24_000, true);
+  view.setUint32(28, 48_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, "LIST");
+  view.setUint32(40, list, true);
+  ascii(44, "INFO");
+  ascii(48, "ISFT");
+  view.setUint32(52, encoder.length, true);
+  bytes.set(encoder, 56);
+  const data = 56 + encoder.length;
+  ascii(data, "data");
+  view.setUint32(data + 4, dataBytes, true);
+  return bytes;
+}
+
 // What the journal_media bucket accepts (step 18, and audio/wav since the 2026-10-24 migration): these types, and files up
 // to 25 MiB.
 const BUCKET_MIME_TYPES = ["audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac", "audio/mpeg", "audio/wav"];
@@ -72,10 +111,12 @@ export const APPLE_TEST_KEY_ID = "TESTKEY001";
 // The app's bundle ID: the fake refuses a client secret or a request for any other.
 const APPLE_TEST_CLIENT_ID = "com.gracehush.app";
 
-// The live-talk secrets of the test world (step 39). They are off in a fresh world: voiceOn(world) sets them. Every value is
-// made up, in the shape the real one has; each voice has an agent of its own.
+// The live-talk secrets of the test world (step 39). They are off in a fresh world: voiceOn(world) sets them, and listenVoiceOn()
+// the switch of Listen in the chosen voice with the workspace's key (2026-11-19). Every value is made up, in the shape the real
+// one has; each voice has an agent of its own.
 const VOICE_NAMES = [
   "SCHOLAR_VOICE_ENABLED",
+  "SCHOLAR_LISTEN_VOICE_ENABLED",
   "ELEVENLABS_API_KEY",
   "ELEVENLABS_AGENTS",
   "SCHOLAR_VOICE_SESSION_SECRET",
@@ -193,6 +234,10 @@ const COLUMNS: Record<string, string[]> = {
     "created_at",
   ],
   scholar_usage: ["user_id", "day", "messages", "listens"],
+  // 2026-11-18 (supabase/migrations/20261118120000_scholar_credits.sql): a Pro account's credits, one row per person.
+  scholar_credits: ["user_id", "used", "allowance", "renews_at", "updated_at"],
+  // 2026-11-20 (supabase/migrations/20261120120000_scholar_free_conversation.sql): the free conversation, one row per person.
+  scholar_free_use: ["user_id", "conversation_id", "messages", "created_at", "updated_at"],
   scholar_safety_daily: [
     "day",
     "screened",
@@ -291,6 +336,10 @@ export type World = {
     recentRead: number;
     // Step 38: a call of either Scholar counter that fails.
     bump: number;
+    // 2026-11-18: a call of spend_scholar_credits that fails.
+    spend: number;
+    // 2026-11-20: a call of use_scholar_free_message or claim_scholar_free_conversation that fails.
+    free: number;
     // Step 39: a read of scholar_voice_sessions that fails.
     talksRead: number;
   };
@@ -333,6 +382,11 @@ export type World = {
   messages: Row[];
   scholarUsage: Row[];
   safetyDaily: Row[];
+  // A Pro account's credits (2026-11-18): written only by spend_scholar_credits, and gone with its account.
+  scholarCredits: Row[];
+  // The free conversation (2026-11-20): written only by use_scholar_free_message and claim_scholar_free_conversation, and gone
+  // with its account. Its conversation_id has no foreign key, so a row outlives its conversation.
+  scholarFree: Row[];
   // Live talk (step 39): the server's record of each talk. Its conversation_id has no foreign key, so a row outlives its
   // conversation, and it goes with its account.
   voiceSessions: Row[];
@@ -346,6 +400,22 @@ export type World = {
   elevenDeleteFails: Set<string>;
   elevenQueue: GeminiReply[];
   elevenCalls: Recorded[];
+  // Listen in the chosen voice (2026-11-19): POST /v1/text-to-speech/{voiceId}?output_format=wav_24000 reads a part in one of the
+  // eight ready-made voices (404 for any other voice, 422 for another format) and answers elevenSpeechBytes (ELEVEN_WAV unless a
+  // test sets them), after elevenSpeechDelayMs, with a history-item-id header naming the item it keeps in elevenHistory (left out
+  // while elevenSpeechNoHistoryId is set). DELETE /v1/history/{id} answers as ElevenLabs does (measured 2026-11-21): 404
+  // invalid_parameters for an item not saved yet (a reading is saved elevenHistorySaveMs after it answers) and for an id it never
+  // made, 200 once it removes a saved item, 200 again for an item already deleted, and 401 missing_permissions while
+  // elevenHistoryDeleteFails is set (a key without History write). A reading cut off by the request's own timeout keeps nothing
+  // here.
+  elevenHistory: Set<string>;
+  elevenHistorySaveMs: number;
+  elevenHistorySavedAt: Map<string, number>;
+  elevenHistoryDeleted: Set<string>;
+  elevenSpeechBytes: Uint8Array<ArrayBuffer> | null;
+  elevenSpeechDelayMs: number;
+  elevenSpeechNoHistoryId: boolean;
+  elevenHistoryDeleteFails: boolean;
   rpcCalls: { name: string; args: Row }[];
   storageTimes: Map<string, string>;
   beforeReply: (() => void) | null;
@@ -656,6 +726,74 @@ function bumpCounter(world: World, name: string, request: Recorded): Response {
   return new Response(null, { status: 204 });
 }
 
+// spend_scholar_credits (2026-11-18), as PostgREST serves an RPC: a cost and an allowance of 1 or more and a window of 60 seconds
+// or more, else 22023; a user with no profile is 23503. A row whose window has ended (or none) starts again with this cost and a
+// window from now; a running one adds the cost and keeps its end. The allowance is always the one given.
+function spendCreditsRpc(world: World, request: Recorded): Response {
+  if (request.method !== "POST") throw new PgError(405, "PGRST105", "method not allowed");
+  const args = (request.json ?? {}) as Row;
+  world.rpcCalls.push({ name: "spend_scholar_credits", args: { ...args } });
+  if (world.fail.spend > 0) {
+    world.fail.spend -= 1;
+    throw new PgError(500, "XX000", "the credits could not be written");
+  }
+  const whole = (value: unknown, min: number): value is number =>
+    typeof value === "number" && Number.isInteger(value) && value >= min;
+  const cost = args.p_cost;
+  const allowance = args.p_allowance;
+  const windowSeconds = args.p_window_seconds;
+  if (!whole(cost, 1) || !whole(allowance, 1) || !whole(windowSeconds, 60)) {
+    throw new PgError(400, "22023", "cost, allowance and window are positive");
+  }
+  const user = String(args.p_user ?? "");
+  if (!world.users.some((row) => row.id === user)) throw new PgError(409, "23503", "scholar_credits_user_id_fkey");
+  const now = Date.now();
+  const renews = new Date(now + windowSeconds * 1000).toISOString();
+  const row = world.scholarCredits.find((candidate) => candidate.user_id === user);
+  if (row === undefined) {
+    world.scholarCredits.push({ user_id: user, used: cost, allowance, renews_at: renews, updated_at: world.now() });
+  } else if (Date.parse(String(row.renews_at)) <= now) {
+    Object.assign(row, { used: cost, allowance, renews_at: renews, updated_at: world.now() });
+  } else {
+    Object.assign(row, { used: Number(row.used) + cost, allowance, updated_at: world.now() });
+  }
+  return new Response(null, { status: 204 });
+}
+
+// use_scholar_free_message and claim_scholar_free_conversation (2026-11-20), as PostgREST serves an RPC: a user and a
+// conversation are required, else 22023; a user with no profile is 23503. A message: the first claims the free conversation with
+// one message, a later one in the same conversation adds one, and one in another conversation changes nothing. A claim: the
+// first claims it with no message; the answer is the conversation that holds it, whoever claimed it.
+function freeRpc(world: World, name: string, request: Recorded): Response {
+  if (request.method !== "POST") throw new PgError(405, "PGRST105", "method not allowed");
+  const args = (request.json ?? {}) as Row;
+  world.rpcCalls.push({ name, args: { ...args } });
+  if (world.fail.free > 0) {
+    world.fail.free -= 1;
+    throw new PgError(500, "XX000", "the free conversation could not be written");
+  }
+  const user = typeof args.p_user === "string" ? args.p_user : "";
+  const conversation = typeof args.p_conversation === "string" ? args.p_conversation : "";
+  if (user === "" || conversation === "") throw new PgError(400, "22023", "user and conversation are required");
+  if (!world.users.some((row) => row.id === user)) throw new PgError(409, "23503", "scholar_free_use_user_id_fkey");
+  const row = world.scholarFree.find((candidate) => candidate.user_id === user);
+  const claim = name === "claim_scholar_free_conversation";
+  if (row === undefined) {
+    world.scholarFree.push({
+      user_id: user,
+      conversation_id: conversation,
+      messages: claim ? 0 : 1,
+      created_at: world.now(),
+      updated_at: world.now(),
+    });
+  } else if (!claim && row.conversation_id === conversation) {
+    Object.assign(row, { messages: Number(row.messages) + 1, updated_at: world.now() });
+  }
+  if (!claim) return new Response(null, { status: 204 });
+  const held = world.scholarFree.find((candidate) => candidate.user_id === user) as Row;
+  return jsonResponse(200, held.conversation_id);
+}
+
 function prefer(request: Recorded): Set<string> {
   return new Set((request.headers.get("prefer") ?? "").split(",").map((part) => part.trim()).filter(Boolean));
 }
@@ -675,6 +813,10 @@ function rest(world: World, table: string, request: Recorded): Response {
     ? world.messages
     : table === "scholar_usage"
     ? world.scholarUsage
+    : table === "scholar_credits"
+    ? world.scholarCredits
+    : table === "scholar_free_use"
+    ? world.scholarFree
     : table === "scholar_safety_daily"
     ? world.safetyDaily
     : table === "scholar_voice_sessions"
@@ -778,7 +920,10 @@ function rest(world: World, table: string, request: Recorded): Response {
           created_at: now,
           ...record,
         };
-      } else if (table === "scholar_usage" || table === "scholar_safety_daily") {
+      } else if (
+        table === "scholar_usage" || table === "scholar_safety_daily" || table === "scholar_credits" ||
+        table === "scholar_free_use"
+      ) {
         throw new PgError(403, "42501", `only the counters write ${table}`);
       } else if (table === "scholar_voice_sessions") {
         row = {
@@ -866,6 +1011,8 @@ function rest(world: World, table: string, request: Recorded): Response {
           world.conversations,
           world.messages,
           world.scholarUsage,
+          world.scholarCredits,
+          world.scholarFree,
           world.voiceSessions,
         ]
       ) {
@@ -970,7 +1117,64 @@ async function elevenLabsApi(world: World, request: Request, recorded: Recorded)
     world.elevenTalks.splice(index, 1);
     return new Response(null, { status: 204 });
   }
+  const speech = /^\/v1\/text-to-speech\/([^/]+)$/.exec(pathname);
+  if (speech && request.method === "POST") {
+    if (searchParams.get("output_format") !== "wav_24000") {
+      return jsonResponse(422, { detail: { status: "invalid_output_format", message: "Invalid output format" } });
+    }
+    const voiceId = decodeURIComponent(speech[1]);
+    if (!VOICES.some((voice) => voice.elevenLabsVoiceId === voiceId)) {
+      return jsonResponse(404, { detail: { status: "voice_not_found", message: "Voice not found" } });
+    }
+    if (world.elevenSpeechDelayMs > 0) await waitOrAbort(world.elevenSpeechDelayMs, request.signal);
+    const text = String((recorded.json as { text?: unknown } | null)?.text ?? "");
+    elevenReadings += 1;
+    const id = `hist${String(elevenReadings).padStart(16, "0")}`;
+    world.elevenHistory.add(id);
+    world.elevenHistorySavedAt.set(id, Date.now() + world.elevenHistorySaveMs);
+    const headers: Record<string, string> = {
+      "content-type": "audio/wav",
+      "character-cost": String(Math.ceil(text.length / 5)),
+    };
+    if (!world.elevenSpeechNoHistoryId) headers["history-item-id"] = id;
+    return new Response(world.elevenSpeechBytes ?? ELEVEN_WAV, { status: 200, headers });
+  }
+  const kept = /^\/v1\/history\/([^/]+)$/.exec(pathname);
+  if (kept && request.method === "DELETE") {
+    if (world.elevenHistoryDeleteFails) {
+      return jsonResponse(401, {
+        detail: { status: "missing_permissions", message: "The API key you used is missing a permission" },
+      });
+    }
+    const id = decodeURIComponent(kept[1]);
+    if (world.elevenHistoryDeleted.has(id)) return jsonResponse(200, { status: "ok" });
+    const savedAt = world.elevenHistorySavedAt.get(id);
+    if (!world.elevenHistory.has(id) || savedAt === undefined || Date.now() < savedAt) {
+      return jsonResponse(404, { detail: { status: "invalid_parameters", message: "Invalid parameters" } });
+    }
+    world.elevenHistory.delete(id);
+    world.elevenHistoryDeleted.add(id);
+    return jsonResponse(200, { status: "ok" });
+  }
   throw new Error(`the test world has no ElevenLabs route for ${request.method} ${pathname}`);
+}
+
+let elevenReadings = 0;
+
+// Waits ms, or ends as the real fetch does when the request's own signal fires first (our timeout): with the signal's reason.
+function waitOrAbort(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof DOMException ? signal.reason : new DOMException("aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 async function play(reply: GeminiReply, request: Request): Promise<Response> {
@@ -1251,7 +1455,10 @@ export function installWorld(): World {
   // back as it was when the world is restored.
   const savedTtsTiming = { ...ttsTiming };
   const savedSpeechTiming = { ...speechTiming };
+  const savedListenTiming = { ...listenSpeechTiming };
   ttsTiming.retryPauseMs = 1;
+  // A Listen reading's item not saved yet is tried again after 20 milliseconds here, for at most 400 (a second, for 15, live).
+  Object.assign(listenSpeechTiming, { deleteEveryMs: 20, deleteForMs: 400 });
   clearChapterCache();
   clearTokenCache();
   let googleTokens = 0;
@@ -1290,6 +1497,8 @@ export function installWorld(): World {
       rowsRead: 0,
       recentRead: 0,
       bump: 0,
+      spend: 0,
+      free: 0,
       talksRead: 0,
     },
     revenuecat: new Map(),
@@ -1315,12 +1524,22 @@ export function installWorld(): World {
     messages: [],
     scholarUsage: [],
     safetyDaily: [],
+    scholarCredits: [],
+    scholarFree: [],
     voiceSessions: [],
     elevenAgents: new Set(),
     elevenTalks: [],
     elevenDeleteFails: new Set(),
     elevenQueue: [],
     elevenCalls: [],
+    elevenHistory: new Set(),
+    elevenHistorySaveMs: 0,
+    elevenHistorySavedAt: new Map(),
+    elevenHistoryDeleted: new Set(),
+    elevenSpeechBytes: null,
+    elevenSpeechDelayMs: 0,
+    elevenSpeechNoHistoryId: false,
+    elevenHistoryDeleteFails: false,
     rpcCalls: [],
     storageTimes: new Map(),
     beforeReply: null,
@@ -1371,6 +1590,7 @@ export function installWorld(): World {
       Object.assign(bibleTiming, savedBibleTiming);
       Object.assign(ttsTiming, savedTtsTiming);
       Object.assign(speechTiming, savedSpeechTiming);
+      Object.assign(listenSpeechTiming, savedListenTiming);
       clearChapterCache();
       clearTokenCache();
       for (const [name, value] of Object.entries(saved)) {
@@ -1490,6 +1710,9 @@ export function installWorld(): World {
         if (url.pathname === "/rest/v1/rpc/feature_affirmation") return featureAffirmation(world, recorded);
         const counter = /^\/rest\/v1\/rpc\/(bump_scholar_usage|bump_scholar_safety)$/.exec(url.pathname);
         if (counter) return bumpCounter(world, counter[1], recorded);
+        if (url.pathname === "/rest/v1/rpc/spend_scholar_credits") return spendCreditsRpc(world, recorded);
+        const free = /^\/rest\/v1\/rpc\/(use_scholar_free_message|claim_scholar_free_conversation)$/.exec(url.pathname);
+        if (free) return freeRpc(world, free[1], recorded);
         if (url.pathname.startsWith("/rest/v1/")) {
           const table = url.pathname.slice("/rest/v1/".length);
           const slow = world.slowInsert;
@@ -1628,8 +1851,6 @@ export function heavyOutput(overrides: Row = {}): Row {
 // The old name, for the tests that only need a flagged reply.
 export const crisisOutput = heavyOutput;
 
-// Turns speech on in the world's environment: the test service account (a real RSA key) and a Chirp 3 HD voice.
-// world.restore() puts the environment back. The Google counters start again from here.
 // Turns live talk on in the world's environment (step 39): the switch, the workspace's key, an agent for each voice (which the
 // fake workspace then has), and the two secrets of a talk's session.
 export function voiceOn(world: World): void {
@@ -1641,6 +1862,14 @@ export function voiceOn(world: World): void {
   for (const agent of Object.values(VOICE_TEST.agents)) world.elevenAgents.add(agent);
 }
 
+// Turns Listen in the chosen voice on (2026-11-19): its switch and the workspace's key. world.restore() puts both back.
+export function listenVoiceOn(): void {
+  Deno.env.set("SCHOLAR_LISTEN_VOICE_ENABLED", "true");
+  Deno.env.set("ELEVENLABS_API_KEY", VOICE_TEST.apiKey);
+}
+
+// Turns speech on in the world's environment: the test service account (a real RSA key) and a Chirp 3 HD voice.
+// world.restore() puts the environment back. The Google counters start again from here.
 export function speechOn(world: World): void {
   Deno.env.set("GOOGLE_TTS_CREDENTIALS_B64", SPEECH_ACCOUNT.encoded);
   Deno.env.set("TTS_VOICE_NAME", SPEECH_VOICE);
@@ -1694,7 +1923,11 @@ export function unscopedRequests(world: World, userId: string): string[] {
     ) {
       offenders.push(`${request.method} ${table}${request.url.search}`);
     }
-    if (table === "rpc/bump_scholar_usage" && (request.json as Row | null)?.p_user !== userId) {
+    if (
+      (table === "rpc/bump_scholar_usage" || table === "rpc/spend_scholar_credits" ||
+        table === "rpc/use_scholar_free_message" || table === "rpc/claim_scholar_free_conversation") &&
+      (request.json as Row | null)?.p_user !== userId
+    ) {
       offenders.push(`${request.method} ${table}`);
     }
     const scoped = [
@@ -1704,6 +1937,8 @@ export function unscopedRequests(world: World, userId: string): string[] {
       "scholar_conversations",
       "scholar_messages",
       "scholar_usage",
+      "scholar_credits",
+      "scholar_free_use",
       "scholar_voice_sessions",
     ];
     if (!scoped.includes(table)) continue;

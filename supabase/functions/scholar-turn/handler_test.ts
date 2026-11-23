@@ -32,6 +32,8 @@ const CONVERSATION = "c0a8012e-0000-4000-8000-000000000001";
 const SECOND = "c0a8012e-0000-4000-8000-000000000002";
 const MESSAGE = "c0a8012e-0000-4000-8000-0000000000a1";
 const NEXT = "c0a8012e-0000-4000-8000-0000000000a2";
+const THIRD = "c0a8012e-0000-4000-8000-0000000000a3";
+const THIRD_CONVERSATION = "c0a8012e-0000-4000-8000-000000000003";
 
 const ASK = "What does Psalm 23 mean when it says the Lord is my shepherd?";
 // A typed message the phrase list matches (the same made-up sentence process-entry's tests use: a feeling, no method).
@@ -99,7 +101,6 @@ const SCHOLAR_ENV: Record<string, string> = {
 const SCHOLAR_NAMES = [
   ...Object.keys(SCHOLAR_ENV),
   "SCHOLAR_SCREEN_FIRST",
-  "SCHOLAR_FREE_DAILY_BUDGET",
   "GEMINI_THINKING_LEVEL",
 ];
 
@@ -109,7 +110,8 @@ function flow(work: (world: World) => Promise<void>) {
     const savedEnv = new Map(SCHOLAR_NAMES.map((name) => [name, Deno.env.get(name)]));
     for (const [name, value] of Object.entries(SCHOLAR_ENV)) Deno.env.set(name, value);
     Deno.env.delete("SCHOLAR_SCREEN_FIRST");
-    Deno.env.delete("SCHOLAR_FREE_DAILY_BUDGET");
+    // Scholar is for paying Pro accounts (2026-11-18): the test account is Pro unless a test says otherwise.
+    setPlan(world, "pro");
     const savedTiming = { ...timing };
     const savedScholar = structuredClone(scholarTiming);
     timing.retryBackoffMs = 1;
@@ -169,10 +171,29 @@ const inputOf = (call: Recorded) => {
 };
 const recordingPath = (messageId = MESSAGE) => `${USER}/raw/chat-${messageId}.m4a`;
 const utcToday = () => new Date().toISOString().slice(0, 10);
-const nextMidnight = () => `${new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)}T00:00:00.000Z`;
 const counted = (world: World, counter: string) =>
   world.rpcCalls.filter((call) => call.name === "bump_scholar_safety" && call.args.p_counter === counter).length;
 const usageBumps = (world: World) => world.rpcCalls.filter((call) => call.name === "bump_scholar_usage");
+const spends = (world: World) => world.rpcCalls.filter((call) => call.name === "spend_scholar_credits");
+const freeUses = (world: World) => world.rpcCalls.filter((call) => call.name === "use_scholar_free_message");
+// The person's free conversation (2026-11-20), held by `conversationId` with `messages` already answered in it.
+function holdFree(world: World, conversationId = SECOND, messages = 1): Row {
+  world.seedUser(USER);
+  const row: Row = {
+    user_id: USER,
+    conversation_id: conversationId,
+    messages,
+    created_at: world.now(),
+    updated_at: world.now(),
+  };
+  world.scholarFree.push(row);
+  return row;
+}
+const DAY_MS = 86_400_000;
+// A resetsAt within a second or so of `at` (the server takes its own clock).
+function near(iso: string | null | undefined, at: number, message: string): void {
+  assert(typeof iso === "string" && Math.abs(Date.parse(iso) - at) < 5_000, `${message}: ${iso}`);
+}
 const textBlock = (body: { blocks: { type: string }[] }) =>
   (body.blocks.find((block) => block.type === "text") as { text: string } | undefined)?.text;
 const scholarRows = (world: World, replyTo = MESSAGE) => world.messages.filter((row) => row.reply_to === replyTo);
@@ -244,9 +265,18 @@ function setPlan(world: World, tier: string, expires: string | null = null): voi
   user.subscription_expires_at = expires;
 }
 
-function seedUsage(world: World, messages: number): void {
+// The person's credits: `used` of 400, in a window that renews `renewsInMs` from now (negative: it has ended).
+function seedCredits(world: World, used: number, renewsInMs = 6 * 3_600_000): Row {
   world.seedUser(USER);
-  world.scholarUsage.push({ user_id: USER, day: utcToday(), messages, listens: 0 });
+  const row: Row = {
+    user_id: USER,
+    used,
+    allowance: 400,
+    renews_at: new Date(Date.now() + renewsInMs).toISOString(),
+    updated_at: world.now(),
+  };
+  world.scholarCredits.push(row);
+  return row;
 }
 
 // ---- The method, the token and the body ------------------------------------------------------------------------------------
@@ -312,7 +342,7 @@ Deno.test(
 // ---- An everyday message ---------------------------------------------------------------------------------------------------
 
 Deno.test(
-  "a typed message is screened and answered at the same time; the answer is saved in order, titled and counted",
+  "a typed message is screened and answered at the same time; the answer is saved in order, titled and paid for",
   flow(async (world) => {
     world.geminiQueue.push(geminiOk(answerOutput({ prayer: PRAYER })));
     const body = await ok(await send(world, typed()));
@@ -347,7 +377,14 @@ Deno.test(
     assertEquals(text, { type: "text", text: REPLY });
     assert(support.type === "passage" && support.scripture.reference === "Psalm 46:1");
     assertEquals(prayer, { type: "prayer", text: PRAYER });
-    assertEquals(body.usage, { kind: "free_day", used: 1, limit: 5, remaining: 4, resetsAt: nextMidnight() });
+    // A Pro account with no credits row yet: this message's 4 credits start a window of 24 hours.
+    assertEquals([body.usage?.kind, body.usage?.used, body.usage?.limit, body.usage?.remaining], [
+      "credits",
+      4,
+      400,
+      396,
+    ]);
+    near(body.usage?.resetsAt, Date.now() + DAY_MS, "the window renews a day after the first spend");
 
     const conversation = world.conversations.find((row) => row.id === CONVERSATION) as Row;
     assertEquals(conversation.title, "The Shepherd Who Stays");
@@ -355,9 +392,13 @@ Deno.test(
     assertEquals(messageRow(world)?.status, "ready");
 
     await world.settleBackground();
+    // After the response: the credits spent (the server's allowance and window) and the day's record.
+    assertEquals(spends(world).map((call) => call.args), [
+      { p_user: USER, p_cost: 4, p_allowance: 400, p_window_seconds: 86_400 },
+    ]);
+    assertEquals(world.scholarCredits.map((row) => [row.user_id, row.used, row.allowance]), [[USER, 4, 400]]);
     assertEquals(world.scholarUsage, [{ user_id: USER, day: utcToday(), messages: 1, listens: 0 }]);
     assertEquals(counted(world, "screened"), 1);
-    assertEquals(counted(world, "free_answered"), 1);
     for (
       const counter of ["flagged_phrase", "flagged_model", "flagged_uncertain", "flagged_blocked", "flagged_writer"]
     ) {
@@ -372,7 +413,7 @@ Deno.test(
     assertEquals(line.promptVersion, "scholar-v3");
     assertEquals(line.screen, "clear");
     assertEquals(line.inputType, "text");
-    assertEquals(line.limit, "free_ok");
+    assertEquals(line.limit, "pro_ok");
     assertEquals(line.limitUsed, 0);
     assertEquals(line.model, "gemini-scholar-model");
     assertEquals(line.attempts, 2);
@@ -572,9 +613,9 @@ Deno.test(
 
     await world.settleBackground();
     assertEquals(usageBumps(world).length, 0);
+    assertEquals(spends(world).length, 0);
     assertEquals(counted(world, "screened"), 1);
     assertEquals(counted(world, "flagged_model"), 1);
-    assertEquals(counted(world, "free_answered"), 0);
     assertEquals(unscopedRequests(world, USER), []);
     const line = lastLog(world);
     assertEquals(line.reason, "scholar:heavy");
@@ -746,19 +787,38 @@ Deno.test(
 );
 
 Deno.test(
-  "a heavy message over the day's limit is answered and never counted",
+  "a heavy message is answered and never paid for: with no credit left, on the free plan and in a free trial",
   flow(async (world) => {
-    seedUsage(world, 5);
+    const credits = seedCredits(world, 400);
     world.screenQueue.push(crisis());
     world.geminiQueue.push(geminiOk(heavyAnswer()));
     const body = await ok(await send(world, typed(TIRED)));
     assertEquals(body.answer.isHeavy, true);
     assertEquals(body.usage, null);
-    // The stored plan had nothing left, so no everyday answer was started.
+    // The stored plan had no credit left, so no everyday answer was started.
     assertEquals(world.geminiCalls.map(modelOf), ["gemini-heavy-model"]);
+    assertEquals(lastLog(world).limit, "exempt");
+
+    // Scholar is not part of the free plan or a free trial, and a heavy message is answered for both all the same.
+    const plans: [string, string | null][] = [["free", null], [
+      "trial",
+      new Date(Date.now() + 2 * DAY_MS).toISOString(),
+    ]];
+    for (const [index, [tier, expires]] of plans.entries()) {
+      setPlan(world, tier, expires);
+      const conversationId = `c0a8012e-0000-4000-8000-00000000000${index + 3}`;
+      const messageId = `c0a8012e-0000-4000-8000-0000000000b${index + 1}`;
+      world.screenQueue.push(crisis());
+      world.geminiQueue.push(geminiOk(heavyAnswer({ reply: HEAVY_REPLY_2 })));
+      const heavy = await ok(await send(world, typed(TIRED, { conversationId, messageId })));
+      assertEquals(heavy.answer.isHeavy, true, tier);
+      assertEquals(heavy.usage, null, tier);
+      assertEquals(lastLog(world).limit, "exempt", tier);
+    }
     await world.settleBackground();
     assertEquals(usageBumps(world).length, 0);
-    assertEquals(world.scholarUsage[0].messages, 5);
+    assertEquals(spends(world).length, 0);
+    assertEquals(credits.used, 400);
   }),
 );
 
@@ -837,10 +897,11 @@ Deno.test(
 Deno.test(
   "a held spoken message is answered from its saved words: the recording is not read again",
   flow(async (world) => {
-    seedUsage(world, 5);
+    setPlan(world, "free");
+    holdFree(world);
     world.storage.set(recordingPath(), new Uint8Array([1, 2, 3, 4]));
     const held = await refused(await send(world, spoken()), 402, "LIMIT_REACHED") as unknown as ScholarLimitError;
-    assertEquals(held.usage, { kind: "free_day", used: 5, limit: 5, remaining: 0, resetsAt: nextMidnight() });
+    assertEquals(held.usage, { kind: "scholar_plan", used: 0, limit: 0, remaining: 0, resetsAt: null });
     assertEquals(messageRow(world)?.status, "failed");
     assertEquals(messageRow(world)?.error_code, "LIMIT_REACHED");
     assertEquals((messageRow(world)?.content as Row).blocks, [{ type: "text", text: SPOKEN }]);
@@ -855,78 +916,237 @@ Deno.test(
     assertEquals(typeof (world.screenCalls[1].json as Row).input, "string", "screened from its words, as text");
     assert(inputOf(world.screenCalls[1]).includes(SPOKEN));
     assertEquals(body.message.blocks, [{ type: "text", text: SPOKEN }]);
-    assertEquals(body.usage?.kind, "pro_day");
-    assertEquals(body.usage?.used, 6);
+    assertEquals(body.usage?.kind, "credits");
+    assertEquals(body.usage?.used, 4);
   }),
 );
 
 // ---- Limits --------------------------------------------------------------------------------------------------------------------
 
 Deno.test(
-  "the day's allowance: five for free and forty for Pro, after the screening, with nothing written and no answer started",
+  "Scholar is for Pro: outside its free conversation the free plan and a trial are told by their plan after the screening, and Try again answers once Pro",
   flow(async (world) => {
-    seedUsage(world, 5);
+    setPlan(world, "free");
+    holdFree(world);
     const free = await refused(await send(world, typed()), 402, "LIMIT_REACHED") as unknown as ScholarLimitError;
-    assertEquals(free.usage.kind, "free_day");
-    assertEquals(free.usage.remaining, 0);
-    assertEquals(world.screenCalls.length, 1, "the limit comes after the screening");
-    assertEquals(world.geminiCalls.length, 0, "no answer is started for a plan with nothing left");
+    assertEquals(free.usage, { kind: "scholar_plan", used: 0, limit: 0, remaining: 0, resetsAt: null });
+    assertEquals(world.screenCalls.length, 1, "the plan comes after the screening");
+    assertEquals(world.geminiCalls.length, 0, "no answer is started for a plan that does not include Scholar");
+    assertEquals(messageRow(world)?.status, "failed");
     assertEquals(messageRow(world)?.error_code, "LIMIT_REACHED");
-    assertEquals(lastLog(world).limit, "free_blocked");
+    assertEquals(
+      (messageRow(world)?.content as Row).blocks,
+      [{ type: "text", text: ASK }],
+      "the message keeps its words",
+    );
+    assertEquals([lastLog(world).limit, lastLog(world).limitUsed], ["free_blocked", null]);
 
-    world.scholarUsage[0].messages = 40;
+    // A trial is told the day its plan begins, when Scholar opens: the same message, sent again.
+    const ends = new Date(Date.now() + 2 * DAY_MS).toISOString();
+    setPlan(world, "trial", ends);
+    const trial = await refused(await send(world, typed()), 402, "LIMIT_REACHED") as unknown as ScholarLimitError;
+    assertEquals(trial.usage, { kind: "scholar_plan", used: 0, limit: 0, remaining: 0, resetsAt: ends });
+    assertEquals([lastLog(world).limit, lastLog(world).limitUsed], ["trial_blocked", null]);
+    assertEquals(world.geminiCalls.length, 0);
+
+    // Once the plan is Pro, Try again answers the saved message, and it is paid for, never counted as a free message.
     setPlan(world, "pro");
-    const pro = await refused(
-      await send(world, typed(ASK, { conversationId: SECOND, messageId: NEXT })),
-      402,
-      "LIMIT_REACHED",
-    ) as unknown as ScholarLimitError;
-    assertEquals(pro.usage, { kind: "pro_day", used: 40, limit: 40, remaining: 0, resetsAt: nextMidnight() });
-
-    world.scholarUsage[0].messages = 39;
-    setPlan(world, "trial");
     world.geminiQueue.push(geminiOk(answerOutput()));
-    const trial = await ok(await send(world, typed(ASK, { conversationId: SECOND, messageId: NEXT })));
-    assertEquals(trial.usage, { kind: "pro_day", used: 40, limit: 40, remaining: 0, resetsAt: nextMidnight() });
+    const answered = await ok(await send(world, typed()));
+    assertEquals(answered.message.id, MESSAGE);
+    assertEquals(answered.message.status, "ready");
+    assertEquals(answered.usage?.kind, "credits");
     await world.settleBackground();
-    assertEquals(counted(world, "free_answered"), 0);
+    assertEquals(spends(world).length, 1);
+    assertEquals(usageBumps(world).length, 1);
+    assertEquals(freeUses(world).length, 0);
   }),
 );
 
 Deno.test(
-  "a paid plan whose end date has passed is read again from RevenueCat before the allowance",
+  "the free conversation (2026-11-20): the free plan's first conversation is answered, eight messages in all, and the ninth is kept with the plans",
   flow(async (world) => {
-    seedUsage(world, 5);
+    setPlan(world, "free");
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    const first = await ok(await send(world, typed()));
+    assertEquals(first.usage, { kind: "free", used: 1, limit: 8, remaining: 7, resetsAt: null });
+    assertEquals([lastLog(world).limit, lastLog(world).limitUsed], ["free_ok", 0]);
+    await world.settleBackground();
+    assertEquals(spends(world).length, 0, "a free message spends no credits");
+    assertEquals(usageBumps(world).length, 1, "the day's record is kept");
+    assertEquals(freeUses(world).map((call) => call.args), [{ p_user: USER, p_conversation: CONVERSATION }]);
+    assertEquals(world.scholarFree.map((row) => [row.conversation_id, row.messages]), [[CONVERSATION, 1]]);
+
+    // The eighth message is answered, with none left after it.
+    (world.scholarFree[0] as Row).messages = 7;
+    world.geminiQueue.push(geminiOk(answerOutput({ title: null })));
+    const eighth = await ok(await send(world, typed(ASK, { messageId: NEXT })));
+    assertEquals(eighth.usage, { kind: "free", used: 8, limit: 8, remaining: 0, resetsAt: null });
+    await world.settleBackground();
+    assertEquals((world.scholarFree[0] as Row).messages, 8);
+
+    // The phone sends the eighth again: the saved answer, with the free conversation's count, and nothing counted twice.
+    const again = await ok(await send(world, typed(ASK, { messageId: NEXT })));
+    assertEquals(again.answer.id, eighth.answer.id);
+    assertEquals(again.usage, { kind: "free", used: 8, limit: 8, remaining: 0, resetsAt: null });
+    assertEquals(lastLog(world).reason, "scholar:replayed");
+    await world.settleBackground();
+    assertEquals(freeUses(world).length, 2, "a replay is not counted");
+
+    // The ninth is kept with its words, refused by the plan after its screening; no answer is started for it.
+    const gemini = world.geminiCalls.length;
+    const screens = world.screenCalls.length;
+    const ninth = await refused(
+      await send(world, typed(ASK, { messageId: THIRD })),
+      402,
+      "LIMIT_REACHED",
+    ) as unknown as ScholarLimitError;
+    assertEquals(ninth.usage, { kind: "scholar_plan", used: 0, limit: 0, remaining: 0, resetsAt: null });
+    assertEquals([world.screenCalls.length, world.geminiCalls.length], [screens + 1, gemini]);
+    assertEquals(messageRow(world, THIRD)?.error_code, "LIMIT_REACHED");
+    assertEquals([lastLog(world).limit, lastLog(world).limitUsed], ["free_blocked", null]);
+    await world.settleBackground();
+    assertEquals(freeUses(world).length, 2, "a refused message is not counted");
+  }),
+);
+
+Deno.test(
+  "the free conversation: a second conversation is kept with the plans, even after the first was deleted",
+  flow(async (world) => {
+    setPlan(world, "free");
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    await ok(await send(world, typed()));
+    await world.settleBackground();
+
+    const second = await refused(
+      await send(world, typed(ASK, { conversationId: SECOND, messageId: NEXT })),
+      402,
+      "LIMIT_REACHED",
+    ) as unknown as ScholarLimitError;
+    assertEquals(second.usage.kind, "scholar_plan");
+    assertEquals(lastLog(world).limit, "free_blocked");
+
+    // Deleting the free conversation gives nothing back: its row has no foreign key and stays with the account.
+    const kept = world.conversations.filter((row) => row.id !== CONVERSATION);
+    world.conversations.splice(0, world.conversations.length, ...kept);
+    const third = await refused(
+      await send(world, typed(ASK, { conversationId: THIRD_CONVERSATION, messageId: THIRD })),
+      402,
+      "LIMIT_REACHED",
+    ) as unknown as ScholarLimitError;
+    assertEquals(third.usage.kind, "scholar_plan");
+    assertEquals(world.scholarFree.map((row) => row.conversation_id), [CONVERSATION]);
+    await world.settleBackground();
+    assertEquals(freeUses(world).length, 1);
+  }),
+);
+
+Deno.test(
+  "the free conversation: a trial has it too, and outside it is told the day its plan begins",
+  flow(async (world) => {
+    const ends = new Date(Date.now() + 2 * DAY_MS).toISOString();
+    setPlan(world, "trial", ends);
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    const first = await ok(await send(world, typed()));
+    assertEquals(first.usage?.kind, "free");
+    assertEquals(lastLog(world).limit, "trial_ok");
+    await world.settleBackground();
+
+    const elsewhere = await refused(
+      await send(world, typed(ASK, { conversationId: SECOND, messageId: NEXT })),
+      402,
+      "LIMIT_REACHED",
+    ) as unknown as ScholarLimitError;
+    assertEquals(elsewhere.usage, { kind: "scholar_plan", used: 0, limit: 0, remaining: 0, resetsAt: ends });
+    assertEquals(lastLog(world).limit, "trial_blocked");
+  }),
+);
+
+Deno.test(
+  "the free conversation: a hard moment is answered for an account that is not Pro, never counted, and never claims it",
+  flow(async (world) => {
+    setPlan(world, "free");
+    world.screenQueue.push(crisis());
+    world.geminiQueue.push(geminiOk(heavyAnswer()), geminiOk(judgeOutput()));
+    const body = await ok(await send(world, typed(TIRED)));
+    assertEquals(body.answer.isHeavy, true);
+    assertEquals(body.usage, null);
+    assertEquals(lastLog(world).limit, "exempt");
+    await world.settleBackground();
+    assertEquals([freeUses(world).length, spends(world).length, world.scholarFree.length], [0, 0, 0]);
+
+    // Its conversation is heavy for good, so a clear message there is answered under the heavy rules and never counted either;
+    // the free conversation is still there for another one.
+    world.geminiQueue.push(geminiOk(heavyAnswer({ reply: HEAVY_REPLY_2 })), geminiOk(judgeOutput()));
+    const later = await ok(await send(world, typed(ASK, { messageId: NEXT })));
+    assertEquals(later.usage, null);
+    await world.settleBackground();
+    assertEquals(world.scholarFree.length, 0);
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    const free = await ok(await send(world, typed(ASK, { conversationId: SECOND, messageId: THIRD })));
+    assertEquals(free.usage?.kind, "free");
+  }),
+);
+
+Deno.test(
+  "Pro's credits: anything may be sent while one is left, and with none left the message waits for the window to renew",
+  flow(async (world) => {
+    const credits = seedCredits(world, 400);
+    const out = await refused(await send(world, typed()), 402, "LIMIT_REACHED") as unknown as ScholarLimitError;
+    assertEquals(out.usage, { kind: "credits", used: 400, limit: 400, remaining: 0, resetsAt: credits.renews_at });
+    assertEquals(world.geminiCalls.length, 0, "the stored credits were used up, so no answer was started");
+    assertEquals([lastLog(world).limit, lastLog(world).limitUsed], ["pro_blocked", 400]);
+
+    // One credit left: the message goes, and the answer says none is left now.
+    credits.used = 399;
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    const last = await ok(await send(world, typed()));
+    assertEquals(last.usage, { kind: "credits", used: 403, limit: 400, remaining: 0, resetsAt: credits.renews_at });
+    assertEquals([lastLog(world).limit, lastLog(world).limitUsed], ["pro_ok", 399]);
+    await world.settleBackground();
+    assertEquals([credits.used, credits.renews_at], [403, last.usage?.resetsAt]);
+  }),
+);
+
+Deno.test(
+  "Pro's credits: a window that has ended is a whole allowance again, and the next message starts a new one",
+  flow(async (world) => {
+    const credits = seedCredits(world, 400, -60_000);
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    const body = await ok(await send(world, typed()));
+    assertEquals([body.usage?.used, body.usage?.remaining], [4, 396]);
+    near(body.usage?.resetsAt, Date.now() + DAY_MS, "a new window");
+    await world.settleBackground();
+    assertEquals(credits.used, 4);
+    near(String(credits.renews_at), Date.now() + DAY_MS, "the row's new window");
+  }),
+);
+
+Deno.test(
+  "Pro's credits: a spend that fails after the response changes no answer, and the day's record is still kept",
+  flow(async (world) => {
+    world.fail.spend = 1;
+    world.geminiQueue.push(geminiOk(answerOutput()));
+    const body = await ok(await send(world, typed()));
+    assertEquals(body.usage?.used, 4);
+    assertEquals(lastLog(world).status, 200);
+    await world.settleBackground();
+    assertEquals(spends(world).length, 1);
+    assertEquals(world.scholarCredits.length, 0);
+    assertEquals(usageBumps(world).length, 1);
+  }),
+);
+
+Deno.test(
+  "a paid plan whose end date has passed is read again from RevenueCat before the plan is checked",
+  flow(async (world) => {
     setPlan(world, "pro", "2026-01-01T00:00:00.000Z");
+    holdFree(world);
     await refused(await send(world, typed()), 402, "LIMIT_REACHED");
     assertEquals(world.revenuecatCalls.length, 1);
     const line = lastLog(world);
     assertEquals(line.billing, "synced");
     assertEquals(line.limit, "free_blocked");
-  }),
-);
-
-Deno.test(
-  "the free budget: past the day's ceiling a free account's clear message rests; Pro and a heavy message are not affected",
-  flow(async (world) => {
-    Deno.env.set("SCHOLAR_FREE_DAILY_BUDGET", "2");
-    const day: Row = { day: utcToday(), free_answered: 2 };
-    for (const counter of ["screened", "flagged_phrase", "flagged_model", "flagged_uncertain"]) day[counter] = 0;
-    for (const counter of ["flagged_blocked", "flagged_writer", "fallbacks", "screen_failed"]) day[counter] = 0;
-    world.safetyDaily.push(day);
-    await refused(await send(world, typed()), 503, "SCHOLAR_UNAVAILABLE");
-    assertEquals(lastLog(world).reason, "scholar:budget");
-    assertEquals(messageRow(world)?.error_code, "SCHOLAR_UNAVAILABLE");
-    assertEquals(world.geminiCalls.length, 0);
-
-    world.screenQueue.push(crisis());
-    world.geminiQueue.push(geminiOk(heavyAnswer()));
-    const heavy = await ok(await send(world, typed(TIRED, { conversationId: SECOND, messageId: NEXT })));
-    assertEquals(heavy.answer.isHeavy, true);
-
-    setPlan(world, "pro");
-    world.geminiQueue.push(geminiOk(answerOutput()));
-    await ok(await send(world, typed()));
   }),
 );
 
@@ -1181,7 +1401,13 @@ Deno.test(
 
     const again = await ok(await send(world, typed()));
     assertEquals(again.answer.id, first.answer.id);
-    assertEquals(again.usage, { kind: "free_day", used: 1, limit: 5, remaining: 4, resetsAt: nextMidnight() });
+    assertEquals(again.usage, {
+      kind: "credits",
+      used: 4,
+      limit: 400,
+      remaining: 396,
+      resetsAt: world.scholarCredits[0].renews_at,
+    });
     assertEquals(lastLog(world).reason, "scholar:replayed");
 
     Deno.env.set("SCHOLAR_ENABLED", "false");

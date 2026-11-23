@@ -6,16 +6,20 @@ import {
   getLatestAffirmations,
   getProfile,
   getReflectionStreak,
+  hydrateWordPool,
+  hydrateWords,
   listPendingItems,
   loadEntriesPage,
   readCachedEntries,
   readCachedEntry,
   readCachedLatestAffirmations,
+  readCachedWords,
+  readCurrentWord,
   setAffirmationFavorite,
 } from "@/data/journalRepository";
 import { mergePending, toPendingEntry } from "@/data/pendingEntries";
 import { getCurrentSlot, getReflectionDays, isListedEntry, mergeEntries } from "@/data/selectors";
-import { requestAffirmationReschedule } from "@/services/affirmationScheduler";
+import { requestAffirmationReschedule, subscribeWordCalendar } from "@/services/affirmationScheduler";
 import { track } from "@/services/analytics";
 import { haptics } from "@/services/haptics";
 import { startOfflineSession } from "@/services/offlineSession";
@@ -26,6 +30,7 @@ import { useDevStore } from "@/store/devStore";
 import { selectIsOnline, useOfflineStore, type SavedNote } from "@/store/offlineStore";
 import type {
   Affirmation,
+  CurrentWord,
   HomeEntry,
   JournalEntry,
   OutboxItem,
@@ -45,6 +50,13 @@ export type HomeState =
       // How many entries the Journal has in all, the ones not loaded yet included.
       entryCount: number;
       affirmations: Affirmation[];
+      // The word the last reminder carried, from the Word Deck's calendar (2026-11-17), or null: the card then shows the newest
+      // reflection's affirmation for the current slot, as before.
+      word: CurrentWord | null;
+      // The deck of words (2026-11-20): the affirmations this phone holds for the reflections on screen, by entry id, each list
+      // in position order. They come a moment after the entries, the phone's own first and then the ones fetched for a page, so
+      // a reflection that is not in here yet has no card. It may also hold reflections that are no longer listed.
+      words: Record<string, Affirmation[]>;
       reflectionDays: number;
       currentSlot: TimeSlot;
       isOffline: boolean;
@@ -75,6 +87,8 @@ type LoadResult =
       nextCursor: string | null;
       total: number | null;
       affirmations: Affirmation[];
+      word: CurrentWord | null;
+      words: Record<string, Affirmation[]>;
     }
   | { key: string; status: "error" };
 
@@ -104,10 +118,34 @@ function placeChangedEntry(
 
 function withFavorite(result: LoadResult | null, key: string, id: string, value: boolean): LoadResult | null {
   if (result?.status !== "ready" || result.key !== key) return result;
+  const flip = (item: Affirmation): Affirmation => (item.id === id ? { ...item, isFavorite: value } : item);
   return {
     ...result,
-    affirmations: result.affirmations.map((item) => (item.id === id ? { ...item, isFavorite: value } : item)),
+    affirmations: result.affirmations.map(flip),
+    word:
+      result.word !== null && result.word.affirmation.id === id
+        ? { ...result.word, affirmation: flip(result.word.affirmation) }
+        : result.word,
+    // The same affirmation may be a card of the deck.
+    words: Object.fromEntries(Object.entries(result.words).map(([entryId, list]) => [entryId, list.map(flip)])),
   };
+}
+
+// The finished reflections among these entries: the ones a card of the deck can be made from.
+function finishedIds(entries: readonly JournalEntry[]): string[] {
+  return entries.filter((entry) => entry.status === "ready" && entry.devotional !== null).map((entry) => entry.id);
+}
+
+// Whether two reads of the word show the same card: a read that changes nothing must not redraw the screen.
+function sameWord(a: CurrentWord | null, b: CurrentWord | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.affirmation.id === b.affirmation.id &&
+    a.affirmation.isFavorite === b.affirmation.isFavorite &&
+    a.slot === b.slot &&
+    a.fireAt === b.fireAt &&
+    (a.entry?.id ?? null) === (b.entry?.id ?? null)
+  );
 }
 
 // Journal Home data. It loads when the screen takes focus (the first time too), when the app returns to the foreground while
@@ -115,10 +153,15 @@ function withFavorite(result: LoadResult | null, key: string, id: string, value:
 // database (the reflections saved on this phone, and the cache of the ones the server has, live in it). A load shows what the
 // phone already has at once, then replaces it with the first page from the server; older pages come with `loadMore`. While the
 // screen is in front it follows the sync engine: the list of unsent reflections refreshes after every change, and the whole
-// list after a reflection has been prepared. It follows Realtime too (step 33): a change made elsewhere is read from the phone
-// (the handler has written it there) and merged into the list, and after a dropped channel came back the list loads again. The
-// "days of reflection" chip is the server's run of days (reflection_streak_days), asked for after the first page and when a
-// reflection finishes; until it answers, offline, with the mock data and on any error, the chip counts what the phone holds.
+// list after a reflection has been prepared. Two things are followed for as long as the screen exists, also while another screen
+// covers it: a reflection deleted leaves the list, and the scheduler's calendar moves the card's word; and the word is read again
+// from the calendar as the screen is shown, because a reminder fires with nothing announced (2026-11-18). While the screen is in
+// front it follows Realtime too (step 33): a change made elsewhere is read from the phone (the handler has written it there) and
+// merged into the list, and after a dropped channel came back the list loads again. The "days of reflection" chip is the server's
+// run of days (reflection_streak_days), asked for after the first page and when a reflection finishes; until it answers,
+// offline, with the mock data and on any error, the chip counts what the phone holds. The deck of words (2026-11-20) needs the
+// affirmations of every reflection on screen: they are read behind the list, never before it (the phone's own once the cached
+// entries show, then one request for those a page's reflections lack), so the list never waits for them.
 export function useJournalHome(): HomeState {
   const scenario = useDevStore((state) => state.scenario);
   const dbReady = useOfflineStore((state) => state.dbReady);
@@ -166,6 +209,29 @@ export function useJournalHome(): HomeState {
     if (request === latestPending.current) setPending(items);
   }, []);
 
+  // The deck's words for these entries, behind the list: with `fetch`, the affirmations the phone lacks are asked for first
+  // (one request), and then the phone's own are read. Only reflections the screen holds no words for are read, unless `all`
+  // (pull-to-refresh reads every one again). A newer load has the newer say. It never rejects.
+  const addWords = useCallback(
+    async (entries: readonly JournalEntry[], request: number, options: { fetch: boolean; all?: boolean }) => {
+      const all = options.all === true;
+      const known = !all && shown.current?.status === "ready" && shown.current.key === key ? shown.current.words : {};
+      const ids = finishedIds(entries).filter((id) => !(id in known));
+      if (ids.length === 0) return;
+      if (options.fetch) await hydrateWords(ids);
+      const words = await readCachedWords(ids);
+      if (request !== latestRequest.current || Object.keys(words).length === 0) return;
+      setResult((previous) =>
+        previous?.status === "ready" && previous.key === key
+          ? // What the screen already holds for a reflection is the newer read (a heart just tapped, a Realtime change), except
+            // on a pull-to-refresh.
+            { ...previous, words: all ? { ...previous.words, ...words } : { ...words, ...previous.words } }
+          : previous,
+      );
+    },
+    [key],
+  );
+
   const load = useCallback(
     async (options: { reset?: boolean } = {}) => {
       if (!dbReady) return;
@@ -182,10 +248,11 @@ export function useJournalHome(): HomeState {
           throw new Error("Journal load failed on purpose (dev)");
         }
         // What the phone already has: shown at once, before the network is asked.
-        const [profile, cached, cachedAffirmations, items] = await Promise.all([
+        const [profile, cached, cachedAffirmations, cachedWord, items] = await Promise.all([
           getProfile(),
           readCachedEntries(),
           readCachedLatestAffirmations(),
+          readCurrentWord(Date.now()),
           listPendingItems(),
         ]);
         if (request !== latestRequest.current) return;
@@ -202,8 +269,11 @@ export function useJournalHome(): HomeState {
                   nextCursor: null,
                   total: null,
                   affirmations: cachedAffirmations,
+                  word: cachedWord,
+                  words: {},
                 },
           );
+          void addWords(cached, request, { fetch: false });
         }
         // The first page from the server. Without an answer, what is on screen stays (or the error shows when nothing is).
         const page = await loadEntriesPage(null);
@@ -211,24 +281,33 @@ export function useJournalHome(): HomeState {
         if (!page.ok) throw new Error(page.code);
         void askStreak(profile.timezone);
         const affirmations = await getLatestAffirmations();
-        // The newest reflection may be new to this phone (made on another phone, say): the affirmation
-        // notifications are planned again from what the phone now holds (step 28), once its affirmations are here too.
+        // The reflections of the week may be new to this phone (made on another phone, say), or their affirmations never read
+        // here: the ones the phone has none for are fetched (one request), and the reminders' words are dealt again from what
+        // the phone now holds (the Word Deck, 2026-11-17; step 28 before it), once the affirmations are all here.
+        await hydrateWordPool(new Date(Date.now()));
         requestAffirmationReschedule();
+        const word = await readCurrentWord(Date.now());
         if (request !== latestRequest.current) return;
         const paged = pagesLoaded.current > 0;
+        // The newest reflection's affirmations have just been read from the server: the deck holds the same ones.
+        const newest = affirmations[0]?.entryId;
         setResult((previous) => {
           const same = previous?.status === "ready" && previous.key === key ? previous : null;
+          const words = same?.words ?? {};
           return {
             key,
             status: "ready",
             profile,
             affirmations,
+            word,
+            words: newest === undefined ? words : { ...words, [newest]: affirmations },
             // Older pages that are already on screen stay, and their cursor with them.
             entries: paged && same !== null ? mergeEntries(same.entries, page.data.entries) : page.data.entries,
             nextCursor: paged && same !== null ? same.nextCursor : page.data.nextCursor,
             total: page.data.total,
           };
         });
+        void addWords(page.data.entries, request, { fetch: true, all: options.reset === true });
       } catch {
         if (request !== latestRequest.current) return;
         // A failed refresh keeps the data that is already on screen.
@@ -237,14 +316,19 @@ export function useJournalHome(): HomeState {
         );
       }
     },
-    [key, dbReady, askStreak],
+    [key, dbReady, askStreak, addWords],
   );
 
-  // A Realtime message about one entry (step 33). The newest reflection's affirmations are read again with it, and the run of
-  // days is asked for again when a reflection has just finished.
+  // A Realtime message about one entry (step 33). The newest reflection's affirmations are read again with it, and the entry's
+  // own for the deck, and the run of days is asked for again when a reflection has just finished.
   const mergeFromPhone = useCallback(
     async (entryId: string) => {
-      const [entry, affirmations] = await Promise.all([readCachedEntry(entryId), readCachedLatestAffirmations()]);
+      const [entry, affirmations, word, words] = await Promise.all([
+        readCachedEntry(entryId),
+        readCachedLatestAffirmations(),
+        readCurrentWord(Date.now()),
+        readCachedWords([entryId]),
+      ]);
       const before = shown.current?.status === "ready" && shown.current.key === key ? shown.current : null;
       if (before === null) return;
       const wasReady = before.entries.some((item) => item.id === entryId && item.status === "ready");
@@ -253,7 +337,13 @@ export function useJournalHome(): HomeState {
       setNow(new Date(nowMs));
       setResult((previous) =>
         previous?.status === "ready" && previous.key === key
-          ? { ...previous, ...placeChangedEntry(previous, entryId, entry, nowMs), affirmations }
+          ? {
+              ...previous,
+              ...placeChangedEntry(previous, entryId, entry, nowMs),
+              affirmations,
+              word,
+              words: { ...previous.words, ...words },
+            }
           : previous,
       );
       if (entry !== null && entry.status === "ready" && entry.devotional !== null && !wasReady) {
@@ -263,19 +353,72 @@ export function useJournalHome(): HomeState {
     [key, askStreak],
   );
 
-  // A Realtime message about an entry's affirmations: the card shows the newest reflection's, as the phone now holds them.
-  const refreshAffirmations = useCallback(async () => {
-    const affirmations = await readCachedLatestAffirmations();
+  // A Realtime message about an entry's affirmations: the card shows the newest reflection's, and the deck that entry's, as the
+  // phone now holds them.
+  const refreshAffirmations = useCallback(
+    async (entryId: string) => {
+      const [affirmations, word, words] = await Promise.all([
+        readCachedLatestAffirmations(),
+        readCurrentWord(Date.now()),
+        readCachedWords([entryId]),
+      ]);
+      setResult((previous) =>
+        previous?.status === "ready" && previous.key === key
+          ? { ...previous, affirmations, word, words: { ...previous.words, ...words } }
+          : previous,
+      );
+    },
+    [key],
+  );
+
+  // The scheduler has written a new deal to the calendar (2026-11-17): the word that last arrived may be another one.
+  const refreshWord = useCallback(async () => {
+    const word = await readCurrentWord(Date.now());
     setResult((previous) =>
-      previous?.status === "ready" && previous.key === key ? { ...previous, affirmations } : previous,
+      previous?.status === "ready" && previous.key === key && !sameWord(previous.word, word)
+        ? { ...previous, word }
+        : previous,
     );
   }, [key]);
+
+  // Followed for as long as the screen exists, also while another screen covers it (2026-11-18, the walk-through's F1): the tab
+  // stays mounted behind Reflection, where a reflection is deleted, and the scheduler writes its calendar whenever the app comes
+  // to the front. Followed only while in front, the card showed a deleted reflection's word, or the previous one, for the 1 to 3
+  // seconds the screen's own load took once it was shown again.
+  useEffect(() => {
+    const stopFollowing = subscribe((event) => {
+      if (event.type !== "deleted") return;
+      // A reflection was deleted (step 29b): it leaves the list on screen at once, also from an older page (pages merge by id, so
+      // a reload alone would keep it), together with its affirmations; the server's count is one lower.
+      setResult((previous) =>
+        previous?.status === "ready" && previous.key === key
+          ? {
+              ...previous,
+              entries: previous.entries.filter((entry) => entry.id !== event.entryId),
+              affirmations: previous.affirmations.filter((affirmation) => affirmation.entryId !== event.entryId),
+              word: previous.word?.affirmation.entryId === event.entryId ? null : previous.word,
+              total: previous.total === null ? null : Math.max(0, previous.total - 1),
+            }
+          : previous,
+      );
+    });
+    const stopCalendar = subscribeWordCalendar(() => {
+      void refreshWord();
+    });
+    return () => {
+      stopFollowing();
+      stopCalendar();
+    };
+  }, [key, refreshWord]);
 
   // The callback changes with the key and with the database, so useFocusEffect reloads then if the screen is focused, and
   // otherwise on the next focus. Leaving the screen drops a response that is still on its way.
   useFocusEffect(
     useCallback(() => {
       load();
+      // A reminder may have fired while the screen was covered, and nothing is announced when one does: the word is read again
+      // from the phone's calendar at once, so the card does not wait for the first page from the server to show it.
+      void refreshWord();
       const subscription = AppState.addEventListener("change", (status) => {
         if (status === "active") load();
       });
@@ -290,24 +433,11 @@ export function useJournalHome(): HomeState {
           load();
         } else if (event.type === "changed") {
           refreshPending();
-        } else if (event.type === "deleted") {
-          // A reflection was deleted (step 29b): it leaves the list on screen at once, also from an older page (pages merge by
-          // id, so a reload alone would keep it), together with its affirmations; the server's count is one lower.
-          setResult((previous) =>
-            previous?.status === "ready" && previous.key === key
-              ? {
-                  ...previous,
-                  entries: previous.entries.filter((entry) => entry.id !== event.entryId),
-                  affirmations: previous.affirmations.filter((affirmation) => affirmation.entryId !== event.entryId),
-                  total: previous.total === null ? null : Math.max(0, previous.total - 1),
-                }
-              : previous,
-          );
         }
       });
       const stopListening = subscribeRealtime((event) => {
         if (event.type === "entry") void mergeFromPhone(event.entryId);
-        else if (event.type === "affirmations") void refreshAffirmations();
+        else if (event.type === "affirmations") void refreshAffirmations(event.entryId);
         else load();
       });
       return () => {
@@ -316,7 +446,7 @@ export function useJournalHome(): HomeState {
         stopListening();
         latestRequest.current += 1;
       };
-    }, [load, refreshPending, key, mergeFromPhone, refreshAffirmations]),
+    }, [load, refreshPending, mergeFromPhone, refreshAffirmations, refreshWord]),
   );
 
   const retry = useCallback(() => {
@@ -358,11 +488,13 @@ export function useJournalHome(): HomeState {
           ? { ...previous, entries: mergeEntries(previous.entries, page.data.entries), nextCursor: page.data.nextCursor }
           : previous,
       );
+      // The deck goes on into this page: its reflections' words are fetched (one request) and read behind the list.
+      void addWords(page.data.entries, request, { fetch: true });
     } finally {
       loadingMoreNow.current = false;
       setLoadingMore(false);
     }
-  }, [nextCursor, key]);
+  }, [nextCursor, key, addWords]);
 
   const toggleFavorite = useCallback(
     async (affirmation: Affirmation) => {
@@ -406,6 +538,8 @@ export function useJournalHome(): HomeState {
     entries,
     entryCount: entries.length + notLoaded,
     affirmations: current.affirmations,
+    word: current.word,
+    words: current.words,
     reflectionDays: serverDays ?? getReflectionDays(entries, now),
     currentSlot: getCurrentSlot(now, current.profile.reminders),
     // The dev scenario still forces the offline look in development.

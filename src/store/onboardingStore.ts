@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import { DEFAULT_REMINDERS } from "@/constants/app";
-import type { TimeSlot } from "@/types";
+import { ACQUISITION_SOURCES, DEFAULT_REMINDERS } from "@/constants/app";
+import type { AcquisitionSource, TimeSlot } from "@/types";
 
 import { safeStorage } from "./safeStorage";
 
@@ -19,6 +19,10 @@ interface OnboardingState {
   remindersDirty: boolean; // an edit the server has not seen yet (step 17)
   analyticsConsent: AnalyticsConsent; // step 34
   hasSignedIn: boolean; // a session has been active on this device (step 34b): the Sign In screen reads it
+  // "How did you hear about GraceHush?" (2026-11-20): the answer, "skipped", or null before the step. It belongs to the device,
+  // like the consent, and is sent to analytics once (acquisitionSent), only after the person said yes to sharing.
+  acquisitionSource: AcquisitionSource | null;
+  acquisitionSent: boolean;
   setReminder: (slot: TimeSlot, hhmm: string) => void;
   markRemindersSynced: () => void; // the server has these times
   applyServerReminders: (times: Record<TimeSlot, string>) => void; // the server's times replace this device's
@@ -27,6 +31,8 @@ interface OnboardingState {
   markPermissionsPrompted: () => void;
   setAnalyticsConsent: (consent: "granted" | "declined") => void;
   markSignedIn: () => void; // idempotent
+  setAcquisitionSource: (source: AcquisitionSource) => void;
+  markAcquisitionSent: () => void;
   resetOnboarding: () => void; // dev only
 }
 
@@ -41,6 +47,8 @@ type OnboardingPersisted = Pick<
   | "remindersDirty"
   | "analyticsConsent"
   | "hasSignedIn"
+  | "acquisitionSource"
+  | "acquisitionSent"
 >;
 
 const HHMM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -73,6 +81,8 @@ function getInitialData(): OnboardingPersisted {
     remindersDirty: false,
     analyticsConsent: "unset",
     hasSignedIn: false,
+    acquisitionSource: null,
+    acquisitionSent: false,
   };
 }
 
@@ -129,11 +139,23 @@ export const useOnboardingStore = create<OnboardingState>()(
         }
         set({ hasSignedIn: true });
       },
+      setAcquisitionSource: (source) => {
+        if (get().acquisitionSource === source) {
+          return;
+        }
+        set({ acquisitionSource: source });
+      },
+      markAcquisitionSent: () => {
+        if (get().acquisitionSent) {
+          return;
+        }
+        set({ acquisitionSent: true });
+      },
       resetOnboarding: () => set(getInitialData()),
     }),
     {
       name: "gracehush.onboarding",
-      version: 4,
+      version: 5,
       storage: createJSONStorage(() => safeStorage),
       partialize: (state): OnboardingPersisted => ({
         hasCompletedOnboarding: state.hasCompletedOnboarding,
@@ -144,12 +166,15 @@ export const useOnboardingStore = create<OnboardingState>()(
         remindersDirty: state.remindersDirty,
         analyticsConsent: state.analyticsConsent,
         hasSignedIn: state.hasSignedIn,
+        acquisitionSource: state.acquisitionSource,
+        acquisitionSent: state.acquisitionSent,
       }),
       // `merge` validates every field. Version 2 (step 17) added remindersDirty. Before it nothing synced the times, so
       // a time that differs from the default was changed on this device and the server has not seen it. Version 3 (step 34)
       // added analyticsConsent: a save from before it has never been asked, so it is unset. Version 4 (step 34b) added
       // hasSignedIn: the returning-user rule marks onboarding complete for any signed-in session, so a save from before it
-      // that had completed onboarding counts as a device that has signed in.
+      // that had completed onboarding counts as a device that has signed in. Version 5 (2026-11-20) added acquisitionSource and
+      // acquisitionSent: a save from before it was never asked, and `merge` reads both as not answered and not sent.
       migrate: (persisted: unknown, version: number) => {
         const saved: Record<string, unknown> = isRecord(persisted) ? persisted : {};
         if (version >= 4) return saved as OnboardingPersisted;
@@ -188,6 +213,10 @@ export const useOnboardingStore = create<OnboardingState>()(
           analyticsConsent:
             saved.analyticsConsent === "granted" || saved.analyticsConsent === "declined" ? saved.analyticsConsent : "unset",
           hasSignedIn: saved.hasSignedIn === true,
+          acquisitionSource: (ACQUISITION_SOURCES as readonly unknown[]).includes(saved.acquisitionSource)
+            ? (saved.acquisitionSource as AcquisitionSource)
+            : null,
+          acquisitionSent: saved.acquisitionSent === true,
         };
       },
       // With safeStorage this should never fire: it is the last line of defence.

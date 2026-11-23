@@ -15,6 +15,12 @@ function clock12(hours: number, minutes: number): string {
   return `${hours % 12 || 12}:${String(minutes).padStart(2, "0")} ${hours < 12 ? "AM" : "PM"}`;
 }
 
+// "6:02 PM": the local clock time of a moment.
+export function formatClock(iso: string): string {
+  const date = new Date(iso);
+  return clock12(date.getHours(), date.getMinutes());
+}
+
 // Whole local calendar days from `from` to `to`. It compares dates, not 24-hour blocks, so a
 // daylight-saving change cannot move an entry to another day.
 export function calendarDaysBetween(from: Date, to: Date): number {

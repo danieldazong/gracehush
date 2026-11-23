@@ -4,7 +4,7 @@
 //
 // What is encrypted is the words. The columns outbox.text, entries_cache.row_json, affirmations_cache.row_json and
 // mutations.patch_json hold a token made by fieldCrypto.ts, never plain text. Everything else is bookkeeping: ids, statuses,
-// counts, flags and times.
+// counts, flags and times (word_calendar holds ids, a slot and times, and no words).
 export const MIGRATIONS: readonly (readonly string[])[] = [
   // Version 1.
   [
@@ -64,5 +64,20 @@ export const MIGRATIONS: readonly (readonly string[])[] = [
       updated_at INTEGER NOT NULL
     )`,
     "ALTER TABLE entries_cache ADD COLUMN is_prayer INTEGER",
+  ],
+  // Version 4 (2026-11-17, the Word Deck). word_calendar: which affirmation each reminder carries, one row per slot of a local day
+  // (day is yyyymmdd in the zone the phone was in when the row was made). The rows of reminders ahead are dealt again at each plan
+  // (db/wordCalendar.ts); a row at or before its time is history: the rotation continues from it and Today's card reads it, so the
+  // card and the lock screen agree. Only ids and times: the words themselves stay in affirmations_cache.
+  [
+    `CREATE TABLE word_calendar (
+      day INTEGER NOT NULL,
+      slot TEXT NOT NULL CHECK (slot IN ('morning', 'afternoon', 'evening')),
+      fire_at INTEGER NOT NULL,
+      entry_id TEXT NOT NULL,
+      affirmation_id TEXT NOT NULL,
+      PRIMARY KEY (day, slot)
+    )`,
+    "CREATE INDEX word_calendar_fire ON word_calendar (fire_at)",
   ],
 ];

@@ -217,13 +217,13 @@ Deno.test(
 // ---- A talk that starts ---------------------------------------------------------------------------------------------------------
 
 Deno.test(
-  "start: a paid account gets a token for its voice's agent, a signed session, the talk's row and its limits",
+  "start: a Pro account gets a token for its voice's agent, a signed session, the talk's row and its limits",
   flow(async (world) => {
     const body = await ok(await send(world, start({ voice: "deep", region: "ng" })));
     assertEquals(body.conversationId, CONVERSATION);
     assertEquals(body.voice, "deep");
     assertEquals(body.heavy, false);
-    assertEquals(body.limits, { talkSeconds: 600, monthSecondsLeft: 1_800, resetsAt: monthEnd() });
+    assertEquals(body.limits, { talkSeconds: 600, monthSecondsLeft: 3_600, resetsAt: monthEnd() });
     assert(body.conversationToken.startsWith("el-test-token-"));
 
     // The token was asked for that voice's agent, with the workspace's key, once.
@@ -290,23 +290,118 @@ Deno.test(
 // ---- The plan, the day and the month ---------------------------------------------------------------------------------------------
 
 Deno.test(
-  "start: a free account has no talk, in a heavy conversation too; trial and Pro do",
+  "start: the free plan talks 3 minutes in its free conversation, in Hannah's voice, and the talk claims it",
   flow(async (world) => {
     setPlan(world, "free");
-    const free = await refused(await send(world, start()), 402, "LIMIT_REACHED") as unknown as ScholarVoiceLimitError;
-    assertEquals(free.usage, { kind: "talk_plan", used: 0, limit: 0, remaining: 0, resetsAt: null });
+    // Nothing claimed: a talk is the free conversation's first use. The voice the phone asks for gives way to the default.
+    const first = await ok(await send(world, start({ voice: "storyteller" })));
+    assertEquals(first.limits, { talkSeconds: 180, monthSecondsLeft: null, resetsAt: monthEnd() });
+    assertEquals(first.voice, "warm");
+    assertEquals(tokenCalls(world).at(-1)?.url.searchParams.get("agent_id"), VOICE_TEST.agents.warm);
+    assertEquals(world.voiceSessions.at(-1)?.cap_seconds, 180);
+    assertEquals(lastLog(world).limit, "free_ok");
+    assertEquals(world.scholarFree.map((row) => [row.conversation_id, row.messages]), [[CONVERSATION, 0]]);
+
+    // A second talk in the same conversation has what is left of the 3 minutes.
+    const held = world.voiceSessions.at(-1) as Row;
+    Object.assign(held, { ended_at: held.started_at, seconds: 100 });
+    const second = await ok(await send(world, start()));
+    assertEquals(second.limits.talkSeconds, 80);
+    assertEquals(lastLog(world).limitUsed, 100);
+
+    // Used up (under 30 seconds left): the plan's answer, nothing asked of ElevenLabs.
+    const again = world.voiceSessions.at(-1) as Row;
+    Object.assign(again, { ended_at: again.started_at, seconds: 60 });
+    const calls = tokenCalls(world).length;
+    const spent = await refused(await send(world, start()), 402, "LIMIT_REACHED") as unknown as ScholarVoiceLimitError;
+    assertEquals(spent.usage, { kind: "talk_plan", used: 0, limit: 0, remaining: 0, resetsAt: null });
     assertEquals(lastLog(world).reason, "voice:plan");
     assertEquals(lastLog(world).limit, "free_blocked");
 
+    // Another conversation is the plan's answer: the free conversation is this one, for good. It is refused before anything
+    // is written: the account's talk still running is left alone, and no claim is asked for.
+    Object.assign(again, { ended_at: null });
+    const claims = () => world.rpcCalls.filter((call) => call.name === "claim_scholar_free_conversation").length;
+    const claimed = claims();
+    await refused(await send(world, start({ conversationId: SECOND })), 402, "LIMIT_REACHED");
+    assertEquals(
+      world.voiceSessions.find((row) => row.id === again.id)?.ended_at,
+      null,
+      "a refused start closes no talk",
+    );
+    assertEquals(claims(), claimed, "a refused start asks for no claim");
+    assertEquals(tokenCalls(world).length, calls);
+    assertEquals(world.scholarFree.length, 1);
+    assertEquals(world.scholarFree[0].conversation_id, CONVERSATION);
+  }),
+);
+
+Deno.test(
+  "start: a heavy conversation never gives an account that is not Pro a talk, and never claims its free conversation",
+  flow(async (world) => {
+    setPlan(world, "free");
     seedConversation(world, { is_heavy: true });
     const heavy = await refused(await send(world, start()), 402, "LIMIT_REACHED") as unknown as ScholarVoiceLimitError;
     assertEquals(heavy.usage.kind, "talk_plan");
-    assertEquals(world.elevenCalls.length, 0);
+    assertEquals(world.scholarFree.length, 0);
     assertEquals(world.voiceSessions.length, 0);
+    assertEquals(world.elevenCalls.length, 0);
+    // The free conversation is still to come, in another conversation.
+    assertEquals((await ok(await send(world, start({ conversationId: SECOND })))).limits.talkSeconds, 180);
+    assertEquals(world.scholarFree[0].conversation_id, SECOND);
+  }),
+);
 
-    setPlan(world, "trial");
-    world.conversations.length = 0;
+Deno.test(
+  "start: a trial talks in its free conversation in the voice it chose, and elsewhere is told the day its plan begins",
+  flow(async (world) => {
+    const ends = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    setPlan(world, "trial", ends);
+    const talk = await ok(await send(world, start({ voice: "storyteller" })));
+    assertEquals(talk.voice, "storyteller");
+    assertEquals(talk.limits.talkSeconds, 180);
+    assertEquals(lastLog(world).limit, "trial_ok");
+    const trial = await refused(
+      await send(world, start({ conversationId: SECOND })),
+      402,
+      "LIMIT_REACHED",
+    ) as unknown as ScholarVoiceLimitError;
+    assertEquals(trial.usage, { kind: "talk_plan", used: 0, limit: 0, remaining: 0, resetsAt: ends });
+    assertEquals(lastLog(world).limit, "trial_blocked");
+  }),
+);
+
+Deno.test(
+  "start: a claim another conversation won in the meantime refuses the talk, and Pro never claims",
+  flow(async (world) => {
+    setPlan(world, "free");
+    // A message elsewhere claimed the free conversation between the read and the claim: the claim answers the other one. The fake
+    // records an RPC before it reads the table, so the other conversation's row lands just in time.
+    const push = world.rpcCalls.push.bind(world.rpcCalls);
+    world.rpcCalls.push = (...calls) => {
+      if (calls.some((call) => call.name === "claim_scholar_free_conversation") && world.scholarFree.length === 0) {
+        world.scholarFree.push({
+          user_id: USER,
+          conversation_id: SECOND,
+          messages: 1,
+          created_at: world.now(),
+          updated_at: world.now(),
+        });
+      }
+      return push(...calls);
+    };
+    await refused(await send(world, start()), 402, "LIMIT_REACHED");
+    assertEquals(world.voiceSessions.length, 0);
+    assertEquals(tokenCalls(world).length, 0);
+
+    assertEquals(lastLog(world).limit, "free_blocked");
+
+    setPlan(world, "pro");
+    world.scholarFree.length = 0;
+    const claims = () => world.rpcCalls.filter((call) => call.name === "claim_scholar_free_conversation").length;
+    const before = claims();
     assertEquals((await ok(await send(world, start()))).limits.talkSeconds, 600);
+    assertEquals([claims(), world.scholarFree.length], [before, 0]);
   }),
 );
 
@@ -314,6 +409,14 @@ Deno.test(
   "start: a paid plan whose end date has passed is read again from RevenueCat before anything else",
   flow(async (world) => {
     setPlan(world, "pro", "2026-01-01T00:00:00.000Z");
+    // The free conversation is held elsewhere, so the free plan RevenueCat answers has no talk here.
+    world.scholarFree.push({
+      user_id: USER,
+      conversation_id: SECOND,
+      messages: 2,
+      created_at: world.now(),
+      updated_at: world.now(),
+    });
     await refused(await send(world, start()), 402, "LIMIT_REACHED");
     assertEquals(world.revenuecatCalls.length, 1);
     assertEquals(lastLog(world).billing, "synced");
@@ -352,12 +455,14 @@ Deno.test(
 );
 
 Deno.test(
-  "start: thirty minutes a calendar month: the talk's cap is the smaller of ten minutes and what is left",
+  "start: sixty minutes a calendar month: the talk's cap is the smaller of ten minutes and what is left",
   flow(async (world) => {
     const earlier = new Date(Date.now() - 2 * 60_000).toISOString();
-    // 25 minutes used, of which one talk ran 20 seconds past its cap (it costs its cap).
+    // 55 minutes used, of which one talk ran 20 seconds past its cap (it costs its cap).
     seedSession(world, { started_at: earlier, seconds: 620, cap_seconds: 600 });
-    seedSession(world, { started_at: earlier, seconds: 600, cap_seconds: 600 });
+    for (let index = 0; index < 4; index += 1) {
+      seedSession(world, { started_at: earlier, seconds: 600, cap_seconds: 600 });
+    }
     seedSession(world, { started_at: earlier, seconds: 300, cap_seconds: 600 });
     // Never counted: a talk in a heavy conversation, and last month's.
     seedSession(world, { started_at: earlier, seconds: 1_500, cap_seconds: null, is_heavy: true });
@@ -367,14 +472,14 @@ Deno.test(
     const body = await ok(await send(world, start()));
     assertEquals(body.limits, { talkSeconds: 300, monthSecondsLeft: 300, resetsAt: monthEnd() });
     assertEquals(world.voiceSessions.at(-1)?.cap_seconds, 300);
-    assertEquals(lastLog(world).limitUsed, 1_500);
+    assertEquals(lastLog(world).limitUsed, 3_300);
 
     // Under half a minute left counts as used up: no token is asked for and no row is written.
     world.voiceSessions.pop();
     seedSession(world, { started_at: earlier, seconds: 275, cap_seconds: 300 });
     const before = world.voiceSessions.length;
     const used = await refused(await send(world, start()), 402, "LIMIT_REACHED") as unknown as ScholarVoiceLimitError;
-    assertEquals(used.usage, { kind: "talk_month", used: 1_775, limit: 1_800, remaining: 25, resetsAt: monthEnd() });
+    assertEquals(used.usage, { kind: "talk_month", used: 3_575, limit: 3_600, remaining: 25, resetsAt: monthEnd() });
     assertEquals(lastLog(world).reason, "voice:month");
     assertEquals(lastLog(world).limit, "pro_blocked");
     assertEquals(world.voiceSessions.length, before);
@@ -470,7 +575,7 @@ Deno.test(
     assertEquals(silent.seconds, 0);
     assertEquals([ended.ended_at, ended.seconds], [lastTurn, 95]);
     // The abandoned talk is counted as it was closed: up to its last turn.
-    assertEquals(body.limits.monthSecondsLeft, 1_800 - 180 - 95);
+    assertEquals(body.limits.monthSecondsLeft, 3_600 - 180 - 95);
     // The new talk is the only one still open.
     assertEquals(world.voiceSessions.filter((row) => row.ended_at === null).map((row) => row.id), [body.talkId]);
   }),
@@ -492,7 +597,7 @@ Deno.test(
     await world.settleBackground();
     // A refused start does not sweep either: only the three token requests reached ElevenLabs.
     assertEquals(world.elevenCalls.length, 3);
-    assertEquals((await ok(await send(world, start()))).limits.monthSecondsLeft, 1_800);
+    assertEquals((await ok(await send(world, start()))).limits.monthSecondsLeft, 3_600);
   }),
 );
 

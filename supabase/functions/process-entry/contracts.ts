@@ -285,8 +285,12 @@ export interface ScholarConversation {
   createdAt: string;
 }
 
-// talk_plan and talk_month (step 39): a live talk needs trial or Pro, and has its own time a calendar month.
-export type ScholarUsageKind = "free_day" | "pro_day" | "listen_day" | "listen_plan" | "talk_plan" | "talk_month";
+// What `usage` counts (2026-11-18). "credits": a Pro account's window, what is used and left of its allowance and when it renews
+// (resetsAt null until a spend starts a window). "scholar_plan", "listen_plan" and "talk_plan": Scholar is not part of this
+// account's plan (no numbers; for a free trial, resetsAt is the day its Pro plan begins). "talk_month": a live talk's own time a
+// calendar month (step 39). "free" (2026-11-20): an account that is not Pro, in its one free conversation: how many of its free
+// messages are answered and left (resetsAt null: they do not renew).
+export type ScholarUsageKind = "credits" | "free" | "scholar_plan" | "listen_plan" | "talk_plan" | "talk_month";
 
 export interface ScholarUsage {
   kind: ScholarUsageKind;
@@ -327,7 +331,9 @@ export interface ScholarLimitError {
   usage: ScholarUsage;
 }
 
-export type ScholarSpeakRequest = { messageId: string; part: number; region?: string };
+// `voice` (2026-11-19): one of the eight voices of a live talk, to read the part in (the app sends it only once the person has
+// allowed ElevenLabs); with none, the devotional's Google voice reads it.
+export type ScholarSpeakRequest = { messageId: string; part: number; region?: string; voice?: string };
 export type ScholarSpeakResponse = { part: number; parts: number; audioBase64: string; durationMs: number };
 export type ScholarSpeakErrorCode =
   | "INVALID_REQUEST"

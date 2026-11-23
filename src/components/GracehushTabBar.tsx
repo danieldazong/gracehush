@@ -48,6 +48,8 @@ const LENS_SQUASH = 0.95;
 const LENS_SQUASH_PER_TAB = 0.03;
 const LENS_STRETCH_MS = 160;
 
+const TABS_WITHOUT_DOCK: readonly (keyof MainTabParamList)[] = ["Journal", "Scholar"];
+
 type TabConfig = {
   label: string;
   icon: SymbolViewProps["name"];
@@ -57,10 +59,11 @@ type TabConfig = {
 };
 
 const tabs: Record<keyof MainTabParamList, TabConfig> = {
+  // The first tab, route "Journal", is Today (2026-11-16): a sun for the day.
   Journal: {
-    label: copy.tabs.journal,
-    icon: { android: "menu_book", ios: "book" },
-    activeIcon: { android: "menu_book", ios: "book.fill" },
+    label: copy.tabs.today,
+    icon: { android: "wb_sunny", ios: "sun.max" },
+    activeIcon: { android: "wb_sunny", ios: "sun.max.fill" },
   },
   Scholar: {
     label: copy.tabs.scholar,
@@ -322,8 +325,9 @@ export function GracehushTabBar({ state, navigation, insets }: BottomTabBarProps
           })}
         </View>
       </View>
-      {/* The Scholar tab has its own ask bar in place of the dock (step 38). */}
-      {state.routes[state.index]?.name === "Scholar" ? null : <FloatingInputDock />}
+      {/* The Scholar tab has its own ask bar in place of the dock (step 38), and the Today tab its hero orb (2026-11-16): two
+          ways to start on one screen would be one too many. */}
+      {TABS_WITHOUT_DOCK.includes(state.routes[state.index]?.name as keyof MainTabParamList) ? null : <FloatingInputDock />}
     </View>
   );
 }

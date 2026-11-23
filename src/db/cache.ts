@@ -201,6 +201,16 @@ export async function listAffirmationsForEntry(entryId: string): Promise<Affirma
   return list.sort(byPosition);
 }
 
+// Whether the cache holds any affirmation for an entry: the Word Deck asks which of its reflections the phone has none for and
+// fetches those (one indexed lookup, nothing decrypted).
+export async function hasAffirmations(entryId: string): Promise<boolean> {
+  const row = await getDb().getFirstAsync<{ one: number }>(
+    "SELECT 1 AS one FROM affirmations_cache WHERE entry_id = ? LIMIT 1",
+    entryId,
+  );
+  return row !== null;
+}
+
 // Every entry and affirmation. (Sign-out deletes the whole file instead; this is for a reset inside a session.)
 export async function clearAll(): Promise<void> {
   const db = getDb();

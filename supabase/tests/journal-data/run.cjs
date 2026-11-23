@@ -1431,14 +1431,18 @@ async function engineChecks() {
     await outbox.enqueue(text("c1"));
     await outbox.enqueue(audio("a1"));
     const db = database.getDb();
-    // What version 1 did not have yet: version 2's column, and version 3's table and column (step 29).
+    // What version 1 did not have yet: version 2's column, version 3's table and column (step 29) and version 4's table (the
+    // Word Deck's calendar, 2026-11-17).
     await db.execAsync("ALTER TABLE outbox DROP COLUMN uploaded");
     await db.execAsync("DROP TABLE mutations");
     await db.execAsync("ALTER TABLE entries_cache DROP COLUMN is_prayer");
+    await db.execAsync("DROP TABLE word_calendar");
     await db.execAsync("PRAGMA user_version = 1");
     await database.closeUserDatabase();
     await database.openUserDatabase("user_a");
-    assert.equal((await database.getDb().getFirstAsync("PRAGMA user_version")).user_version, 3);
+    assert.equal((await database.getDb().getFirstAsync("PRAGMA user_version")).user_version, 4);
+    const names = (await database.getDb().getAllAsync("SELECT name FROM sqlite_master WHERE type = 'table'")).map((row) => row.name);
+    assert.ok(names.includes("word_calendar"), "version 4's table is made");
     assert.equal((await outbox.get("c1")).text, WORDS, "the words are still readable with the same key");
     assert.equal((await outbox.get("c1")).uploaded, false);
     assert.equal((await outbox.get("a1")).uploaded, false);
@@ -1488,6 +1492,359 @@ async function journalChecks() {
     raw.close();
     assert.ok(seen.length > 0, "Journal asks for the notifications to be planned again after its first page");
     assert.deepEqual(seen, seen.map(() => 3), "each time, the newest reflection's three affirmations are already on this phone");
+    handle.unmount();
+  });
+
+  // The Word Deck (2026-11-17): Today's card shows the word of the reminder that last fired, read from the scheduler's calendar.
+  const calendarRow = (w, n, slot, ago) => {
+    const entryId = serverRow(n).id;
+    return {
+      day: 20261025,
+      slot,
+      fireAt: BASE - ago,
+      entryId,
+      affirmationId: `aff-${entryId.slice(-12)}-${slot}`,
+    };
+  };
+
+  await test("journal: the word is none without a calendar; the word of the reminder that last fired shows once the scheduler writes one, and the same read changes nothing", async (w) => {
+    seedServer(w, 3);
+    const repo = w.use("@/data/journalRepository");
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 3 && s.affirmations.length === 3, "the server's page");
+    assert.equal(handle.result.current.word, null, "no calendar, no word: the card keeps the newest reflection's word");
+    assert.equal(w.calendarListeners(), 1, "the screen follows the scheduler's calendar while it is in front");
+    await repo.saveWordCalendar([calendarRow(w, 2, "evening", 3_600_000)], BASE);
+    w.calendarChanged();
+    const state = await until(handle, (s) => s.status === "ready" && s.word !== null, "the calendar's word");
+    assert.equal(state.word.entry.id, serverRow(2).id, "it is the word of the reflection the calendar names, not the newest one");
+    assert.equal(state.word.affirmation.id, calendarRow(w, 2, "evening", 0).affirmationId);
+    assert.equal(state.word.slot, "evening");
+    const first = state.word;
+    w.calendarChanged();
+    await settle(30);
+    assert.equal(handle.result.current.word, first, "a read that finds the same word does not redraw the screen");
+    handle.unmount();
+    assert.equal(w.calendarListeners(), 0, "leaving the screen stops following the calendar");
+  });
+
+  await test("journal: the word's heart follows the affirmation's, and a deleted reflection takes its word away", async (w) => {
+    seedServer(w, 3);
+    const repo = w.use("@/data/journalRepository");
+    await repo.hydrateWordPool(new Date(BASE));
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 3 && s.affirmations.length === 3, "the server's page");
+    await repo.saveWordCalendar([calendarRow(w, 2, "afternoon", 7_200_000)], BASE);
+    w.calendarChanged();
+    let state = await until(handle, (s) => s.status === "ready" && s.word !== null, "the calendar's word");
+    state.toggleFavorite(state.word.affirmation);
+    state = await until(handle, (s) => s.status === "ready" && s.word !== null && s.word.affirmation.isFavorite, "the word's heart");
+    await settle(20);
+    assert.equal(w.server.state.affirmations.find((a) => a.id === state.word.affirmation.id).is_favorite, true, "the save is the affirmation's own");
+    w.use("@/services/syncEngine").announceEntryDeleted(serverRow(2).id);
+    state = await until(handle, (s) => s.status === "ready" && s.word === null, "the word of the deleted reflection gone");
+    assert.ok(!state.entries.some((entry) => entry.id === serverRow(2).id));
+    handle.unmount();
+  });
+
+  await test("journal: a calendar row older than a day and a word the phone no longer holds are not shown", async (w) => {
+    seedServer(w, 3);
+    const repo = w.use("@/data/journalRepository");
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 3 && s.affirmations.length === 3, "the server's page");
+    await repo.saveWordCalendar([calendarRow(w, 2, "morning", 30 * 3_600_000)], BASE);
+    w.calendarChanged();
+    await settle(30);
+    assert.equal(handle.result.current.word, null, "a reminder from over a day ago is not today's word");
+    await repo.saveWordCalendar([{ ...calendarRow(w, 2, "evening", 3_600_000), affirmationId: "no-such-word" }], BASE);
+    w.calendarChanged();
+    await settle(30);
+    assert.equal(handle.result.current.word, null, "a word that is not in the cache falls back to the newest reflection's");
+    handle.unmount();
+  });
+
+  // Walk-through F1 (2026-11-18, the owner's iPhone): when a reminder had fired, or a reflection had been deleted, while Today was
+  // covered, the card kept the previous word until the screen's own load came back, 1 to 3 seconds after Today was shown. The hook
+  // followed the sync engine's deletions and the scheduler's calendar only while the screen was in front, and read the word again
+  // only together with the first page from the server.
+  await test("journal: a reflection deleted while the screen is covered leaves its list, count and word at once, and showing the screen again loads as before", async (w) => {
+    seedServer(w, 3);
+    const repo = w.use("@/data/journalRepository");
+    await repo.hydrateWordPool(new Date(BASE));
+    // The sync engine's listeners the screen holds, counted by wrapping subscribe (the screen calls it through the module).
+    const engine = w.use("@/services/syncEngine");
+    const subscribeToEngine = engine.subscribe;
+    let listening = 0;
+    engine.subscribe = (listener) => {
+      listening += 1;
+      const stop = subscribeToEngine(listener);
+      return () => {
+        listening -= 1;
+        stop();
+      };
+    };
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 3 && s.affirmations.length === 3, "the server's page");
+    await repo.saveWordCalendar([calendarRow(w, 2, "afternoon", 7_200_000)], BASE);
+    w.calendarChanged();
+    await until(handle, (s) => s.status === "ready" && s.word !== null, "the calendar's word");
+    w.setFocused(false);
+    await settle(20);
+    assert.equal(listening, 1, "covered, the screen follows only the deletions, which the sync engine announces");
+    // The two steps of a deletion that matter here: the server deletes first, then the phone forgets the entry and tells the lists.
+    assert.equal((await repo.deleteEntry(serverRow(2).id)).ok, true, "the server deleted the reflection");
+    w.use("@/services/syncEngine").announceEntryDeleted(serverRow(2).id);
+    const covered = await until(handle, (s) => s.status === "ready" && s.word === null, "the word of the deleted reflection gone while the screen is covered");
+    assert.deepEqual(covered.entries.map((entry) => entry.id), [1, 3].map((n) => serverRow(n).id), "its card left the list");
+    assert.equal(covered.entryCount, 2, "and the count is one lower");
+    const reads = journalReads(w).length;
+    w.setFocused(true);
+    for (let i = 0; i < 100 && journalReads(w).length === reads; i += 1) await settle(2);
+    assert.ok(journalReads(w).length > reads, "showing the screen again loads it again");
+    await settle(40);
+    assert.deepEqual(handle.result.current.entries.map((entry) => entry.id), [1, 3].map((n) => serverRow(n).id), "the deleted reflection does not come back");
+    assert.equal(handle.result.current.word, null);
+    handle.unmount();
+    assert.equal(listening, 0, "gone, the screen follows nothing");
+  });
+
+  await test("journal: the scheduler's calendar is followed while the screen is covered, for as long as the screen exists", async (w) => {
+    seedServer(w, 3);
+    const repo = w.use("@/data/journalRepository");
+    await repo.hydrateWordPool(new Date(BASE));
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 3 && s.affirmations.length === 3, "the server's page");
+    await repo.saveWordCalendar([calendarRow(w, 2, "afternoon", 7_200_000)], BASE);
+    w.calendarChanged();
+    await until(handle, (s) => s.status === "ready" && s.word !== null && s.word.entry.id === serverRow(2).id, "the first word");
+    w.setFocused(false);
+    await settle(20);
+    assert.equal(w.calendarListeners(), 1, "the screen goes on following the calendar while it is covered");
+    await repo.saveWordCalendar([calendarRow(w, 3, "evening", 3_600_000)], BASE);
+    w.calendarChanged();
+    const covered = await until(handle, (s) => s.status === "ready" && s.word !== null && s.word.entry.id === serverRow(3).id, "the new deal's word, read while the screen is covered");
+    assert.equal(covered.word.slot, "evening");
+    handle.unmount();
+    assert.equal(w.calendarListeners(), 0, "the screen stops following the calendar when it is gone");
+  });
+
+  await test("journal: a word that changed with the clock while the screen was covered shows the moment the screen is shown again, before the first page comes", async (w) => {
+    seedServer(w, 3);
+    const repo = w.use("@/data/journalRepository");
+    await repo.hydrateWordPool(new Date(BASE));
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 3 && s.affirmations.length === 3, "the server's page");
+    // The scheduler has dealt the reminder that last fired and the next one, ten minutes ahead.
+    await repo.saveWordCalendar([calendarRow(w, 2, "afternoon", 7_200_000), calendarRow(w, 3, "evening", -600_000)], BASE);
+    w.calendarChanged();
+    await until(handle, (s) => s.status === "ready" && s.word !== null && s.word.entry.id === serverRow(2).id, "the word that last fired");
+    w.setFocused(false);
+    await settle(20);
+    // The next reminder fires while the screen is covered: nothing is written and nothing is announced, the clock alone moves it.
+    clock.now = BASE + 20 * 60_000;
+    let release;
+    w.server.state.gate = new Promise((resolve) => (release = resolve));
+    w.setFocused(true);
+    const shown = await until(handle, (s) => s.status === "ready" && s.word !== null && s.word.entry.id === serverRow(3).id, "the word of the reminder that fired, shown while the first page is still on its way");
+    assert.equal(shown.word.slot, "evening");
+    release();
+    await settle(40);
+    assert.equal(handle.result.current.word.entry.id, serverRow(3).id, "the first page that follows keeps it");
+    handle.unmount();
+  });
+
+  // What stays tied to the screen being in front: the success tap (Reflection gives it when Journal is covered, so it is never felt
+  // twice) and the loads a finished reflection starts.
+  await test("journal: a reflection that finishes while the screen is covered gives no success tap and starts no load here", async (w) => {
+    seedServer(w, 2);
+    await w.startEngine();
+    const engine = w.use("@/services/syncEngine");
+    const handle = await render(w);
+    await until(handle, (s) => s.status === "ready" && s.entries.length === 2, "the entries");
+    w.setFocused(false);
+    await settle(20);
+    const reads = journalReads(w).length;
+    await w.use("@/db/outbox").enqueue(text("c-covered"));
+    const done = await engine.syncAndWait("c-covered", { waitMs: 60_000 });
+    assert.equal(done.kind, "ready", "the reflection finished");
+    await settle(40);
+    assert.deepEqual(w.hapticsCalls, [], "the tap is given by the screen that is in front");
+    assert.equal(journalReads(w).length, reads, "and the covered screen reads nothing from the server");
+    handle.unmount();
+  });
+
+  await test("today: the screen draws the calendar's word and falls back to the newest reflection's word for the slot", async () => {
+    const screen = fs.readFileSync(path.join(REPO, "src/screens/journal/JournalFeedScreen.tsx"), "utf8").replace(/\r\n/g, "\n");
+    assert.ok(screen.includes("const word = ready.word;"), "the card reads the hook's word");
+    assert.ok(screen.includes("word === null ? getAffirmationForSlot(ready.affirmations, ready.currentSlot) : null"), "no word: the old rule");
+    assert.ok(screen.includes("word?.slot ?? fallback?.slot"), "the label's slot is the word's own slot");
+    assert.ok(screen.includes("word !== null ? word.entry"), "the card shows when the word's own reflection was made");
+    assert.ok(screen.includes("getWordStack({ affirmation, entry: source, slot }, ready.entries, ready.words)"), "today's word lies on top of the deck");
+    assert.ok(screen.includes("entryId: card.affirmation.entryId, tab: \"affirmations\""), "a card opens the reflection its word is from");
+  }, { signIn: false });
+
+  await test("journal: the deck's words come behind the list: what the phone lacks is fetched in one request, and every finished reflection gets a card", async (w) => {
+    // Two reflections this week and eight older ones. The reminders' pool is the week's two topped up with the five newest older
+    // ones, read from the phone's cache, where each already has its words: so the one request for several reflections' words is
+    // the deck's own, for the two the phone has none of.
+    const older = (n) => (n <= 2 ? {} : { created_at: stamp(BASE - (n + 10) * 86_400_000), updated_at: stamp(BASE - (n + 10) * 86_400_000) });
+    seedServer(w, 10, older);
+    await seedCache(w, [1, 2, 3, 4, 5, 6, 7, 9].map((n) => modelOf(w, n, older(n))));
+    const handle = await render(w);
+    const ids = Array.from({ length: 10 }, (_, i) => serverRow(i + 1).id);
+    const state = await until(handle, (s) => s.status === "ready" && s.entries.length === 10 && ids.every((id) => (s.words[id] ?? []).length === 3), "every reflection's words");
+    const many = affirmationReads(w).filter((r) => (query(r).get("entry_id") ?? "").startsWith("in."));
+    assert.equal(many.length, 1, "one request for the words the phone lacks");
+    assert.equal(query(many[0]).get("entry_id"), `in.(${serverRow(8).id},${serverRow(10).id})`, "only those of the reflections it has none of");
+    assert.equal(query(many[0]).get("user_id"), "eq.user_a", "filtered by the user too");
+    const cards = w.use("@/data/selectors").getWordStack({ affirmation: state.affirmations[0], entry: state.entries[0], slot: "morning" }, state.entries, state.words);
+    assert.deepEqual(cards.map((card) => card.entry.id), ids, "today's word on top, then one card for each earlier reflection, newest first");
+    handle.unmount();
+  });
+
+  await test("journal: the deck goes on into each older page: its reflections' words are fetched in one request when the page comes", async (w) => {
+    seedServer(w, 10);
+    w.use("@/store/devStore").useDevStore.getState().setPageSize(5);
+    const handle = await render(w);
+    const first = Array.from({ length: 5 }, (_, i) => serverRow(i + 1).id);
+    let state = await until(handle, (s) => s.status === "ready" && s.entries.length === 5 && first.every((id) => s.words[id]?.length === 3), "the first page's words");
+    const many = () => affirmationReads(w).filter((r) => (query(r).get("entry_id") ?? "").startsWith("in."));
+    const before = many().length;
+    state.loadMore();
+    const second = Array.from({ length: 5 }, (_, i) => serverRow(i + 6).id);
+    state = await until(handle, (s) => s.status === "ready" && s.entries.length === 10 && second.every((id) => s.words[id]?.length === 3), "the second page's words");
+    const added = many().slice(before);
+    assert.equal(added.length, 1, "one request for the page");
+    assert.equal(query(added[0]).get("entry_id"), `in.(${second.join(",")})`, "for its reflections");
+    handle.unmount();
+  });
+
+  await test("journal: a heart on an earlier card of the deck saves that word and shows it saved on its card", async (w) => {
+    seedServer(w, 3);
+    const handle = await render(w);
+    const second = serverRow(2).id;
+    let state = await until(handle, (s) => s.status === "ready" && s.words[second]?.length === 3, "the earlier reflection's words");
+    const target = state.words[second][0];
+    state.toggleFavorite(target);
+    state = await until(handle, (s) => s.status === "ready" && s.words[second].find((a) => a.id === target.id)?.isFavorite === true, "the heart on its card");
+    await settle(20);
+    assert.equal(w.server.state.affirmations.find((a) => a.id === target.id).is_favorite, true, "the save is that word's own");
+    assert.ok(state.affirmations.every((a) => !a.isFavorite), "today's words are untouched");
+    assert.ok(state.words[serverRow(1).id].every((a) => !a.isFavorite));
+    const cards = w.use("@/data/selectors").getWordStack({ affirmation: state.affirmations[0], entry: state.entries[0], slot: "morning" }, state.entries, state.words);
+    assert.equal(cards[1].affirmation.id, target.id, "the card shows the word that was saved");
+    assert.equal(cards[1].affirmation.isFavorite, true);
+    handle.unmount();
+  });
+
+  await test("journal: offline the deck takes its words from the phone and asks the server for none", async (w) => {
+    seedServer(w, 3);
+    w.server.state.offline = true;
+    await seedCache(w, [modelOf(w, 1), modelOf(w, 2)]);
+    const handle = await render(w);
+    const state = await until(handle, (s) => s.status === "ready" && [1, 2].every((n) => s.words[serverRow(n).id]?.length === 3), "the phone's words");
+    await settle(30);
+    assert.equal(affirmationReads(w).length, 0, "no word is asked for while there is no answer");
+    assert.equal(Object.keys(state.words).length, 2);
+    handle.unmount();
+  });
+
+  await test("journal: the deck's words are all read again from the phone on a pull-to-refresh, and none the phone holds is asked for", async (w) => {
+    seedServer(w, 3);
+    const handle = await render(w);
+    const second = serverRow(2).id;
+    let state = await until(handle, (s) => s.status === "ready" && [1, 2, 3].every((n) => s.words[serverRow(n).id]?.length === 3), "every card's words");
+    await settle(20);
+    assert.ok(handle.result.current.words[second].every((a) => !a.isFavorite));
+    // The phone now holds a heart for an earlier card (a save that came back while the screen showed something else, say).
+    const mappers = w.use("@/data/mappers");
+    const saved = affirmationRows(second).map(mappers.toAffirmation).sort((a, b) => a.position - b.position);
+    saved[0] = { ...saved[0], isFavorite: true };
+    await w.use("@/db/cache").upsertAffirmations(second, saved);
+    const many = () => affirmationReads(w).filter((r) => (query(r).get("entry_id") ?? "").startsWith("in.")).length;
+    const before = many();
+    handle.result.current.refresh();
+    state = await until(handle, (s) => s.status === "ready" && s.words[second]?.[0]?.isFavorite === true, "the phone's heart on its card");
+    assert.equal(state.words[second][0].id, saved[0].id);
+    await settle(20);
+    assert.equal(many(), before, "the phone holds every reflection's words, so the server is asked for none");
+    handle.unmount();
+  });
+
+  await test("journal: a heart tapped while the deck's words are on their way stays on its card when the older read lands", async (w) => {
+    const older = (n) => (n <= 2 ? {} : { created_at: stamp(BASE - (n + 10) * 86_400_000), updated_at: stamp(BASE - (n + 10) * 86_400_000) });
+    seedServer(w, 10, older);
+    // The phone holds the newest reflection with no words: the deck reads them from the phone behind the page, as the server
+    // sent them before the heart.
+    await seedCache(w, [2, 3, 4, 5, 6, 7, 9].map((n) => modelOf(w, n, older(n))));
+    await w.use("@/db/cache").upsertEntry(modelOf(w, 1));
+    const newest = serverRow(1).id;
+    // The deck's request for the page's words, and the heart's save, are held until the check lets them go.
+    const fake = globalThis.fetch;
+    let heldRead = false;
+    let heldSave = false;
+    let releaseRead = () => {};
+    let releaseSave = () => {};
+    const readGate = new Promise((resolve) => (releaseRead = resolve));
+    const saveGate = new Promise((resolve) => (releaseSave = resolve));
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === "string" ? input : input.url);
+      if (url.pathname.endsWith("/daily_affirmations")) {
+        const method = init.method ?? "GET";
+        if (method === "GET" && !heldRead && (url.searchParams.get("entry_id") ?? "").includes(serverRow(8).id)) {
+          heldRead = true;
+          await readGate;
+        } else if (method === "PATCH" && !heldSave) {
+          heldSave = true;
+          await saveGate;
+        }
+      }
+      return fake(input, init);
+    };
+    const waitFor = async (check, label) => {
+      for (let i = 0; i < 200; i += 1) {
+        if (check()) return;
+        await settle(2);
+      }
+      assert.fail(`${label} never happened`);
+    };
+    try {
+      const handle = await render(w);
+      await waitFor(() => heldRead, "the deck's request for the page's words");
+      let state = await until(handle, (s) => s.status === "ready" && s.words[newest]?.length === 3, "the newest reflection's words");
+      const target = state.words[newest][0];
+      assert.equal(target.isFavorite, false);
+      state.toggleFavorite(target);
+      await waitFor(() => heldSave, "the heart's save");
+      await until(handle, (s) => s.words[newest][0].isFavorite === true, "the heart at once");
+      releaseRead();
+      await until(handle, (s) => [8, 10].every((n) => s.words[serverRow(n).id]?.length === 3), "the page's words");
+      await settle(20);
+      assert.equal(handle.result.current.words[newest][0].isFavorite, true, "the older read of the phone does not take the heart back");
+      releaseSave();
+      await settle(30);
+      assert.equal(handle.result.current.words[newest][0].isFavorite, true, "and the save keeps it");
+      assert.equal(w.server.state.affirmations.find((a) => a.id === target.id).is_favorite, true, "saved on the server");
+      handle.unmount();
+    } finally {
+      releaseRead();
+      releaseSave();
+      globalThis.fetch = fake;
+    }
+  });
+
+  await test("journal: with the mock data the deck's words are the mock rows, and nothing reaches the server", async (w) => {
+    w.use("@/store/devStore").useDevStore.getState().setDataSource("mock");
+    const before = w.server.state.requests.length;
+    const handle = await render(w);
+    await advance(3_000);
+    const state = await until(handle, (s) => s.status === "ready" && s.entries.length >= 20 && Object.keys(s.words).length > 0, "the mock entries and their words");
+    const finished = new Set(state.entries.filter((e) => e.status === "ready" && e.devotional !== null).map((e) => e.id));
+    for (const [entryId, list] of Object.entries(state.words)) {
+      assert.ok(finished.has(entryId), "only finished reflections have words");
+      assert.ok(list.length > 0 && list.every((a) => a.entryId === entryId));
+    }
+    assert.equal(w.server.state.requests.length, before, "the mock never reaches the server");
     handle.unmount();
   });
 
@@ -2128,7 +2485,7 @@ async function reflectionChecks() {
     for (const gone of ["stages", "ProcessingStage"]) lacks(home, gone, "Journal keeps no stages");
     const copyText = read("src/constants/copy.ts");
     lacks(copyText, "Reflecting on what you shared…", "the stage lines are gone");
-    has(copyText, 'body: "It’s in your Journal, where Review shows what you can do.",', "the refused view's words");
+    has(copyText, 'body: "It’s on your Today screen, where Review shows what you can do.",', "the refused view's words");
     has(copyText, 'body: "It’ll appear here as soon as it’s ready.",', "the preparing view no longer sends the person to Journal");
     has(copyText, 'note: "Your reflection is saved. It’ll open in a moment.",', "the overlay's note");
     has(copyText, 'sent: "Sent. Preparing your devotional, which opens in a moment.",', "the overlay's last announcement");
@@ -2372,6 +2729,412 @@ async function copyChecks() {
   }, { signIn: false });
 }
 
+// ================================================================== the Today tab (2026-11-16)
+async function todayChecks() {
+  await test("today: Listen again plays the newest finished reflection that has audio, and never a heavy moment", async (w) => {
+    const selectors = w.use("@/data/selectors");
+    const withAudio = (n, extra = {}) =>
+      modelOf(w, n, { devotional_audio_path: "user_a/devotionals/" + n + ".wav", devotional_duration_ms: 90_000, ...extra });
+    const heavy = withAudio(1, { is_crisis: true });
+    const noAudio = modelOf(w, 2);
+    const processing = modelOf(w, 3, { processing_status: "processing" });
+    const playable = withAudio(4);
+    const older = withAudio(5);
+    assert.equal(selectors.getListenAgainEntry([heavy, noAudio, processing, playable, older]).id, playable.id, "the newest one that can be played");
+    assert.equal(selectors.getListenAgainEntry([noAudio, processing]), null, "nothing to play");
+    assert.equal(selectors.getListenAgainEntry([heavy]), null, "a heavy moment is never put on the first screen");
+    assert.equal(selectors.getListenAgainEntry([]), null);
+    const input = [heavy, playable];
+    selectors.getListenAgainEntry(input);
+    assert.deepEqual(input, [heavy, playable], "the list is not changed");
+  }, { signIn: false });
+
+  await test("today: the words say what you get, in curly punctuation, with no promise, no time and no privacy claim", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    const { today } = copy;
+    assert.equal(copy.tabs.today, "Today");
+    assert.equal(today.hero.title, copy.newEntry.speak.title, "the hero asks what New Entry asks");
+    assert.deepEqual(Object.values(today.hero.gets), ["Scripture", "Spoken devotional", "Affirmations"]);
+    const hero = [today.hero.title, ...Object.values(today.hero.gets), today.hero.speak, today.hero.speakLabel, today.hero.speakHint, today.hero.write, today.hero.writeLabel, today.hero.writeHint];
+    const all = [...hero, today.listenAgain.eyebrow, today.listenAgain.hint, today.word.title, copy.tabs.today, copy.journal.empty.title, copy.journal.empty.body];
+    for (const value of all) {
+      assert.equal(typeof value, "string");
+      assert.ok(value.length > 2, value);
+      assert.ok(!value.includes("'") && !value.includes("..."), "typographic punctuation: " + value);
+    }
+    assert.ok(!/private|confidential|safe|secure|encrypt|guarantee|free|second|minute|will make|will heal|answer/i.test(hero.join(" ")), "the hero promises nothing and names no time");
+    assert.equal("action" in copy.journal.empty, false, "the empty list has nothing to press: the hero is the way in");
+    assert.equal(today.listenAgain.meta(null, "1:30"), "1:30");
+    assert.equal(today.listenAgain.meta("Psalm 4:8", "1:30"), "Psalm 4:8 · 1:30");
+    const label = today.listenAgain.label("Rest in Him", "1 minute 30 seconds");
+    assert.ok(label.includes("Rest in Him") && label.includes("1 minute 30 seconds") && label.startsWith("Listen again"));
+    // the week strip's sentence: the count of days stays in it, a quiet week is just "This week.", and nothing counts what was missed
+    assert.equal(today.week.label([], 0), "This week.");
+    assert.equal(today.week.label(["Monday", "Thursday"], 1), "This week. You reflected on Monday, Thursday. 1 day of reflection.");
+    assert.equal(today.week.label(["Sunday"], 5), "This week. You reflected on Sunday. 5 days of reflection.");
+    assert.equal(today.week.label([], 3), "This week. 3 days of reflection.");
+    for (const spoken of [today.week.label([], 0), today.week.label(["Monday"], 2)]) {
+      assert.ok(!/miss|break|lost|behind|streak|don.t|keep it up|only/i.test(spoken), "no guilt in the strip: " + spoken);
+    }
+    // the word card: its one button reads the headline and then the verse, and the two actions are named
+    assert.equal(today.word.openLabel("Peace surrounds your sleep", "“I will lie down.”"), "Peace surrounds your sleep. “I will lie down.”");
+    for (const value of [today.word.openHint, today.word.share, today.word.shareHint]) {
+      assert.ok(typeof value === "string" && value.length > 2 && !value.includes("'"), value);
+    }
+    // the deck of words (2026-11-20): an earlier card's heading names its day and its footer what it is tied to, the link goes
+    // back to today, and a screen reader's two actions turn the cards; nothing presses anyone to keep swiping
+    assert.equal(today.word.from("Tuesday, Nov 12"), "From Tuesday, Nov 12");
+    assert.equal(today.word.tiedTo("yesterday’s prayer"), "Tied to yesterday’s prayer");
+    assert.equal(today.word.today, "Today");
+    assert.equal(today.word.todayLabel, "Back to today’s word");
+    assert.equal(today.word.next, "Next reflection");
+    assert.equal(today.word.previous, "Previous reflection");
+    const deck = [
+      today.word.from("Tuesday, Nov 12"),
+      today.word.tiedTo("yesterday’s prayer"),
+      today.word.today,
+      today.word.todayLabel,
+      today.word.next,
+      today.word.previous,
+    ];
+    for (const value of deck) assert.ok(!value.includes("'") && !value.includes("..."), "typographic punctuation: " + value);
+    assert.ok(!/miss|streak|don.t|keep|only|left|last chance|hurry|unlock|more to see/i.test(deck.join(" ")), "the deck's words press no one");
+  }, { signIn: false });
+
+  await test("today: the deck lays today's word on top, then one word for each earlier finished reflection, newest first, a heavy moment like any other", async (w) => {
+    const selectors = w.use("@/data/selectors");
+    const mappers = w.use("@/data/mappers");
+    const withVerse = { verse_reference: "Psalm 4:8", verse_text: "In peace I will lie down and sleep." };
+    // An entry's words, out of order, with a verse only on the one at `verseAt` (if any).
+    const wordsOf = (n, verseAt = null) =>
+      affirmationRows(serverRow(n).id)
+        .map((row) => mappers.toAffirmation(row.position === verseAt ? { ...row, ...withVerse } : row))
+        .reverse();
+    const entries = [
+      modelOf(w, 1),
+      modelOf(w, 2),
+      modelOf(w, 3),
+      modelOf(w, 4, { processing_status: "processing" }),
+      modelOf(w, 5, { devotional_script: null }),
+      modelOf(w, 6, { is_crisis: true, help_line: "crisis" }),
+      modelOf(w, 7),
+    ];
+    const words = {
+      [serverRow(1).id]: wordsOf(1),
+      [serverRow(2).id]: wordsOf(2, 2),
+      [serverRow(3).id]: wordsOf(3),
+      [serverRow(4).id]: wordsOf(4),
+      [serverRow(5).id]: wordsOf(5),
+      [serverRow(6).id]: wordsOf(6),
+    };
+    const top = { affirmation: words[serverRow(1).id][2], entry: entries[0], slot: "morning" };
+    const before = JSON.stringify({ entries, words });
+    assert.deepEqual(selectors.getWordStack(null, entries, words), [], "no word, no deck");
+    const cards = selectors.getWordStack(top, entries, words);
+    assert.equal(cards[0], top, "today's word on top, as it is");
+    assert.deepEqual(cards.map((card) => card.entry.id), [1, 2, 3, 6].map((n) => serverRow(n).id), "the top's own reflection once; one still being made, one with no devotional and one with no words are left out; newest first");
+    assert.equal(cards[1].affirmation.position, 2, "a reflection's first word with a verse");
+    assert.equal(cards[2].affirmation.position, 1, "or, with no verse, its first word");
+    assert.equal(cards[3].entry.isCrisis, true, "a heavy moment is a card like any other");
+    assert.deepEqual(Object.keys(cards[3]).sort(), ["affirmation", "entry", "slot"], "with nothing that labels it");
+    assert.ok(cards.slice(1).every((card) => card.slot === null), "only today's word was delivered at a slot");
+    assert.equal(JSON.stringify({ entries, words }), before, "nothing it was given is changed");
+  }, { signIn: false });
+
+  await test("today: the week strip is the last seven days in the profile's time zone, oldest first, today last, and only a finished reflection marks a day", async (w) => {
+    const selectors = w.use("@/data/selectors");
+    const at = (n, iso, extra = {}) => modelOf(w, n, { created_at: iso, updated_at: iso, ...extra });
+    const now = new Date("2026-11-16T12:00:00.000Z"); // a Monday in UTC
+    const dots = selectors.getWeekDots([], now, "UTC");
+    assert.equal(dots.length, 7);
+    assert.deepEqual(dots.map((dot) => dot.key), ["2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13", "2026-11-14", "2026-11-15", "2026-11-16"]);
+    assert.deepEqual(dots.map((dot) => dot.letter), ["T", "W", "T", "F", "S", "S", "M"]);
+    assert.deepEqual(dots.map((dot) => dot.name), ["Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Monday"]);
+    assert.deepEqual(dots.map((dot) => dot.today), [false, false, false, false, false, false, true]);
+    assert.ok(dots.every((dot) => dot.reflected === false), "an empty week marks nothing");
+
+    // a finished reflection marks its day; unfinished ones, a reflection with no devotional (a heavy moment's words only) and
+    // other days do not
+    const entries = [
+      at(1, "2026-11-16T08:00:00.000Z"),
+      at(2, "2026-11-14T08:00:00.000Z"),
+      at(3, "2026-11-13T08:00:00.000Z", { processing_status: "processing" }),
+      at(4, "2026-11-12T08:00:00.000Z", { devotional_script: null }),
+      at(5, "2026-11-01T08:00:00.000Z"),
+    ];
+    const marked = selectors.getWeekDots(entries, now, "UTC").filter((dot) => dot.reflected).map((dot) => dot.key);
+    assert.deepEqual(marked, ["2026-11-14", "2026-11-16"]);
+    assert.equal(selectors.getWeekDots(entries, now, "UTC").at(-1).reflected && selectors.getWeekDots(entries, now, "UTC").at(-1).today, true, "today can be both");
+
+    // the day is the day on the profile's clock: 23:30 UTC on Sunday is already Monday in Auckland and still Sunday in Pago Pago
+    const late = [at(6, "2026-11-15T23:30:00.000Z")];
+    assert.deepEqual(selectors.getWeekDots(late, now, "Pacific/Auckland").filter((dot) => dot.reflected).map((dot) => dot.key), ["2026-11-16"]);
+    assert.deepEqual(selectors.getWeekDots(late, now, "Pacific/Pago_Pago").filter((dot) => dot.reflected).map((dot) => dot.key), ["2026-11-15"]);
+    // and "today" follows that clock too
+    assert.equal(selectors.getWeekDots([], new Date("2026-11-16T23:30:00.000Z"), "Pacific/Auckland").at(-1).key, "2026-11-17");
+    assert.equal(selectors.getWeekDots([], new Date("2026-11-16T00:30:00.000Z"), "Pacific/Pago_Pago").at(-1).key, "2026-11-15");
+
+    // a month and a year boundary
+    const edge = selectors.getWeekDots([], new Date("2027-01-02T12:00:00.000Z"), "UTC");
+    assert.deepEqual(edge.map((dot) => dot.key), ["2026-12-27", "2026-12-28", "2026-12-29", "2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02"]);
+    // a zone Intl does not know never throws: the phone's own is used
+    assert.equal(selectors.getWeekDots([], now, "Not/AZone").length, 7);
+    // the list is not changed
+    const copyOf = JSON.stringify(entries);
+    selectors.getWeekDots(entries, now, "UTC");
+    assert.equal(JSON.stringify(entries), copyOf);
+  }, { signIn: false });
+
+  await test("today: the screens' source: a new person gets the hero, everyone else the deck of words and the capture bar, the week replaces the tag, no dock, a heavy moment never on the first screen", async () => {
+    const read = (file) => fs.readFileSync(path.join(REPO, file), "utf8").replace(/\r\n/g, "\n");
+    const has = (haystack, needle, message) => assert.ok(haystack.includes(needle), message + ": " + needle);
+    const lacks = (haystack, needle, message) => assert.ok(!haystack.includes(needle), message + ": " + needle);
+    const feed = read("src/screens/journal/JournalFeedScreen.tsx");
+    has(feed, "const header = (", "the header is always drawn, so the way in does not wait for the data");
+    lacks(feed, "const header = ready ?", "the way in is not hidden while the data loads");
+    has(feed, "ListHeaderComponent={header}", "the list takes the header as it is");
+    has(feed, "const wayIn = hasNoEntries ? (", "the hero only for a person with no reflection; the compact bar for everyone else, loading included");
+    has(feed, "<TodayHero", "the hero");
+    has(feed, "<CaptureBar", "the capture bar");
+    assert.equal(feed.split('onSpeak={() => openNewEntry("speak")}').length - 1, 2, "both open a spoken reflection");
+    assert.equal(feed.split('onWrite={() => openNewEntry("write")}').length - 1, 2, "and a written one");
+    assert.equal(feed.split("active={focused}").length - 1, 2, "the orb moves only while the tab is in front");
+    has(feed, "if (opening.current) {", "a second tap is blocked until New Entry has taken focus");
+    has(feed, "const paddingBottom = barClearance + BOTTOM_AIR;", "the content ends above the bar alone");
+    lacks(feed, "useTabScreenBottomPadding()", "no room is kept for a dock that is not there");
+    has(feed, "getListenAgainEntry(ready.entries)", "the row takes the selector's entry, a heavy moment never");
+    has(feed, "onPlay={playEntry}", "a Journal card's play pill and the row share one function");
+    has(feed, "onPlay={() => playEntry(listenEntry)}", "the row plays its entry");
+    has(feed, "<ScreenHeader title={copy.tabs.today} />", "the header names the tab Today");
+    lacks(feed, "copy.journal.empty.action", "the empty list has no button of its own");
+    lacks(feed, "images.logoMark", "and no logo circle");
+    // the week strip replaced the tag in the greeting
+    has(feed, "getWeekDots(ready.entries, ready.now, ready.profile.timezone)", "the strip reads the profile's clock");
+    has(feed, "streakDays={ready.reflectionDays}", "the run of days stays, in the spoken sentence");
+    has(feed, "const weekDots = getWeekDots(ready.entries, ready.now, ready.profile.timezone);", "the week is worked out once");
+    has(feed, "{weekDots.some((dot) => dot.reflected) ? (", "the strip is drawn only once one of its seven days is filled: a blank week is not shown");
+    lacks(feed, "{hasNoEntries ? null : (", "it no longer shows seven blank rings to a person who has not reflected this week");
+    lacks(feed, "<WeekStrip dots={getWeekDots(", "the strip takes the week already worked out and does not work it out a second time");
+    // one rhythm: 24 between the sections, 16 between the greeting and the strip
+    has(feed, '<View className="gap-6 pb-6">', "24 between the header's sections");
+    has(feed, '<View className="gap-4">\n        <GreetingBlock', "16 between the greeting and the strip");
+    lacks(feed, "copy.journal.reflectionDays(", "the tag is gone");
+    lacks(feed, "reflectionDays={ready.reflectionDays}", "the greeting no longer takes the count");
+    lacks(feed, "chip--terracotta", "and no chip");
+    // the deck of words (2026-11-20): today's word on top, one card for each earlier reflection behind it
+    lacks(feed, "<AffirmationCard", "the word is a card on the hour's scene now");
+    lacks(feed, "<WordCard", "the screen draws the deck, and the deck draws its cards");
+    has(feed, "<WordStack", "the deck");
+    has(feed, "const cards = getWordStack({ affirmation, entry: source, slot }, ready.entries, ready.words);", "today's word on top, the earlier reflections' words behind it");
+    has(feed, "scenes={deckScenes(\n            cards.map((card) => card.entry),\n            getPlayerSceneForHour(ready.now.getHours()),\n          )}", "each card's scene interprets its reflection, the hour's only for a card with none");
+    lacks(feed, "scene={getPlayerSceneForHour(", "no card is left on the hour's scene alone");
+    has(feed, "pageWidth={width}", "one page for each window width");
+    has(feed, "side={sidePadding}", "and the list's side padding around each card");
+    has(feed, 'onOpen={(card) => navigation.navigate("Reflection", { entryId: card.affirmation.entryId, tab: "affirmations" })}', "a card opens its own reflection on its Affirmations tab");
+    has(feed, "onToggleFavorite={(card) => ready.toggleFavorite(card.affirmation)}", "a card's heart saves its own word");
+    has(feed, "onNearEnd={ready.loadMore}", "the deck goes on into the next page of reflections");
+    has(feed, "copy.today.word.tiedTo(getAffirmationSource(card.entry.createdAt, ready.now))", "an earlier card with no verse says what it is tied to");
+    // Since 2026-11-20 Share sends the card as a picture (supabase/tests/share-card); the verse as text is what it falls back to.
+    has(feed, "shareSheet.share(copy.reflection.share.message(quoteVerse(verse.text), verse.reference))", "the text share sends the verse the way Reflection does");
+    has(feed, "<ShareSheet text={shareSheet.text} whatsApp={shareSheet.whatsApp} onClose={shareSheet.close} />", "through the share panel");
+    has(feed, "    if (!verse) return;\n", "and the screen shares nothing without a verse");
+    has(feed, "const asPicture = card.entry !== null && !card.entry.isCrisis;", "a heavy moment's word, and a word whose reflection is not held, keep the text share");
+    has(feed, "    if (wordShare.preparing) return;\n    setSharingId(affirmation.id);", "one picture at a time, and the spinner on the card it is for");
+    has(feed, "sharing={wordShare.preparing ? sharingId : null}", "only while a picture is being made");
+    has(feed, "saveFailed={ready.favoriteFailed}", "a heart that could not be saved says so");
+    has(feed, "if (ready && !hasNoEntries) {", "and only a person with a reflection has one");
+    const order = ["{greeting}", "<OfflineBanner", "<NoticeBanner", "{wordStack}", "{wayIn}", "<AnalyticsConsentCard", "<ListenAgainCard", "<SectionRow"].map((marker) => {
+      const at = feed.indexOf("      " + marker) >= 0 ? feed.indexOf("      " + marker) : feed.indexOf(marker);
+      assert.ok(at >= 0, "the header holds " + marker);
+      return at;
+    });
+    assert.deepEqual([...order].sort((a, b) => a - b), order, "greeting and week, status, the word, the way in, consent, listen again, the history");
+
+    const hero = read("src/components/today/TodayHero.tsx");
+    has(hero, "const ORB = 104;", "a large target");
+    has(hero, 'size={ORB} state="listening" agentTrack={null} micTrack={null}', "the living orb, at rest, listening");
+    has(hero, "{active ? <VoiceOrb", "drawn only while the tab is in front");
+    has(hero, "const MIC = 34;", "with a white microphone on it");
+    has(hero, 'color="white"', "white");
+    has(hero, "accessibilityLabel={hero.speakLabel}", "the orb is named");
+    assert.equal(hero.split('accessibilityRole="button"').length - 1, 2, "two buttons: the orb and the written way");
+    has(hero, "bg-white/25", "the strip's circles are brighter");
+    has(hero, "text-white/95", "and so are its labels");
+    has(hero, "size={20}", "with larger icons");
+    lacks(hero, "bg-white\"", "no white disc under the microphone any more");
+    lacks(hero, "usePulse", "and no flat halo: the orb breathes by itself");
+    lacks(hero, "HALO", "no halo");
+    has(hero, "importantForAccessibility=\"no\"", "the caption under the orb is for the eye, the button already says it");
+
+    const bar = read("src/components/today/CaptureBar.tsx");
+    has(bar, "const ORB = 56;", "the same orb, smaller: 56, the size of the dock's pair");
+    has(bar, "min-h-[80px]", "80 tall: 12 of padding round a 56 orb");
+    has(bar, 'size={ORB} state="listening" agentTrack={null} micTrack={null}', "living");
+    has(bar, "{active ? <VoiceOrb", "drawn only while the tab is in front");
+    has(bar, "{hero.title}", "the question New Entry asks");
+    assert.equal(bar.split('accessibilityRole="button"').length - 1, 2, "two buttons: speak and write, as separate controls");
+    has(bar, "accessibilityLabel={hero.writeLabel}", "the pen is named");
+    // the pen's circle and the orb are one size from one number, and their glyphs are one size from one number
+    lacks(bar, "size-11", "the pen is no longer a smaller circle than the orb");
+    assert.equal(bar.split("style={styles.orbArea}").length - 1, 2, "the orb's area and the pen's circle share one style, so they cannot differ");
+    has(bar, "orbArea: { width: ORB, height: ORB }", "that style is the orb's size");
+    has(bar, "const GLYPH = 26;", "one glyph size");
+    assert.equal(bar.split("size={GLYPH}").length - 1, 2, "the microphone and the pen are drawn at that size");
+
+    const strip = read("src/components/today/WeekStrip.tsx");
+    has(strip, "accessible accessibilityLabel={copy.today.week.label(reflected, streakDays)}", "one sentence for a screen reader");
+    has(strip, 'importantForAccessibility="no-hide-descendants"', "the circles are skipped");
+    lacks(strip, "<Pressable", "nothing to press");
+    has(strip, "size-[28px]", "28 circles");
+    lacks(strip, "size-[30px]", "not the 30 of the first pass");
+    has(strip, 'name={icons.sun} size={14} color="white"', "a small white sun on a reflection day");
+    has(strip, "border-rose bg-rose/20", "today's empty ring is rose over a faint rose fill");
+    has(strip, 'border-plum/40"', "other empty days are a clear ring: plum at 40%, not the petal that vanished on the linen");
+    lacks(strip, "border-petal", "no near-invisible ring");
+    for (const gone of ["crisis", "text-rosewood", "bg-terracotta", "missed", "console.", "haptics"]) lacks(strip, gone, "no red, no word for a day without a reflection");
+
+    const word = read("src/components/today/WordCard.tsx");
+    // The card's measures live in utils/wordCardLayout.ts since 2026-11-20, where the picture of the card reads them too.
+    const wordLayout = read("src/utils/wordCardLayout.ts");
+    has(word, "paddingTop: WORD_CARD.sceneRoom, paddingHorizontal: WORD_CARD.sidePadding", "the scene stays clear at the top");
+    has(wordLayout, "  sceneRoom: 112,", "by 112");
+    has(word, "minHeight: WORD_CARD.minHeight,", "the card has a least height, so more of the painting shows");
+    has(wordLayout, "  minHeight: 280,", "280");
+    has(word, "colors={gradients.wordFade.colors}", "the text sits on the fade");
+    // The fade's inner stops are pinned to points (2026-11-21), so a tall card's headline stays on the dense part of it.
+    has(word, "locations={wordFadeLocations(height, gradients.wordFade.locations)}", "worked out against the scenes, pinned to points");
+    has(word, "onLayout={(event) => setHeight(event.nativeEvent.layout.height)}", "the card's own height pins the fade");
+    has(word, "useState<number>(WORD_CARD.minHeight)", "a card not laid out yet has the theme's own stops");
+    lacks(word, "locations={gradients.wordFade.locations}", "never the theme's stops stretched over a tall card");
+    has(word, "text-[24px] leading-[30px] text-white", "a white headline");
+    has(word, "word.openLabel(affirmation.headline, detail)", "the card reads as one button");
+    assert.equal(word.split("<Pressable").length - 1, 3, "the card, Share and the heart");
+    assert.ok(word.indexOf("</Pressable>") < word.indexOf("{onShare ? ("), "Share and the heart are beside the card's button, never inside it");
+    has(word, "onShare: (() => void) | null;", "only a verse is shared");
+    has(word, "accessibilityLabel={word.share}", "Share is named");
+    has(word, "favorite ? copy.journal.affirmation.unsave : copy.journal.affirmation.save", "the heart says what it does");
+    lacks(word, "accessibilityLiveRegion", "the line about a heart that could not be saved is the deck's, under it, once");
+    has(word, "width: 44, height: 44", "44 targets");
+    // on the top card a screen reader turns the cards with two actions, and only when there is a card that way
+    has(word, '...(onNext ? [{ name: "next", label: word.next }] : []),', "Next reflection");
+    has(word, '...(onPrevious ? [{ name: "previous", label: word.previous }] : []),', "Previous reflection");
+    has(word, "accessibilityActions={turns.length > 0 ? turns : undefined}", "no actions where there is nowhere to turn");
+    has(word, 'if (event.nativeEvent.actionName === "next") onNext?.();', "the action turns the card");
+
+    // the deck: three cards show (the top one whole, two peeking out on the right, smaller and dimmed), and a swipe turns one
+    // card at a time through the whole history, on the phone's own paging scroll view and the native driver
+    const stack = read("src/components/today/WordStack.tsx");
+    has(stack, "const STACK_MIN_HEIGHT = 300;", "the deck's least height");
+    has(stack, "if (measured > height + 0.5) setHeight(measured);", "which only grows, so nothing under it jumps while the cards turn");
+    has(stack, "const measured = event.nativeEvent.layout.height - ROOM_TOP - ROOM_BOTTOM;", "the card's height, without the shadow's room");
+    has(stack, "minHeight: height + ROOM_TOP + ROOM_BOTTOM,\n            paddingTop: ROOM_TOP,\n            paddingBottom: ROOM_BOTTOM,", "the scroll view holds that height, with room for the shadow");
+    // the shadow's room fits the gaps that are already there (12 under the heading, 24 above the capture bar), and the margins
+    // give it back, so nothing on the screen moves
+    has(stack, "const ROOM_TOP = 12;\nconst ROOM_BOTTOM = 24;", "room for the shadow: 12 above the cards, 24 under them");
+    has(stack, "marginHorizontal: -side, marginTop: -ROOM_TOP, marginBottom: -ROOM_BOTTOM", "given back by negative margins");
+    has(stack, 'className="flex-row items-center gap-3" style={styles.heading}', "the heading row over the room");
+    has(stack, "heading: { zIndex: 1 },", "so the link back to today keeps its touch area");
+    has(feed, "{wordStack}\n      {wayIn}", "the capture bar right under the deck, 24 below it");
+    has(feed, '<View className="gap-6 pb-6">', "in the header's 24 gaps");
+    has(stack, "const PEEK = 7;\nconst PEEK_NARROW = 5;\nconst NARROW = 360;", "each card behind peeks 7 out, 5 on a narrow phone");
+    has(stack, "const SCALES = [1, 0.95, 0.9, 0.85] as const;", "each a little smaller");
+    has(stack, "const VEILS = [0, 0.6, 0.8, 0.8] as const;", "and fading toward the page: each strip one even tone, no painting streaks");
+    // the wash is what the deck's motion uses: the top card clear, the cards behind washed by depth, the fourth unseen
+    has(stack, "outputRange: [VEILS[2], VEILS[1], VEILS[0]],", "a card clears to its painting as it comes to the front");
+    has(stack, "veil: VEILS[k],", "and under Reduce Motion each card keeps its depth's wash");
+    has(stack, "backgroundColor: colors.linen }", "a linen wash, never a darker shade");
+    lacks(stack, "colors.plumDeep", "no plum shade over the cards behind (dark on the top card's dark edge)");
+    // each card casts a soft shadow from its own layer, with its corners, so it moves, scales and fades with its card
+    has(stack, "lift: { borderRadius: radii.hero, ...shadows.deckCard },", "each card's shadow, with the card's corners");
+    has(stack, "styles.card,\n        styles.lift,", "on the card's own moving layer, not inside the clipped card");
+    has(stack, "(pageWidth - 2 * side) * ((1 - SCALES[1]) / 2) + (pageWidth < NARROW ? PEEK_NARROW : PEEK)", "the step makes up for the smaller size");
+    has(stack, "// Cards held around the top one.\nconst BEFORE = 1;\nconst AFTER = 3;", "a few cards are mounted, the others are empty pages");
+    has(stack, "{depth >= -BEFORE && depth <= AFTER ? (", "around the top one");
+    has(stack, "    opacity: scrollX.interpolate({ inputRange: [at(3), at(2)], outputRange: [0, 1], extrapolate: \"clamp\" }),", "three show: a fourth fades in only as the top one leaves");
+    has(stack, "horizontal\n          pagingEnabled", "the phone's own paging");
+    has(stack, "scrollEnabled={cards.length > 1}", "a deck of one does not move");
+    has(stack, "removeClippedSubviews={false}", "the cards behind are drawn outside their pages");
+    has(stack, "scrollEventThrottle={16}", "every frame");
+    has(stack, "Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: true })", "the scroll drives the cards on the native driver");
+    has(stack, "transform: [{ translateX: motion.translateX }, { scale: motion.scale }],", "translate before scale");
+    has(stack, "zIndex: cards.length - position", "the top card over the ones behind it");
+    has(stack, 'pointerEvents={top ? "auto" : "none"}', "only the top card is touched");
+    has(stack, "accessibilityElementsHidden={!top}", "and only the top card is read, on iOS");
+    has(stack, 'importantForAccessibility={top ? "auto" : "no-hide-descendants"}', "and on Android");
+    has(stack, "onNext={top ? rest.onNext : null}", "the top card's actions turn the deck");
+    has(stack, "onNext={position < last ? () => goTo(position + 1, !reduced) : null}", "to the next card, when there is one");
+    has(stack, "onPrevious={position > 0 ? () => goTo(position - 1, !reduced) : null}", "and back");
+    has(stack, "at === 0 || entry === null ? copy.today.word.title : copy.today.word.from(formatResetDay(entry.createdAt))", "the heading names an earlier card's day");
+    has(stack, 'accessibilityRole="header"\n          accessibilityLiveRegion="polite"', "Android hears the heading change");
+    has(stack, "useAnnounce(announcement);", "iOS hears the heading and the headline");
+    has(stack, "{current > 0 ? (", "the link back to today, away from today's word only");
+    has(stack, "accessibilityLabel={copy.today.word.todayLabel}", "named");
+    has(stack, "onPress={() => goTo(0, current <= SLIDE_BACK_MAX && !reduced)}", "it slides back from close, and jumps from far");
+    has(stack, "const SLIDE_BACK_MAX = 3;", "three cards at most");
+    has(stack, "if (target > 0 && target >= cards.length - NEAR_END) actions.onNearEnd();", "close to the end the next page is asked for");
+    has(stack, "const NEAR_END = 3;", "three cards from the end");
+    has(stack, "if (page === null || Math.abs(page - Math.round(page)) > 0.01) return;", "a drag that stops between pages waits for its momentum");
+    has(stack, "scrollRef.current?.scrollTo({ x: current * pageWidth, animated: false });", "the scroll view follows a deck that got shorter");
+    // the cards are given the deck's position again whenever they change: on iOS a newly placed card is tied to the scroll
+    // only at the next scroll event, so after a reflection was made the cards behind stayed hidden until a pan (2026-11-20)
+    has(stack, 'const cardKey = cards.map((card) => card.affirmation.id).join(" ");', "the cards, by their words");
+    has(stack, "    scrollX.setValue(shownAt.current * pageWidth);\n  }, [cardKey, current, pageWidth, side, reduced, scrollX]);", "set the deck's position whenever the cards, the top card or the layout change");
+    has(stack, "    if (moving.current) {\n      resyncLater.current = true;\n      return;\n    }", "never while a finger or a slide moves the deck");
+    has(stack, "onScrollBeginDrag={onDragStart}", "a drag is a move");
+    has(stack, "if (animated && target !== shownAt.current) moving.current = true;", "and so is a slide the deck asks for");
+    has(stack, "    shownAt.current = Math.round(page);\n    stopped();\n    settle(Math.round(page));\n  };\n  const onScrollEnd", "a drag that stops on a page ends the move");
+    has(stack, "    shownAt.current = Math.round(page);\n    stopped();\n    settle(Math.round(page));\n  };\n\n  const onLayout", "and so does the end of a slide");
+    has(stack, "    moving.current = false;\n    if (!resyncLater.current) return;\n    resyncLater.current = false;\n    scrollX.setValue(shownAt.current * pageWidth);", "a resync that waited is done once the deck stops, at its page");
+    {
+      const resync = stack.indexOf("const cardKey = ");
+      const follow = stack.indexOf("scrollRef.current?.scrollTo({ x: current * pageWidth, animated: false });");
+      assert.ok(follow > 0 && resync > follow, "the resync runs after the scroll view is brought to the top card's page");
+    }
+    has(stack, "const current = Math.min(index, Math.max(last, 0));", "a card deleted under the top one does not leave the deck empty");
+    has(stack, "scene={scenes[position] ?? scenes[0] ?? 0}", "each card takes the scene chosen for its own reflection");
+    has(stack, "? () => actions.onShare(item, scenes[position] ?? scenes[0] ?? 0)", "and Share draws the card with that same painting");
+    lacks(stack, "% playerScenes.length", "the cards no longer cycle through the scenes in turn");
+    has(stack, "item.affirmation.verse\n                        ? () =>", "only a verse is shared");
+    has(stack, "sharing={sharing === item.affirmation.id}", "the spinner on the card being shared, not on all of them");
+    has(stack, "  if (reduced) {", "under Reduce Motion");
+    has(stack, "      scale: SCALES[k],", "the cards behind do not grow");
+    has(stack, "      opacity: k >= 3 ? 0 : 1,", "and none fades");
+    has(stack, '<Text accessibilityLiveRegion="polite" className="text-body-sm text-rosewood">\n          {copy.journal.affirmation.saveError}', "a heart that could not be saved says so, under the deck");
+    for (const gone of ["react-native-gesture-handler", "react-native-reanimated", "PanResponder", "listener:", "useNativeDriver: false"]) {
+      lacks(stack, gone, "the deck is the scroll view and the native driver, with no gesture library and no JavaScript in each frame");
+    }
+    for (const [name, source] of [["TodayHero", hero], ["CaptureBar", bar], ["WeekStrip", strip], ["WordCard", word], ["WordStack", stack]]) {
+      for (const gone of ["haptics", "console.", "track(", "from \"@/services/analytics\""]) lacks(source, gone, name + " makes no haptic, event or log line");
+    }
+    const theme = read("src/constants/theme.ts");
+    has(theme, "locations: [0, 0.26, 0.4, 0.54, 1],", "the fade's stops");
+    has(
+      theme,
+      "deckCard: {\n    boxShadow: [\n      { offsetX: 0, offsetY: 6, blurRadius: 16, color: `${colors.ink}24` },\n      { offsetX: 0, offsetY: 1, blurRadius: 4, color: `${colors.ink}38` },\n    ],\n  },",
+      "the deck's shadow: soft (ink 14%, 6 down, blur 16) over a contact edge (ink 22%, 1 down, blur 4), inside its room (10 above, 22 under)",
+    );
+
+    const card = read("src/components/today/ListenAgainCard.tsx");
+    assert.equal(card.split("<Pressable").length - 1, 1, "the row is one button");
+    has(card, "formatDurationSpoken(durationMs)", "a screen reader hears the length in words");
+    lacks(card, "haptics", "the row makes no haptic");
+    // a quiet row: 60 tall, a 40 play circle, a hairline border and no shadow, so it stays under the word card and the capture bar
+    has(card, "card min-h-[60px] flex-row items-center gap-3 px-3 py-2.5", "a 60 dp row");
+    has(card, "size-10 items-center justify-center rounded-full bg-plum", "with a 40 play circle");
+    lacks(card, "shadows.card", "no shadow");
+    lacks(card, "p-3.5", "not the 80 dp card");
+    assert.equal(card.split("numberOfLines={1}").length - 1, 2, "the title and the line under it are each one line");
+
+    const dock = read("src/components/GracehushTabBar.tsx");
+    has(dock, 'TABS_WITHOUT_DOCK: readonly (keyof MainTabParamList)[] = ["Journal", "Scholar"]', "the dock is hidden where a screen has its own way in");
+    has(dock, "label: copy.tabs.today", "the first tab is called Today");
+    has(dock, 'ios: "sun.max"', "with a sun");
+    const tabs = read("src/navigation/MainTabs.tsx");
+    has(tabs, 'initialRouteName="Journal"', "the route keeps its name");
+    has(tabs, '<Tab.Screen name="Journal" component={JournalFeedScreen} />', "so navigation and analytics keep working");
+  });
+}
+
 (async () => {
   await gatewayChecks();
   await queryChecks();
@@ -2384,6 +3147,7 @@ async function copyChecks() {
   await timestampChecks();
   await selectorChecks();
   await copyChecks();
+  await todayChecks();
   finished = true;
   console.log(`${passed} checks passed${failures.length > 0 ? `, ${failures.length} FAILED` : ""}`);
   if (failures.length > 0) {

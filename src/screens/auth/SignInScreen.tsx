@@ -36,13 +36,18 @@ const icons = {
   mail: { android: "mail", ios: "envelope" },
 } as const;
 
-// The cover of the sign-in that ends onboarding (2026-11-01): the scene takes what the lockup, the title, the three
-// buttons and the privacy card leave (about 260 dp on an 812-tall phone), never less than SCENE_MIN. Its bottom fade is
-// shorter than the Welcome's because the scene is, so a face sits in the clear band between the two. The top fade follows
-// the status bar, because the progress row sits just under it: at a fixed 90 the pills fell to 1.16:1 over the darkest
-// scene on the newest iPhones, and this keeps them at 4.02:1 or better on every iPhone.
+// The cover of every Sign In (the one that ends onboarding since 2026-11-01, the returning one since 2026-11-21): the
+// scene takes what the lockup, the title, the three buttons and the privacy card leave (about 260 dp on an 812-tall
+// phone), never less than SCENE_MIN. Its bottom fade is shorter than the Welcome's because the scene is, so a face sits in
+// the clear band between the two. The top fade follows the status bar, because a row sits just under it: at a fixed 90
+// the progress pills fell to 1.16:1 over the darkest scene on the newest iPhones, and inset + 72 keeps them at 4.02:1 or
+// better on every iPhone. The returning row's "Welcome back" sits in the middle of the scene, which is darker there than
+// at the right edge where "Final step" sits, so its fade runs 12 points further: worked out from the picture files over
+// the four scenes on nine iPhones, the label's average contrast then stays at 5.08:1 or better ("Final step" at
+// inset + 72: 5.00:1) and the chevron's at 4.71:1, with the faces still clear of the fade.
 const SCENE_MIN = 240;
 const SCENE_FADE_BELOW_INSET = 72;
+const RETURN_FADE_BELOW_INSET = 84;
 const SCENE_FADE_BOTTOM = 100;
 // The lockup overlaps the scene's bottom fade by this much, as on the Welcome.
 const LOCKUP_OVERLAP = 48;
@@ -139,51 +144,23 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
   const busy = pending !== null;
 
   return (
-    // The cover runs under the status bar (the progress row applies the top inset itself); the returning variant keeps the
-    // safe area on every side, as before.
-    <SafeAreaView edges={fresh ? ["bottom"] : ["top", "bottom"]} style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={fresh ? styles.coverContent : styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* The cover (2026-11-01): the last page of the story the Welcome began. The scene is full width and under the
-            status bar, the progress row sits over its top fade (below), and the lockup overlaps its bottom fade. */}
-        {fresh ? (
-          <WelcomeScenes
-            sources={scenes}
-            minHeight={SCENE_MIN}
-            active={focused}
-            fadeTop={insets.top + SCENE_FADE_BELOW_INSET}
-            fadeBottom={SCENE_FADE_BOTTOM}
-          />
-        ) : null}
-        <View className="screen__content" style={fresh ? styles.coverBody : undefined}>
-          {fresh ? null : (
-            <View className="h-14 flex-row items-center justify-between">
-              {navigation.canGoBack() ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={back}
-                  onPress={() => navigation.goBack()}
-                  style={({ pressed }) => pressed && styles.pressed}
-                >
-                  <View className="size-11 items-center justify-center">
-                    <Icon name={icons.back} size={24} color={colors.ink} />
-                  </View>
-                </Pressable>
-              ) : (
-                <View className="size-11" />
-              )}
-              <Text className="text-label-md tracking-[0.3px] text-mauve">{welcomeBack}</Text>
-              <View className="size-11" />
-            </View>
-          )}
-
+    // Every Sign In is a cover that runs under the status bar: the row over its scene applies the top inset itself.
+    <SafeAreaView edges={["bottom"]} style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.coverContent} showsVerticalScrollIndicator={false}>
+        {/* The cover (2026-11-01): the last page of the story the Welcome began, and since 2026-11-21 what a person who
+            signed out or already has an account meets too, so every way into the app looks the same. The scene is full
+            width and under the status bar, a row sits over its top fade (below), and the lockup overlaps its bottom fade. */}
+        <WelcomeScenes
+          sources={scenes}
+          minHeight={SCENE_MIN}
+          active={focused}
+          fadeTop={insets.top + (fresh ? SCENE_FADE_BELOW_INSET : RETURN_FADE_BELOW_INSET)}
+          fadeBottom={SCENE_FADE_BOTTOM}
+        />
+        <View className="screen__content" style={styles.coverBody}>
           <View className="items-center">
             {/* The same lockup as the Welcome step and the tab header (2026-11-01), in place of the blush tile. */}
-            <View className={fresh ? undefined : "mt-2"}>
-              <Wordmark />
-            </View>
+            <Wordmark />
             <Text className="mt-5 text-center text-title tracking-[-0.7px] text-ink">
               {fresh ? freshCopy.title : title}
             </Text>
@@ -197,7 +174,7 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
             )}
           </View>
 
-          <View className={fresh ? "mt-6 gap-3" : "mt-8 gap-3"}>
+          <View className="mt-6 gap-3">
             {/* The native Apple flow is iOS-only; App Store Guideline 4.8 applies to iOS only. */}
             {Platform.OS === "ios" ? (
               <AuthButton
@@ -246,8 +223,10 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
         </View>
       </ScrollView>
 
-      {/* On the cover the progress row sits over the scene's top fade, under the status bar, with every pill filled: the
-          flow goes on, it does not start over. It takes no space of its own and no touches. */}
+      {/* A row sits over the scene's top fade, under the status bar, and takes no space of its own. At the end of
+          onboarding it is the progress row with every pill filled: the flow goes on, it does not start over, and it takes
+          no touches. For anyone else it is the back chevron, when there is a screen to go back to, and "Welcome back" in
+          the progress row's on-image style; only the chevron takes touches, so a drag anywhere else reaches the page. */}
       {fresh ? (
         <View pointerEvents="none" className="screen__content" style={[styles.coverHeader, { paddingTop: insets.top }]}>
           <StepProgress
@@ -258,7 +237,34 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
             tone="onImage"
           />
         </View>
-      ) : null}
+      ) : (
+        <View pointerEvents="box-none" className="screen__content" style={[styles.coverHeader, { paddingTop: insets.top }]}>
+          <View pointerEvents="box-none" className="h-11 flex-row items-center justify-between">
+            {navigation.canGoBack() ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={back}
+                onPress={() => navigation.goBack()}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <View className="size-11 items-center justify-center">
+                  <Icon name={icons.back} size={24} color={colors.ink} />
+                </View>
+              </Pressable>
+            ) : (
+              <View pointerEvents="none" className="size-11" />
+            )}
+            <Text
+              pointerEvents="none"
+              accessibilityLabel={welcomeBack}
+              className="font-dm-semibold text-[12px] uppercase leading-[16px] tracking-[1.2px] text-plum-deep"
+            >
+              {welcomeBack}
+            </Text>
+            <View pointerEvents="none" className="size-11" />
+          </View>
+        </View>
+      )}
 
       <EmailSheet key={emailSheetKey} visible={emailOpen} onClose={() => setEmailOpen(false)} />
     </SafeAreaView>
@@ -267,7 +273,6 @@ export function SignInScreen({ navigation }: SignInScreenProps) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.linen },
-  content: { paddingBottom: 24 },
   // The cover's content fills the viewport, so the scene (flex 1) takes what the text and the buttons leave.
   coverContent: { flexGrow: 1, paddingBottom: 24 },
   coverBody: { marginTop: -LOCKUP_OVERLAP },

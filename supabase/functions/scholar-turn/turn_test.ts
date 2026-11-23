@@ -91,7 +91,6 @@ const SCHOLAR_ENV: Record<string, string> = {
 const SCHOLAR_NAMES = [
   ...Object.keys(SCHOLAR_ENV),
   "SCHOLAR_SCREEN_FIRST",
-  "SCHOLAR_FREE_DAILY_BUDGET",
   "GEMINI_THINKING_LEVEL",
 ];
 
@@ -101,13 +100,15 @@ function flow(work: (world: World) => Promise<void>) {
     const savedEnv = new Map(SCHOLAR_NAMES.map((name) => [name, Deno.env.get(name)]));
     for (const [name, value] of Object.entries(SCHOLAR_ENV)) Deno.env.set(name, value);
     Deno.env.delete("SCHOLAR_SCREEN_FIRST");
-    Deno.env.delete("SCHOLAR_FREE_DAILY_BUDGET");
     const savedTiming = { ...timing };
     const savedScholar = structuredClone(scholarTiming);
     const savedVoice = structuredClone(voiceTiming);
     timing.retryBackoffMs = 1;
     // A look for the answer every 20 ms, so a test that waits is short.
     voiceTiming.joinPollMs = 20;
+    // Scholar is Pro's (2026-11-18): a typed message beside a talk's turn is answered for a Pro account, so that is the default
+    // here; a test about another plan sets it.
+    setPlan(world, "pro");
     try {
       await work(world);
       await world.settleBackground();
@@ -193,10 +194,10 @@ const inputOf = (call: Recorded) => {
   const input = (call.json as Row).input;
   return typeof input === "string" ? input : JSON.stringify(input);
 };
-const utcToday = () => new Date().toISOString().slice(0, 10);
 const counted = (world: World, counter: string) =>
   world.rpcCalls.filter((call) => call.name === "bump_scholar_safety" && call.args.p_counter === counter).length;
 const usageBumps = (world: World) => world.rpcCalls.filter((call) => call.name === "bump_scholar_usage");
+const spends = (world: World) => world.rpcCalls.filter((call) => call.name === "spend_scholar_credits");
 const textBlock = (body: { blocks: { type: string }[] }) =>
   (body.blocks.find((block) => block.type === "text") as { text: string } | undefined)?.text;
 const messageRow = (world: World, id = MESSAGE) => world.messages.find((row) => row.id === id);
@@ -382,14 +383,21 @@ Deno.test(
 // ---- 2. The limits of a typed message do not apply ---------------------------------------------------------------------------
 
 Deno.test(
-  "a talk's turn skips the rate limit, the day's allowance, the free budget and the plan re-read, and counts nothing",
+  "a talk's turn skips the rate limit, the credits and the plan re-read, and spends nothing",
   flow(async (world) => {
-    // A state in which a typed message is refused three times over: thirty messages in the last ten minutes, the day's forty
-    // used, and a paid plan whose end date has passed (a typed message would ask RevenueCat).
+    // A state in which a typed message is refused three times over: thirty messages in the last ten minutes, the credits used
+    // up, and a paid plan whose end date has passed (a typed message would ask RevenueCat).
     seedConversation(world, { id: SECOND });
     const recent = new Date(Date.now() - 60_000).toISOString();
     for (let index = 0; index < 30; index += 1) seedMessage(world, { conversation_id: SECOND, created_at: recent });
-    world.scholarUsage.push({ user_id: USER, day: utcToday(), messages: 40, listens: 0 });
+    const credits: Row = {
+      user_id: USER,
+      used: 400,
+      allowance: 400,
+      renews_at: new Date(Date.now() + 3_600_000).toISOString(),
+      updated_at: world.now(),
+    };
+    world.scholarCredits.push(credits);
     setPlan(world, "pro", "2026-01-01T00:00:00.000Z");
 
     world.geminiQueue.push(geminiOk(answerOutput()));
@@ -401,25 +409,21 @@ Deno.test(
     assertEquals(spoken.context.billing, null);
     assertEquals(world.revenuecatCalls.length, 0);
     assertEquals(usageBumps(world).length, 0);
-    assertEquals(counted(world, "free_answered"), 0);
-    assertEquals(world.scholarUsage[0].messages, 40);
+    assertEquals(spends(world).length, 0);
+    assertEquals(credits.used, 400);
     // The anonymous count of screened messages still runs: it holds no person.
     assertEquals(counted(world, "screened"), 1);
 
     // A replayed turn carries no usage either.
     assertEquals(answered(await run()).usage, null);
 
-    // The free budget (an account on the free plan cannot start a talk; the engine does not ask again).
-    Deno.env.set("SCHOLAR_FREE_DAILY_BUDGET", "1");
-    const day = world.safetyDaily.find((row) => row.day === utcToday());
-    assert(day !== undefined, "the first turn's screening was counted for the day");
-    (day as Row).free_answered = 5;
+    // An account the plan does not include (it cannot start a talk; the engine does not ask again) spends nothing either.
     setPlan(world, "free");
     world.geminiQueue.push(geminiOk(answerOutput()));
     const free = await run({ messageId: NEXT, words: "And what does the next verse mean?" });
     assertEquals(answered(free).usage, null);
-    assertEquals(counted(world, "free_answered"), 0);
     assertEquals(usageBumps(world).length, 0);
+    assertEquals(spends(world).length, 0);
 
     // The same state refuses a typed message, at its first limit.
     failed(await typedRun({ messageId: THIRD }), "RATE_LIMITED");

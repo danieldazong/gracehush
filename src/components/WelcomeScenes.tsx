@@ -18,15 +18,18 @@ type WelcomeScenesProps = {
   // viewport), and never less than this; on a short phone, or at large text, the cover scrolls instead.
   minHeight: number;
   active: boolean; // false while the screen is not in front: the motion stops
-  // The linen fade over the top edge, where the status bar and the progress row sit. It has no default: each screen works it out
-  // from the status bar's height, because a fixed one leaves the row unreadable over a dark scene on some iPhones.
+  // The linen fade over the top edge, where the status bar and the screen's row sit (the progress, "Welcome back", or the
+  // Paywall's close and restore). It has no default: each screen works it out from the status bar's height, because a fixed
+  // one leaves the row unreadable over a dark scene on some iPhones.
   fadeTop: number;
   fadeBottom?: number; // and under the bottom edge, BOTTOM_FADE by default
 };
 
-// The full-bleed scene at the top of the Welcome step and of the Sign In that ends onboarding (2026-11-01): the painted
-// "moment" a new person recognises themselves in, edge to edge and under the status bar, dissolving into linen above
-// and below. Decorative: the headline under it carries the meaning. Reduce Motion shows the first scene, still.
+// The full-bleed scene at the top of the Welcome step (2026-11-01), of every Sign In (the one that ends onboarding since
+// 2026-11-01, the one a person meets after a sign-out or "I already have an account" since 2026-11-21) and of the Paywall
+// (2026-11-15): the painted "moment" a person recognises themselves in, edge to edge and under the status bar, dissolving
+// into linen above and below. Decorative: the headline under it carries the meaning. Reduce Motion shows the first scene,
+// still.
 export function WelcomeScenes({
   sources,
   minHeight,

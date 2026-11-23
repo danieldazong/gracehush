@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   SCHOLAR_BREAK_NUDGE_TURNS,
-  SCHOLAR_LOW_REMAINING,
+  SCHOLAR_CREDITS_LOW_PERCENT,
+  SCHOLAR_CREDITS_TICK_MS,
+  SCHOLAR_LEFT_NOTICE_FROM,
   SCHOLAR_MAX_MESSAGE_LENGTH,
   SCHOLAR_MIN_SPOKEN_MS,
   SCHOLAR_PENDING_MS,
@@ -17,12 +19,16 @@ import {
   findConversationForEntry,
   getConversation,
   getTurnInFlight,
+  readScholarCredits,
+  readScholarFree,
   sendTurn,
+  type FreeConversation,
   type TurnResult,
 } from "@/data/scholarRepository";
 import type { RootStackParamList } from "@/navigation/types";
 import { hasAiPermission } from "@/services/aiPermission";
 import { track } from "@/services/analytics";
+import { useEntitlementStore } from "@/store/entitlementStore";
 import type { HomeEntry, ScholarConversation, ScholarInput, ScholarMessage, ScholarTurnRequest, ScholarUsage } from "@/types";
 import {
   answerCount,
@@ -37,17 +43,24 @@ import {
 // one with an id made on the phone), sends one message at a time, shows the person's message at once and the answer when it comes,
 // and keeps every failure on the screen with a way to try again under the same id (the server answers a message once). Nothing is
 // sent before the AI permission or while the phone is known to be offline. No limit number lives here: the server's 402 and its
-// `usage` say when a limit is reached and how many free messages are left.
+// `usage` say whether Scholar is part of the plan (2026-11-18: Pro alone; a trial is told the day it opens) and what is left of
+// a Pro account's credits, and when they renew. Since 2026-11-20 an account that is not Pro has one free conversation: the
+// server answers its first messages there, each answer's `usage` says how many are left, and the message it refuses after them
+// (or in any other conversation) is kept and, for a free account, opens the plans by itself (`paywallAsk`).
 
 type Params = RootStackParamList["Conversation"];
 type Request = Omit<ScholarTurnRequest, "region">;
 
 export type ConversationPhase = "loading" | "ready" | "missing" | "error";
 
+// "plan": a free account's message was saved and Scholar is part of Pro. "opens": a trial's tap on Listen or Talk, and
+// "opensSaved" its message: Scholar opens when the plan begins (`opensAt`). A Pro account with no credit left has no notice of
+// its own: `creditsOut` says it, from the credits themselves, and goes when they renew.
 export type ConversationNotice =
   | "offline"
-  | "freeLimit"
-  | "proLimit"
+  | "plan"
+  | "opens"
+  | "opensSaved"
   | "rateLimited"
   | "resting"
   | "adultsOnly"
@@ -129,6 +142,21 @@ function hasReadyAnswer(messages: ScholarMessage[]): boolean {
   return messages.some((message) => message.role === "scholar" && message.status === "ready");
 }
 
+// A Pro account's credits while their window runs: what is left, as a share of the allowance (rounded up, so 1 credit left is
+// never 0%), and the minutes until they renew (rounded up). Null with no credits usage, and once the window has ended.
+type Credits = { remaining: number; percent: number; renewsInMinutes: number };
+
+function creditsAt(usage: ScholarUsage | null, now: number): Credits | null {
+  if (usage?.kind !== "credits" || usage.resetsAt === null || usage.limit <= 0) return null;
+  const renews = Date.parse(usage.resetsAt);
+  if (!Number.isFinite(renews) || renews <= now) return null;
+  return {
+    remaining: usage.remaining,
+    percent: Math.ceil((Math.max(0, usage.remaining) * 100) / usage.limit),
+    renewsInMinutes: Math.max(1, Math.ceil((renews - now) / 60_000)),
+  };
+}
+
 export function useConversation(params: Params) {
   const source = startedSource(params);
   // A new conversation has nothing to read: it is ready at once (the load still runs, for the starter).
@@ -141,6 +169,10 @@ export function useConversation(params: Params) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<ConversationNotice | null>(null);
   const [usage, setUsage] = useState<ScholarUsage | null>(null);
+  // When Scholar opens for a trial (2026-11-18): the day its plan begins, for the "opens" notices.
+  const [opensAt, setOpensAt] = useState<string | null>(null);
+  // The clock the credits' countdown reads: set with every new `usage` and moved while a window runs, never read in render.
+  const [clock, setClock] = useState(() => Date.now());
   const [entry, setEntry] = useState<HomeEntry | null>(null);
   const [breakNote, setBreakNote] = useState(false);
   // The answers that arrived during this visit: they fade in, and "Scholar answered" is announced for each one.
@@ -148,6 +180,13 @@ export function useConversation(params: Params) {
   // The person's own messages sent during this visit: they fade in (2026-11-15). Kept apart from `fresh` on purpose: that one
   // also drives "Scholar answered", which a message that got no answer must not announce.
   const [sentIds, setSentIds] = useState<string[]>([]);
+  // The free conversation of an account that is not Pro (2026-11-20): which conversation it is and how many of its messages were
+  // answered, or null while none is claimed; undefined until it is read (or when it cannot be). It decides only whether Listen
+  // and Talk are offered here; the server checks every message, listen and talk itself.
+  const [free, setFree] = useState<FreeConversation | null | undefined>(undefined);
+  // Grows each time a free account's message is refused because its free conversation is used: the screen opens the plans once
+  // for each (the message is kept, and Try again answers it once the plan includes Scholar).
+  const [paywallAsk, setPaywallAsk] = useState(0);
 
   // The latest values for the callbacks below, written only in callbacks.
   const list = useRef<ScholarMessage[]>([]);
@@ -177,6 +216,12 @@ export function useConversation(params: Params) {
   const finishTurn = useCallback(() => {
     busy.current = false;
     setSendingId(null);
+  }, []);
+
+  // New numbers from the server, and the clock their countdown starts from.
+  const takeUsage = useCallback((next: ScholarUsage | null) => {
+    setUsage(next);
+    setClock(Date.now());
   }, []);
 
   // Reads the conversation every few seconds while a message it already has is still being answered (sent on another visit, or
@@ -218,12 +263,14 @@ export function useConversation(params: Params) {
       if (!mounted.current) return;
       if (result.ok) {
         finishTurn();
-        const { conversation: saved, message, answer, usage: dayUsage } = result.data;
+        const { conversation: saved, message, answer, usage: answerUsage } = result.data;
         idRef.current = saved.id;
         entryIdRef.current = saved.entryId;
         setConversationId(saved.id);
         setConversation(saved);
-        setUsage(dayUsage);
+        takeUsage(answerUsage);
+        // A free message was answered here: this is the free conversation, with that many of its messages used.
+        if (answerUsage?.kind === "free") setFree({ conversationId: saved.id, messages: answerUsage.used });
         const rest = list.current.filter(
           (item) => item.id !== request.messageId && item.id !== message.id && item.id !== answer.id,
         );
@@ -268,8 +315,19 @@ export function useConversation(params: Params) {
       }
       mark(request.messageId, code);
       if (code === "LIMIT_REACHED") {
-        if (result.usage !== null) setUsage(result.usage);
-        setNotice(result.usage?.kind === "pro_day" ? "proLimit" : "freeLimit");
+        // A Pro account with no credit left: `creditsOut` says when they renew. Otherwise Scholar is not part of the plan beyond
+        // the free conversation: a trial is told the day it opens (the server's `resetsAt`), and a free account sees the plans,
+        // which open by themselves (2026-11-20). The message is kept either way.
+        if (result.usage?.kind === "credits") {
+          takeUsage(result.usage);
+          setNotice(null);
+        } else if (result.usage !== null && result.usage.resetsAt !== null) {
+          setOpensAt(result.usage.resetsAt);
+          setNotice("opensSaved");
+        } else {
+          setNotice("plan");
+          setPaywallAsk((asks) => asks + 1);
+        }
       } else if (code === "RATE_LIMITED") {
         setNotice("rateLimited");
       } else if (code === "SCHOLAR_UNAVAILABLE") {
@@ -282,7 +340,7 @@ export function useConversation(params: Params) {
         setNotice("offline");
       }
     },
-    [finishTurn, mark, put, source, watchPending],
+    [finishTurn, mark, put, source, takeUsage, watchPending],
   );
 
   const start = useCallback(
@@ -401,6 +459,21 @@ export function useConversation(params: Params) {
     setConversationId(id);
     setConversation(found);
     setPhase("ready");
+    // A Pro account's credits, for the line above the composer before an answer here brings its own (2026-11-18). Only for an
+    // account RevenueCat calls Pro: any other has no credits, and its first message says what its plan is.
+    if (useEntitlementStore.getState().tier === "pro") {
+      void readScholarCredits().then((read) => {
+        if (stale() || read === null) return;
+        setUsage((current) => current ?? read);
+        setClock(Date.now());
+      });
+    } else {
+      // Any other account (or one RevenueCat has not answered for yet): its free conversation, so Listen and Talk are offered here
+      // only when this is it (2026-11-20). An answer that comes first wins over this read.
+      void readScholarFree().then((read) => {
+        if (!stale()) setFree((current) => (current !== undefined ? current : read));
+      });
+    }
     if (entryId !== null) {
       void getEntry(entryId)
         .then((value) => {
@@ -448,6 +521,26 @@ export function useConversation(params: Params) {
     };
   }, [load]);
 
+  // The credits' countdown moves while their window runs; nothing ticks otherwise. Once they have renewed, the old window's numbers
+  // go, and with them the notice and the line drawn from them.
+  const renewsAt = usage?.kind === "credits" ? usage.resetsAt : null;
+  useEffect(() => {
+    if (renewsAt === null) return;
+    const ends = Date.parse(renewsAt);
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (!(ends > now)) setUsage(null);
+    }, SCHOLAR_CREDITS_TICK_MS);
+    return () => clearInterval(timer);
+  }, [renewsAt]);
+
+  // A trial's tap on Listen or Talk (2026-11-18): Scholar opens when its plan begins, said above the composer with no paywall.
+  const noteOpens = useCallback((endsAt: string | null) => {
+    setOpensAt(endsAt);
+    setNotice("opens");
+  }, []);
+
   const reload = useCallback(() => {
     setPhase("loading");
     void load();
@@ -475,12 +568,24 @@ export function useConversation(params: Params) {
   }, []);
 
   // A conversation opened from a reflection that was a heavy moment starts heavy on the server, so it is heavy here from the
-  // start, before its first answer: no chips, the help button, no heads-up and no event.
+  // start, before its first answer: no chips, the help button, no credits line and no event.
   const heavy = isHeavyConversation(conversation, messages) || entry?.isCrisis === true;
   const rows = buildConversationRows(messages, sendingId);
-  // The heads-up: a free account with one or two messages left today, never in a heavy conversation.
-  const headsUp =
-    !heavy && usage?.kind === "free_day" && usage.remaining > 0 && usage.remaining <= SCHOLAR_LOW_REMAINING
+  // A Pro account's credits, never in a heavy conversation (which is never counted): with none left, the minutes until they
+  // renew; with SCHOLAR_CREDITS_LOW_PERCENT or less left, that share and the minutes.
+  const credits = heavy ? null : creditsAt(usage, clock);
+  const creditsOut = credits !== null && credits.remaining <= 0 ? credits.renewsInMinutes : null;
+  const creditsLow =
+    credits !== null && credits.remaining > 0 && credits.percent <= SCHOLAR_CREDITS_LOW_PERCENT
+      ? { percent: credits.percent, renewsInMinutes: credits.renewsInMinutes }
+      : null;
+  // The free conversation (2026-11-20). `freeHere`: this is it. `freeOpen`: it is this one or none is claimed yet, so a talk may
+  // start here. `freeKnown`: the read has answered (until then the server decides). `freeLeft`: how many of its free messages are
+  // left, shown from SCHOLAR_LEFT_NOTICE_FROM down, never in a heavy conversation (which is never counted).
+  const freeHere = free != null && free.conversationId === conversationId;
+  const freeOpen = free === null || freeHere;
+  const freeLeft =
+    !heavy && usage?.kind === "free" && usage.remaining >= 1 && usage.remaining <= SCHOLAR_LEFT_NOTICE_FROM
       ? usage.remaining
       : null;
 
@@ -495,7 +600,14 @@ export function useConversation(params: Params) {
     help: newestHelpLine(messages, entry?.isCrisis === true ? entry.helpLine : null),
     sending: sendingId !== null,
     notice,
-    headsUp,
+    opensAt,
+    creditsOut,
+    creditsLow,
+    freeHere,
+    freeOpen,
+    freeKnown: free !== undefined,
+    freeLeft,
+    paywallAsk,
     breakNote: breakNote && !heavy,
     fresh,
     sentIds,
@@ -503,6 +615,8 @@ export function useConversation(params: Params) {
     sendSpoken,
     retry,
     sendStarter,
+    noteOpens,
+    noteUsage: takeUsage,
     dismissNotice: () => setNotice(null),
     reload,
     refreshAfterTalk,

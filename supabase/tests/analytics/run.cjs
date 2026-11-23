@@ -177,10 +177,11 @@ function setPostHogEnv(token, host) {
   else process.env.EXPO_PUBLIC_POSTHOG_HOST = host;
 }
 
-// `consent` is what the onboarding store has saved on the phone (version 3), or undefined for a fresh install. A token or
-// host given as undefined means the variable is not set (a destructuring default would put the test token back).
+// `consent` is what the onboarding store has saved on the phone (version 3), or undefined for a fresh install. `saved` adds
+// fields to that save and makes it version 5 (the acquisition answer, 2026-11-20). A token or host given as undefined means
+// the variable is not set (a destructuring default would put the test token back).
 function world(options = {}) {
-  const { consent } = options;
+  const { consent, saved } = options;
   const token = "token" in options ? options.token : TOKEN;
   const host = "host" in options ? options.host : US;
   setPostHogEnv(token, host);
@@ -215,8 +216,9 @@ function world(options = {}) {
               remindersSyncedAt: null,
               remindersDirty: false,
               analyticsConsent: consent,
+              ...(saved ?? {}),
             },
-            version: 3,
+            version: saved === undefined ? 3 : 5,
           }),
         };
   const env = makeEnv({
@@ -270,6 +272,7 @@ const ALLOWED_COMMON = [
   "tier",
   "app_version",
   "build",
+  "acquisition_source",
   "$process_person_profile",
   "$geoip_disable",
 ];
@@ -471,17 +474,40 @@ async function policyChecks() {
         tier: "enterprise",
         app_version: "1.0.0-beta.1",
         build: "staging",
+        acquisition_source: "a friend at work",
         $lib: "x".repeat(65),
       }),
     );
     assert.equal(out.properties.$process_person_profile, false);
     assert.equal(out.properties.$geoip_disable, true);
-    for (const key of ["$is_identified", "tier", "app_version", "build", "$lib"]) assert.equal(key in out.properties, false, key);
-    const good = sanitizeEvent(message("restore_completed", { found: false, tier: "trial", app_version: "1.0", build: "development" }));
+    for (const key of ["$is_identified", "tier", "app_version", "build", "acquisition_source", "$lib"]) {
+      assert.equal(key in out.properties, false, key);
+    }
+    const good = sanitizeEvent(
+      message("restore_completed", { found: false, tier: "trial", app_version: "1.0", build: "development", acquisition_source: "church" }),
+    );
+    assert.equal(good.properties.acquisition_source, "church");
     assert.equal(good.properties.tier, "trial");
     assert.equal(good.properties.app_version, "1.0");
     assert.equal(good.properties.build, "development");
     assert.equal(good.properties.$is_identified, false);
+  });
+
+  await test("policy: acquisition_source_answered keeps one of the ten answers and nothing else; any other value drops it", async () => {
+    const { sanitizeEvent } = world().policy();
+    const answers = ["tiktok", "instagram", "facebook", "youtube", "google", "app_store", "friend_family", "church", "other", "skipped"];
+    for (const source of answers) {
+      const out = sanitizeEvent(message("acquisition_source_answered", { source }));
+      assert.notEqual(out, null, source);
+      assert.equal(out.properties.source, source);
+    }
+    for (const source of ["TikTok", "twitter", "my pastor Dan", "", null, 3, undefined, "__proto__"]) {
+      assert.equal(sanitizeEvent(message("acquisition_source_answered", { source })), null, String(source));
+    }
+    const extra = sanitizeEvent(message("acquisition_source_answered", { source: "church", name: "Grace Fellowship" }));
+    assert.equal(extra.properties.name, undefined, "a word beside the answer is dropped");
+    const app = world().env.use("@/constants/app");
+    assert.deepEqual([...app.ACQUISITION_SOURCES], answers, "the list the store and the filter share");
   });
 
   await test("policy: screenToTrack and toEntryFailedCode", async () => {
@@ -546,7 +572,7 @@ async function envChecks() {
 
 // ================================================================== the stored answer
 async function storeChecks() {
-  await test("store: a fresh install is unset; the answer is saved as version 4; reset clears it", async () => {
+  await test("store: a fresh install is unset; the answer is saved as version 5; reset clears it", async () => {
     const w = world({ token: undefined, host: undefined });
     const store = w.onboarding();
     await store.persist.rehydrate();
@@ -555,8 +581,10 @@ async function storeChecks() {
     assert.equal(store.getState().analyticsConsent, "granted");
     await settle();
     const saved = JSON.parse(w.env.storage.get("gracehush.onboarding"));
-    assert.equal(saved.version, 4);
+    assert.equal(saved.version, 5);
     assert.equal(saved.state.analyticsConsent, "granted");
+    assert.equal(saved.state.acquisitionSource, null);
+    assert.equal(saved.state.acquisitionSent, false);
     store.getState().setAnalyticsConsent("declined");
     assert.equal(store.getState().analyticsConsent, "declined");
     store.getState().resetOnboarding();
@@ -780,6 +808,156 @@ async function resetChecks() {
   });
 }
 
+// ================================================================== how they heard about GraceHush (2026-11-20)
+async function sourceChecks() {
+  const answered = (w) => w.captures().filter((call) => call[1] === "acquisition_source_answered").map((call) => call[2]);
+
+  await test("source: the store keeps one of the ten answers, reads anything else as no answer, and the reset clears both fields", async () => {
+    const w = world({ token: undefined, host: undefined });
+    const store = w.onboarding();
+    await store.persist.rehydrate();
+    assert.equal(store.getState().acquisitionSource, null);
+    assert.equal(store.getState().acquisitionSent, false);
+    store.getState().setAcquisitionSource("church");
+    store.getState().markAcquisitionSent();
+    await settle();
+    const saved = JSON.parse(w.env.storage.get("gracehush.onboarding"));
+    assert.equal(saved.state.acquisitionSource, "church");
+    assert.equal(saved.state.acquisitionSent, true);
+    store.getState().resetOnboarding();
+    assert.equal(store.getState().acquisitionSource, null);
+    assert.equal(store.getState().acquisitionSent, false);
+    for (const [value, expected] of [
+      ["tiktok", "tiktok"],
+      ["skipped", "skipped"],
+      ["TikTok", null],
+      ["my pastor", null],
+      [true, null],
+      ["__proto__", null],
+    ]) {
+      const b = world({ token: undefined, host: undefined, consent: "unset", saved: { acquisitionSource: value, acquisitionSent: "yes" } });
+      const storeB = b.onboarding();
+      await storeB.persist.rehydrate();
+      assert.equal(storeB.getState().acquisitionSource, expected, String(value));
+      assert.equal(storeB.getState().acquisitionSent, false, "only true counts as sent");
+    }
+    const v4 = world({ token: undefined, host: undefined, consent: "granted" });
+    const old = v4.onboarding();
+    await old.persist.rehydrate();
+    assert.equal(old.getState().acquisitionSource, null, "an older save was never asked");
+    assert.equal(old.getState().analyticsConsent, "granted", "and keeps what it had");
+  });
+
+  await test("source: an answer given while sharing is unset or off sends nothing and makes no client", async () => {
+    for (const consent of ["unset", "declined"]) {
+      const w = world({ consent });
+      await w.start();
+      w.onboarding().getState().setAcquisitionSource("tiktok");
+      await settle();
+      assert.equal(w.posthog.instances.length, 0, consent);
+      assert.equal(w.onboarding().getState().acquisitionSent, false, consent);
+    }
+  });
+
+  await test("source: an answer that waited is sent once when the person says yes, with the super property on it", async () => {
+    const w = world({ consent: "unset" });
+    await w.start();
+    w.onboarding().getState().setAcquisitionSource("friend_family");
+    await settle();
+    w.onboarding().getState().setAnalyticsConsent("granted");
+    await settle();
+    assert.deepEqual(answered(w), [{ source: "friend_family" }]);
+    assert.equal(w.client().superProperties.acquisition_source, "friend_family");
+    const event = w.client().queue.find((queued) => queued.event === "acquisition_source_answered");
+    assert.equal(event.properties.source, "friend_family");
+    assert.equal(event.properties.acquisition_source, "friend_family", "registered before the event was captured");
+    assert.equal(w.onboarding().getState().acquisitionSent, true);
+    // Off and on again does not send it twice.
+    w.onboarding().getState().setAnalyticsConsent("declined");
+    await settle();
+    w.onboarding().getState().setAnalyticsConsent("granted");
+    await settle();
+    assert.equal(answered(w).length, 1);
+  });
+
+  await test("source: with sharing on, an answer is sent at once and once; a changed answer moves the super property and is not sent again", async () => {
+    const w = world({ consent: "granted" });
+    await w.start();
+    assert.equal("acquisition_source" in w.client().superProperties, false, "no answer, no super property");
+    w.onboarding().getState().setAcquisitionSource("youtube");
+    await settle();
+    assert.deepEqual(answered(w), [{ source: "youtube" }]);
+    assert.equal(w.client().superProperties.acquisition_source, "youtube");
+    w.onboarding().getState().setAcquisitionSource("church");
+    await settle();
+    assert.equal(answered(w).length, 1, "the first answer is the one sent");
+    assert.equal(w.client().superProperties.acquisition_source, "church", "the super property follows the answer");
+  });
+
+  await test("source: Skip is an answer too, sent as skipped", async () => {
+    const w = world({ consent: "granted" });
+    await w.start();
+    w.onboarding().getState().setAcquisitionSource("skipped");
+    await settle();
+    assert.deepEqual(answered(w), [{ source: "skipped" }]);
+    assert.equal(w.client().superProperties.acquisition_source, "skipped");
+  });
+
+  await test("source: an answer saved as sent is never sent again at the next launch, and the super property still rides along", async () => {
+    const w = world({ consent: "granted", saved: { acquisitionSource: "instagram", acquisitionSent: true } });
+    await w.start();
+    assert.equal(answered(w).length, 0);
+    assert.equal(w.client().superProperties.acquisition_source, "instagram");
+    const unsent = world({ consent: "granted", saved: { acquisitionSource: "google", acquisitionSent: false } });
+    await unsent.start();
+    assert.deepEqual(answered(unsent), [{ source: "google" }], "one saved and not sent goes at the next launch");
+  });
+
+  await test("source: the sign-out reset keeps the answer on every later event and does not send it again", async () => {
+    const w = world({ consent: "granted" });
+    await w.start();
+    w.onboarding().getState().setAcquisitionSource("facebook");
+    await settle();
+    await w.analytics().resetAnalytics();
+    await settle();
+    assert.equal(w.client().superProperties.acquisition_source, "facebook");
+    assert.equal(answered(w).length, 1);
+  });
+
+  await test("source: an answer given after sharing was turned off waits, with no super property, until sharing is on again", async () => {
+    const w = world({ consent: "granted" });
+    await w.start();
+    w.onboarding().getState().setAnalyticsConsent("declined");
+    await settle();
+    w.onboarding().getState().setAcquisitionSource("google");
+    await settle();
+    assert.equal(answered(w).length, 0, "nothing while sharing is off");
+    assert.equal("acquisition_source" in w.client().superProperties, false, "not registered while sharing is off");
+    assert.equal(w.onboarding().getState().acquisitionSent, false);
+    w.onboarding().getState().setAnalyticsConsent("granted");
+    await settle();
+    assert.deepEqual(answered(w), [{ source: "google" }]);
+    assert.equal(w.client().superProperties.acquisition_source, "google");
+  });
+
+  await test("source: the developer reset clears the answer, so a later yes carries no super property until a new answer", async () => {
+    const w = world({ consent: "granted" });
+    await w.start();
+    w.onboarding().getState().setAcquisitionSource("tiktok");
+    await settle();
+    assert.equal(answered(w).length, 1);
+    w.onboarding().getState().resetOnboarding();
+    await settle();
+    w.onboarding().getState().setAnalyticsConsent("granted");
+    await settle();
+    assert.equal("acquisition_source" in w.client().superProperties, false, "the old answer is not kept");
+    w.onboarding().getState().setAcquisitionSource("church");
+    await settle();
+    assert.deepEqual(answered(w), [{ source: "tiktok" }, { source: "church" }], "a fresh onboarding sends its own answer");
+    assert.equal(w.client().superProperties.acquisition_source, "church");
+  });
+}
+
 // ================================================================== the sync engine
 async function engineChecks() {
   // Since 2026-11-09 the event has two facts, not three: the audio is made behind the server's answer, so whether a reflection
@@ -989,8 +1167,8 @@ async function contractChecks() {
     }
     const policy = read("src/services/analyticsPolicy.ts");
     const names = [...policy.matchAll(/name: "([a-z_]+)"/g)].map((match) => match[1]);
-    // Step 39 added scholar_talk_started and scholar_talk_ended (22 in all).
-    assert.equal(names.length, 22, names.join(","));
+    // Step 39 added scholar_talk_started and scholar_talk_ended, and 2026-11-20 acquisition_source_answered (23 in all).
+    assert.equal(names.length, 23, names.join(","));
     for (const name of names) assert.ok(!/crisis|support|sign/.test(name), name);
   });
 }
@@ -1001,6 +1179,7 @@ async function contractChecks() {
   await storeChecks();
   await consentChecks();
   await resetChecks();
+  await sourceChecks();
   await engineChecks();
   await playerChecks();
   await screenChecks();

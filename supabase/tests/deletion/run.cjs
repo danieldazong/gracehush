@@ -873,7 +873,7 @@ async function menuChecks() {
       assert.deepEqual(shape(kind, "other"), ["web:directory:https://findahelpline.com"], kind);
     }
     assert.equal(numbers.DV_HOTLINE_DIAL, numbers.DV_HOTLINE_NUMBER.replace(/-/g, ""), "the digits dialed are the number shown");
-    assert.equal(numbers.HELPLINE_LAST_VERIFIED, "2026-11-11");
+    assert.equal(numbers.HELPLINE_LAST_VERIFIED, "2026-11-23");
     // The phone's region: the US and its territories are the US, and a region that cannot be read is the US.
     for (const [locale, code] of [["en-US", "US"], ["es-PR", "PR"], ["en_GB", "GB"], ["en-NG", "NG"], ["zh-Hant-TW", "TW"], ["en", null], ["", null], [null, null], ["es-419", null]]) {
       assert.equal(regionCode(locale), code, String(locale));
@@ -947,7 +947,7 @@ async function menuChecks() {
     assert.ok(/internet/i.test(text.offline), "the offline line says what is needed");
     assert.ok(copy.prayers.menu.deleteReflection.endsWith("…"), "the delete row opens a dialog, so it ends in an ellipsis");
     assert.ok(!/delete|forever/i.test(copy.prayers.menu.removeFromPrayers), "Remove from Prayers does not sound like a delete");
-    assert.ok(/still in your Journal/.test(copy.prayers.notice.removed));
+    assert.ok(/still in your reflections/.test(copy.prayers.notice.removed));
   }, { signIn: false });
 }
 

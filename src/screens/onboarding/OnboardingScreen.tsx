@@ -32,10 +32,13 @@ import { isSamplePlaying, playSample, stopSample, subscribeSample } from "@/serv
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { flowVerse, formatTime12, quoteVerse } from "@/utils/format";
 
-const { stepCounter, stepLabel, welcome, rhythm, permissions } = copy.onboarding;
+import { SourceStep } from "./SourceStep";
 
-// The counter and the pills also count the Sign In that follows (TOTAL_STEPS, step 34b). The analytics choice was a fourth
-// step from step 34 until round 8 of 2026-11-01, when it moved to the Journal's first visit.
+const { stepCounter, stepLabel, welcome, source, rhythm, permissions } = copy.onboarding;
+
+// The steps: Welcome (0), "How did you hear about GraceHush?" (1, since 2026-11-20), Rhythm (2) and Permissions (3). The
+// counter and the pills also count the Sign In that follows (TOTAL_STEPS, step 34b). The analytics choice was a step of its
+// own from step 34 until round 8 of 2026-11-01, when it moved to the Journal's first visit.
 // Fade out, swap the step, fade in: about 200ms in total.
 const FADE_MS = 100;
 // The Welcome scene takes whatever the cover's text and footer leave (2026-11-01: about 400 dp on an 812-tall phone,
@@ -62,6 +65,16 @@ const icons = {
   headphones: { android: "headphones", ios: "headphones" },
   book: { android: "menu_book", ios: "book" },
 } satisfies Record<string, SymbolViewProps["name"]>;
+
+// A step's footer: the primary button and the text link under it. The source step's button waits for an answer.
+type Footer = {
+  label: string;
+  icon: SymbolViewProps["name"];
+  onPress: () => void;
+  disabled?: boolean;
+  hint?: string;
+  link: { label: string; onPress: () => void; className: string };
+};
 
 const slots = [
   { key: "morning", icon: icons.morning },
@@ -131,6 +144,8 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
   const setReminder = useOnboardingStore((state) => state.setReminder);
   const markPermissionsPrompted = useOnboardingStore((state) => state.markPermissionsPrompted);
   const completeOnboarding = useOnboardingStore((state) => state.completeOnboarding);
+  const acquisitionSource = useOnboardingStore((state) => state.acquisitionSource);
+  const setAcquisitionSource = useOnboardingStore((state) => state.setAcquisitionSource);
   // The ref ignores a second tap before the re-render that disables the buttons.
   const [isRequesting, setIsRequesting] = useState(false);
   const isRequestingRef = useRef(false);
@@ -219,7 +234,9 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
     completeOnboarding();
   }
 
-  const footers = [
+  // Continue on the source step waits for a tile; "skipped" (an earlier Skip, then Back) counts as no answer yet.
+  const sourceAnswered = acquisitionSource !== null && acquisitionSource !== "skipped";
+  const footers: Footer[] = [
     {
       label: welcome.primary,
       icon: icons.arrow,
@@ -231,12 +248,27 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
       },
     },
     {
-      label: rhythm.primary,
+      label: source.primary,
       icon: icons.arrow,
       onPress: () => goToStep(2),
+      disabled: !sourceAnswered,
+      hint: sourceAnswered ? undefined : source.primaryHint,
+      link: {
+        label: source.skip,
+        onPress: () => {
+          setAcquisitionSource("skipped");
+          goToStep(2);
+        },
+        className: "btn-text__label text-mauve",
+      },
+    },
+    {
+      label: rhythm.primary,
+      icon: icons.arrow,
+      onPress: () => goToStep(3),
       link: {
         label: rhythm.back,
-        onPress: () => goToStep(0),
+        onPress: () => goToStep(1),
         className: "btn-text__label text-mauve",
       },
     },
@@ -344,7 +376,9 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
               </>
             )}
 
-            {step === 1 && (
+            {step === 1 && <SourceStep selected={acquisitionSource} onSelect={setAcquisitionSource} />}
+
+            {step === 2 && (
               <>
                 <View className="gap-2">
                   <Text className="eyebrow">{rhythm.eyebrow}</Text>
@@ -405,7 +439,7 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
               </>
             )}
 
-            {step === 2 && (
+            {step === 3 && (
               <>
                 <View className="gap-2">
                   <Text className="eyebrow">{permissions.eyebrow}</Text>
@@ -426,6 +460,8 @@ export function OnboardingScreen({ navigation }: OnboardingScreenProps) {
                 iconRight={footer.icon}
                 onPress={footer.onPress}
                 loading={isRequesting}
+                disabled={footer.disabled}
+                accessibilityHint={footer.hint}
               />
               <Pressable
                 accessibilityRole="button"

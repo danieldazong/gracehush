@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "../../process-entry/testing/assert.ts";
 import { CASCADE_TIMEOUT_SECONDS } from "./agent_setup.ts";
-import { VOICE_PRAYER_WORDS, VOICE_WRITER_THINKING, voiceTiming } from "./constants.ts";
+import { listenSpeechTiming, VOICE_PRAYER_WORDS, VOICE_WRITER_THINKING, voiceTiming } from "./constants.ts";
 
 // The times of a turn against ElevenLabs' own limit (step 39). ElevenLabs gives an attempt up when no new piece of text has
 // arrived for cascade_timeout_seconds, counted from the request's start and from every piece (measured, 2026-11-13). It then
@@ -101,4 +101,17 @@ Deno.test("every prayer request of the evaluation sets is told apart, and no oth
       assertEquals(VOICE_PRAYER_WORDS.test(item.message), item.asksPrayer === true, `${name} ${item.id}`);
     }
   }
+});
+
+// Listen in the chosen voice (2026-11-21): ElevenLabs saves a reading's item about a second after the reading answers (measured:
+// a DELETE at +359 ms answered 404, one at +1.2 s deleted it), so the deletion is tried again for long enough, not hammered, and
+// the whole of it ends well inside a function's 150 seconds of wall clock.
+Deno.test("Listen's deletion is tried again long enough for ElevenLabs to save the item, and not more often than twice a second", () => {
+  const t = listenSpeechTiming;
+  assert(t.deleteEveryMs >= 500 && t.deleteEveryMs <= 2 * SECOND, `a try every ${t.deleteEveryMs} ms`);
+  assert(t.deleteForMs >= 5 * SECOND, `tried for ${t.deleteForMs} ms`);
+  assert(t.deleteForMs / t.deleteEveryMs >= 5, "at least five tries");
+  assert(t.deleteMs >= 2 * SECOND, `a DELETE may take ${t.deleteMs} ms`);
+  // A late reading (capMs), then tries for deleteForMs, the last of which may take deleteMs.
+  assert(t.capMs + t.deleteForMs + t.deleteMs < 120 * SECOND, "the deletion ends well inside 150 seconds");
 });

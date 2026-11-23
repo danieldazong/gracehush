@@ -1,8 +1,15 @@
-import { ENTRY_CACHE_LIMIT, PRAYERS_LIMIT } from "@/constants/app";
+import {
+  ENTRY_CACHE_LIMIT,
+  PRAYERS_LIMIT,
+  WORD_CALENDAR_KEEP_DAYS,
+  WORD_CURRENT_MAX_AGE_MS,
+  WORD_DECK_LOOKBACK,
+} from "@/constants/app";
 import { copy } from "@/constants/copy";
 import type { PrayerPatch } from "@/data/columns";
 import {
   selectAffirmations,
+  selectAffirmationsForEntries,
   selectEntriesPage,
   selectEntry,
   selectPrayerRows,
@@ -15,8 +22,10 @@ import { getNewestReadyEntry, isListedEntry } from "@/data/selectors";
 import * as cache from "@/db/cache";
 import { isDatabaseOpen } from "@/db/database";
 import * as mutations from "@/db/mutations";
-import type { Affirmation, AffirmationSource, JournalEntry, RepoResult } from "@/types";
+import * as calendar from "@/db/wordCalendar";
+import type { Affirmation, CurrentWord, JournalEntry, RepoResult } from "@/types";
 import { byPosition } from "@/utils/affirmationOrder";
+import { deckWordsOf, selectPoolEntries, type DeckHistoryRow, type DeckReflection } from "@/utils/wordDeck";
 
 // The real source of the Journal's entries and affirmations (step 25), used by journalRepository.ts when the data source is
 // Supabase: what this phone already has comes first (the read cache of step 24), then the network, and everything read from the
@@ -89,17 +98,137 @@ export async function readCachedLatestAffirmations(): Promise<Affirmation[]> {
   return latest === null ? [] : readCachedAffirmations(latest.id);
 }
 
-// The newest finished entry the phone has and its affirmations (step 28's notifications). A heavy moment's are sent like any
-// other's since 2026-11-08; one saved before then has none, so nothing is sent while it is the newest. Unlike the reads above it
-// throws when the cache cannot be read (a closed database included): a bad read must not look like "no reflection", which would
-// cancel the notifications. An entry still being prepared is not finished, so it never counts.
-export async function readCachedAffirmationSource(): Promise<AffirmationSource | null> {
-  const entries = await cache.listEntries(LATEST_LOOKBACK);
-  const now = Date.now();
-  const latest = entries.find((entry) => entry.status === "ready" && isListedEntry(entry, now));
-  if (latest === undefined) return null;
-  const affirmations = await cache.listAffirmationsForEntry(latest.id);
-  return { entryId: latest.id, affirmations };
+// ---- the Word Deck (2026-11-17) -------------------------------------------------------------------------------------------
+// What the three daily reminders carry is dealt from the reflections of the week (utils/wordDeck.ts has the rules). The scheduler
+// reads the pool and the calendar from here, writes the calendar after each deal, and Today's card reads the word that last
+// arrived. Everything but the card's read throws when the cache cannot be read (a closed database included): a bad read must
+// not look like "no reflection", which would cancel the notifications.
+export type WordPool = {
+  // The reflections the deck draws from that the phone has words for: the week's first, newest first, then older ones.
+  reflections: DeckReflection[];
+  // The newest finished reflection is one saved before 2026-11-08, a heavy moment with only the person's words and no devotional
+  // (so no affirmations): nothing is sent while it is the newest, as since step 28, and an older reflection's words are not used.
+  quiet: boolean;
+  // The pool's reflections the phone has no affirmations cached for yet: hydrateWordPool fetches them.
+  missing: string[];
+};
+
+// The reflections of the pool among the newest entries the phone has. An entry still being prepared is not finished, so it never
+// counts, and a reflection with no devotional is no reflection of the deck.
+async function cachedPoolEntries(now: Date, timeZone: string): Promise<{ picked: ReturnType<typeof selectPoolEntries>; quiet: boolean }> {
+  const entries = await cache.listEntries(WORD_DECK_LOOKBACK);
+  const nowMs = now.getTime();
+  const finished = entries.filter((entry) => entry.status === "ready" && isListedEntry(entry, nowMs));
+  const newest = finished[0];
+  if (newest === undefined) return { picked: [], quiet: false };
+  if (newest.devotional === null) return { picked: [], quiet: true };
+  const picked = selectPoolEntries(
+    finished.filter((entry) => entry.devotional !== null),
+    now,
+    timeZone,
+  );
+  return { picked, quiet: false };
+}
+
+export async function readCachedWordPool(now: Date, timeZone: string): Promise<WordPool> {
+  const { picked, quiet } = await cachedPoolEntries(now, timeZone);
+  const reflections: DeckReflection[] = [];
+  const missing: string[] = [];
+  for (const { entry, tier } of picked) {
+    const affirmations = await cache.listAffirmationsForEntry(entry.id);
+    if (affirmations.length === 0) missing.push(entry.id);
+    else reflections.push({ entryId: entry.id, tier, words: deckWordsOf(affirmations) });
+  }
+  return { reflections, quiet, missing };
+}
+
+// What each reminder carried or will carry (db/wordCalendar.ts).
+export function readCachedWordCalendar(): Promise<DeckHistoryRow[]> {
+  return calendar.listWordCalendar();
+}
+
+export function writeWordCalendar(rows: readonly DeckHistoryRow[], nowMs: number): Promise<void> {
+  return calendar.saveWordCalendar(rows, nowMs, WORD_CALENDAR_KEEP_DAYS * 86_400_000);
+}
+
+// The word that last arrived (the reminder that fired last, within WORD_CURRENT_MAX_AGE_MS), with the reflection it is from. Null
+// when the calendar has none, or the phone no longer holds that word or reflection: the card then shows the newest reflection's
+// word for the current slot, as before the deck. It never throws.
+export function readCachedCurrentWord(nowMs: number): Promise<CurrentWord | null> {
+  return safely(async () => {
+    const row = await calendar.getCurrentWordRow(nowMs, WORD_CURRENT_MAX_AGE_MS);
+    if (row === null) return null;
+    const [entry, affirmations] = await Promise.all([cache.getEntry(row.entryId), cache.listAffirmationsForEntry(row.entryId)]);
+    const affirmation = affirmations.find((candidate) => candidate.id === row.affirmationId);
+    if (affirmation === undefined) return null;
+    return { affirmation, entry, slot: row.slot, fireAt: row.fireAt };
+  }, null);
+}
+
+// Fetches, in one request, the affirmations of the pool's reflections that the phone has none cached for (a reflection made
+// before the deck existed, or on another phone) and writes them to the cache. True when anything was written. Online only; with no
+// answer, or nothing missing, it changes nothing. `keep` answers false once the caller no longer wants the answer.
+export async function hydrateWordPool(now: Date, timeZone: string, keep: () => boolean = always): Promise<boolean> {
+  const missing: string[] = [];
+  try {
+    const { picked } = await cachedPoolEntries(now, timeZone);
+    for (const { entry } of picked) {
+      if (!(await cache.hasAffirmations(entry.id))) missing.push(entry.id);
+    }
+  } catch {
+    return false;
+  }
+  return fetchMissingAffirmations(missing, keep);
+}
+
+// One request for the affirmations of the entries in `missing`, written to the cache entry by entry. True when anything was
+// written.
+async function fetchMissingAffirmations(missing: readonly string[], keep: () => boolean): Promise<boolean> {
+  if (missing.length === 0) return false;
+  const result = await selectAffirmationsForEntries(missing);
+  if (!result.ok || !keep()) return false;
+  const byEntry = new Map<string, Affirmation[]>();
+  for (const row of result.data) {
+    const affirmation = toAffirmation(row);
+    byEntry.set(affirmation.entryId, [...(byEntry.get(affirmation.entryId) ?? []), affirmation]);
+  }
+  let wrote = false;
+  for (const [entryId, list] of byEntry) {
+    await safely(async () => {
+      await cache.upsertAffirmations(entryId, [...list].sort(byPosition));
+      wrote = true;
+    }, undefined);
+  }
+  return wrote;
+}
+
+// ---- the Today tab's deck of words (2026-11-20) --------------------------------------------------------------------------
+// The deck shows one card for each reflection the Journal lists, so it needs the affirmations of all of them, where the rest of
+// the screen needs only the newest reflection's.
+
+// What the phone holds for these entries: each one's affirmations in position order, by entry id. An entry the phone holds none
+// for is left out.
+export async function readCachedWords(entryIds: readonly string[]): Promise<Record<string, Affirmation[]>> {
+  const words: Record<string, Affirmation[]> = {};
+  for (const entryId of entryIds) {
+    const list = await readCachedAffirmations(entryId);
+    if (list.length > 0) words[entryId] = list;
+  }
+  return words;
+}
+
+// Fetches, in one request, the affirmations of those of these entries that the phone has none cached for, and writes them to
+// the cache. True when anything was written. Online only; with no answer, or nothing missing, it changes nothing.
+export async function hydrateWords(entryIds: readonly string[]): Promise<boolean> {
+  const missing: string[] = [];
+  try {
+    for (const entryId of entryIds) {
+      if (!(await cache.hasAffirmations(entryId))) missing.push(entryId);
+    }
+  } catch {
+    return false;
+  }
+  return fetchMissingAffirmations(missing, always);
 }
 
 // The week's count of devotionals, from the entries this phone has: a finished entry that holds a devotional and is not a heavy

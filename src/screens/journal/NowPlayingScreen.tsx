@@ -93,19 +93,23 @@ function CloseRow({ onClose }: { onClose: () => void }) {
 }
 
 type ArtworkProps = {
+  scenes: readonly number[]; // the reflection's best painted scenes, best first (PlaybackTrack.scenes)
   playing: boolean; // the person asked for sound: the card grows at once
   buffering: boolean; // and it has not started yet: the scenes wait for the voice
 };
 
-// The player's four painted scenes (2026-11-02). The card opens on the scene of the hour, the one the lock screen shows,
-// and while the voice is heard it drifts through the day's four moments; paused, it holds the scene it is on, a little
-// smaller. Under Reduce Motion it is the hour's scene, still. Decorative for a screen reader: the title under it says what
+// The player's painted scenes (2026-11-02; twenty since 2026-11-20). The card opens on the scene that interprets the
+// reflection best, the one the lock screen shows, and while the voice is heard it drifts through the reflection's five
+// best; paused, it holds the scene it is on, a little smaller. Under Reduce Motion it is the best scene, still. A track
+// with no scenes shows the scene of the hour. Decorative for a screen reader: the title under it says what
 // plays. The shadow sits on the outer view with a background (an iOS shadow needs one) and the inner view clips the
 // scenes, since overflow: "hidden" on the same view would clip the shadow.
-function Artwork({ playing, buffering }: ArtworkProps) {
+function Artwork({ scenes, playing, buffering }: ArtworkProps) {
   const reduceMotion = useReduceMotion();
   const [scale] = useState(() => new Animated.Value(playing || reduceMotion ? 1 : PAUSED_ARTWORK_SCALE));
-  const [startScene] = useState(() => getPlayerSceneForHour(new Date().getHours()));
+  const [hourScene] = useState(() => getPlayerSceneForHour(new Date().getHours()));
+  const shown = scenes.length > 0 ? scenes : [hourScene];
+  const sources = shown.map((scene) => playerScenes[scene] ?? playerScenes[0]);
 
   useEffect(() => {
     if (reduceMotion) {
@@ -130,8 +134,8 @@ function Artwork({ playing, buffering }: ArtworkProps) {
     >
       <View style={styles.artworkClip}>
         <SceneStack
-          sources={playerScenes}
-          start={startScene}
+          key={shown.join(",")}
+          sources={sources}
           holdMs={ARTWORK_HOLD_MS}
           moving={playing && !buffering}
         />
@@ -172,7 +176,7 @@ type PlayerViewProps = {
 
 // The loaded player, drawn from the store alone: a slow or failed reflection load never hides it.
 function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
-  const { title, subtitle, durationMs, positionMs, status, rate, ambientSound, ambientVolume } =
+  const { title, subtitle, durationMs, scenes, positionMs, status, rate, ambientSound, ambientVolume } =
     playback;
   // The position under the finger while dragging. A tick of the store cannot move the thumb meanwhile.
   const [dragMs, setDragMs] = useState<number | null>(null);
@@ -194,7 +198,7 @@ function PlayerView({ playback, padding, onClose }: PlayerViewProps) {
       contentContainerStyle={[styles.content, { paddingHorizontal: padding }]}
     >
       <CloseRow onClose={onClose} />
-      <Artwork playing={status === "playing"} buffering={isBuffering} />
+      <Artwork scenes={scenes} playing={status === "playing"} buffering={isBuffering} />
 
       <View className="items-center pt-2">
         <Text

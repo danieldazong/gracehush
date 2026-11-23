@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { UserAvatar } from "@/components/UserAvatar";
 import { Wordmark } from "@/components/Wordmark";
 import { copy } from "@/constants/copy";
+import { usePlanTier } from "@/hooks/usePlanTier";
 import type { MainTabScreenProps } from "@/navigation/types";
 
 type ScreenHeaderProps = {
@@ -16,6 +17,8 @@ type ScreenHeaderProps = {
 // SafeAreaView, with the header above its ScrollView.
 export function ScreenHeader({ title, avatar = "link" }: ScreenHeaderProps) {
   const navigation = useNavigation<MainTabScreenProps<"Journal">["navigation"]>();
+  // The tag on the picture is drawn, so the button says the plan too (2026-11-19).
+  const tier = usePlanTier();
 
   // The same picture as Profile's account header, so the person sees themselves on every tab.
   const avatarCircle = <UserAvatar size={32} />;
@@ -28,7 +31,9 @@ export function ScreenHeader({ title, avatar = "link" }: ScreenHeaderProps) {
         {avatar === "link" ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={copy.header.openProfile}
+            accessibilityLabel={
+              tier === null ? copy.header.openProfile : copy.header.openProfileWithPlan(copy.planTag.a11y[tier])
+            }
             hitSlop={6}
             onPress={() => navigation.navigate("Profile")}
             style={({ pressed }) => pressed && styles.pressed}

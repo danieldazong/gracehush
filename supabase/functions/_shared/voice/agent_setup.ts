@@ -14,7 +14,7 @@
 // silence or asks for an answer before the person has finished, the agent is private (a talk needs a token from our server), the
 // phone can pass nothing but the signed session (not a voice, a prompt or a first message), and ElevenLabs keeps and analyses as
 // little as it allows. It prints settings as counts and names, never a key, a secret, an id or anything said in a talk.
-import { VOICE_LIMITS } from "./constants.ts";
+import { SPEECH, VOICE_LIMITS } from "./constants.ts";
 import { VOICE_LINES } from "./lines.ts";
 import { DEFAULT_VOICE, VOICE_KEYS, type VoiceKey, VOICES } from "./voices.ts";
 
@@ -25,9 +25,8 @@ const API = "https://api.elevenlabs.io";
 // generation failed" (found on the phone on 2026-11-13). Our server says a holding line before then (constants.ts,
 // voiceTiming), and constants_test.ts keeps every gap of a turn under this limit.
 export const CASCADE_TIMEOUT_SECONDS = 15;
-// The voice's own settings, pinned so that every agent sounds as the owner heard it when choosing (2026-11-13): a model
-// ElevenLabs changes its default for would otherwise change Scholar's voice without anyone deciding it.
-export const SPEECH = { model: "eleven_v4_turbo", stability: 0.5, similarity: 0.75, speed: 1 } as const;
+// The voice's own settings (constants.ts since 2026-11-19, where Listen in the chosen voice reads them too).
+export { SPEECH };
 // The sound ElevenLabs sends the phone: 48 kHz, its highest (2026-11-14, the retest). Its default, 16 kHz, is the sound of a phone
 // call, and the owner heard the talk as unclean beside the voice previews (MP3s at 44.1 kHz); a talk reaches the iPhone over
 // WebRTC, which carries 48 kHz.

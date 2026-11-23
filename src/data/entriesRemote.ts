@@ -126,6 +126,24 @@ export async function selectAffirmations(entryId: string): Promise<RepoResult<Af
   return { ok: true, data };
 }
 
+// The affirmations of several entries in one request (2026-11-17): the Word Deck's reflections that the phone has none cached
+// for, a few at most, and since 2026-11-20 those of a Journal page for the Today tab's deck of words, thirty at most. Three to
+// ten rows each, in position order within an entry.
+export async function selectAffirmationsForEntries(entryIds: readonly string[]): Promise<RepoResult<AffirmationRow[]>> {
+  const supabase = getSupabase();
+  const userId = getSupabaseUserId();
+  if (supabase === null || userId === null) return unauthorized(copy.journal.error.message);
+  const { data, error, status } = await supabase
+    .from("daily_affirmations")
+    .select(AFFIRMATION_COLUMNS)
+    .in("entry_id", [...entryIds])
+    .eq("user_id", userId)
+    .order("position", { ascending: true });
+  if (error !== null) return fail("daily_affirmations", status, error, copy.journal.error.message);
+  lastError = null;
+  return { ok: true, data };
+}
+
 // The run of reflection days for Journal Home's chip (step 33): reflection_streak_days counts the user's own entries in the
 // database (consecutive days in the zone `tz`, ending today or yesterday, each with a finished reflection, a heavy moment's included),
 // so the number does not depend on how many entries the phone holds. A zone the database does not know is refused (22023).

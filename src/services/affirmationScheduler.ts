@@ -1,7 +1,12 @@
 import { AppState } from "react-native";
 
 import { AFFIRMATION_MIN_LEAD_MS, AFFIRMATION_RESCHEDULE_DEBOUNCE_MS } from "@/constants/app";
-import { getKnownAffirmationsEnabled, readAffirmationSource } from "@/data/journalRepository";
+import {
+  getKnownAffirmationsEnabled,
+  readWordCalendar,
+  readWordPool,
+  saveWordCalendar,
+} from "@/data/journalRepository";
 import { getDeviceTimezone } from "@/data/mappers";
 import { userHash } from "@/db/database";
 import {
@@ -26,16 +31,22 @@ import { subscribe as subscribeToSync } from "@/services/syncEngine";
 import { useOfflineStore } from "@/store/offlineStore";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
+import { dealWords, toHistoryRow, type DeckHistoryRow } from "@/utils/wordDeck";
 
-// The daily affirmation notifications (step 28): local notifications only, made on this phone from the newest reflection it
-// holds, at the reminder times, in the phone's time zone, for the next 7 days. The auth bridge starts it when a user signs in;
-// it then plans again whenever something the plan reads may have changed (the app comes to the front, a reminder time, the
-// Daily Affirmations switch, the user's database opening, a reflection finishing, Journal's first page) and changes only the
-// difference. Coming to the front also refills the 7 days.
+// The daily affirmation notifications (step 28): local notifications only, made on this phone at the reminder times, in the
+// phone's time zone, for the next 7 days. Since 2026-11-17 the three reminders of a day take turns between the reflections of the
+// week (the Word Deck, utils/wordDeck.ts) and no longer all come from the newest one: each run reads the week's reflections and
+// the calendar of what the reminders carried, deals the words, writes the deal to the calendar (which Today's card reads, so the
+// card and the lock screen agree, notifications on or off) and plans the notifications from it. The auth bridge starts it when a
+// user signs in; it then plans again whenever something the plan reads may have changed (the app comes to the front, a reminder
+// time, the Daily Affirmations switch, the user's database opening, a reflection finishing, Journal's first page) and changes only
+// the difference. Coming to the front also refills the 7 days.
 //
 // - One run at a time; a request during a run runs it once more after. Requests are gathered for half a second.
 // - A run that cannot read something it needs (the database is not open, the profile was never read on this phone, the cache
-//   cannot be read) changes nothing: a bad read never cancels anyone's notifications.
+//   or the calendar cannot be read) changes nothing: a bad read never cancels anyone's notifications.
+// - The deal and the calendar do not depend on notifications: with the switch off, the permission missing or the module not
+//   there (Expo Go on Android) the calendar is still written, and Today's card still shows the word of the day.
 // - Nothing is logged but a step that failed. Never a title, a headline, an id or a time.
 
 let userId: string | null = null;
@@ -57,6 +68,26 @@ async function attempt(step: string, task: () => Promise<void>): Promise<void> {
     await task();
   } catch {
     note(step);
+  }
+}
+
+// Told after each deal has been written to the calendar: Today's card reads the word that last arrived from there.
+const calendarListeners = new Set<() => void>();
+
+export function subscribeWordCalendar(listener: () => void): () => void {
+  calendarListeners.add(listener);
+  return () => {
+    calendarListeners.delete(listener);
+  };
+}
+
+function announceCalendar() {
+  for (const listener of [...calendarListeners]) {
+    try {
+      listener();
+    } catch {
+      note("listener");
+    }
   }
 }
 
@@ -116,8 +147,9 @@ export function stopAffirmationSchedule(): void {
   setTapUser(null);
 }
 
-// Plans again shortly (the requests of the next half second are one run). Also called by Journal when its first page has
-// come (the newest reflection may have changed on the server) and by Profile when notifications are allowed.
+// Plans again shortly (the requests of the next half second are one run). Also called by Journal when its first page and the
+// affirmations of the week's reflections have come (a reflection may have changed on the server) and by Profile when
+// notifications are allowed.
 export function requestAffirmationReschedule(): void {
   if (userId === null) return;
   if (timer !== null) clearTimeout(timer);
@@ -145,36 +177,56 @@ function run(): Promise<void> {
   return running;
 }
 
-async function currentPlan(): Promise<PlannedAffirmation[] | null> {
+type Computed = { rows: DeckHistoryRow[]; plan: PlannedAffirmation[]; nowMs: number };
+
+// Reads the week's reflections, the calendar and the permission, deals the words and works out the notifications; it changes
+// nothing. Null when something it needs cannot be read yet: then the run changes nothing at all.
+async function compute(): Promise<Computed | null> {
   const id = userId;
   const h = hash;
-  if (id === null || h === null || !notificationsAvailable()) return null;
+  if (id === null || h === null) return null;
   if (!useOfflineStore.getState().dbReady) return null;
   const enabled = getKnownAffirmationsEnabled(id);
   if (enabled === null) return null;
-  let source;
+  const now = new Date(Date.now());
+  const timeZone = getDeviceTimezone();
+  let pool;
+  let history;
   try {
-    source = await readAffirmationSource();
+    pool = await readWordPool(now, timeZone);
+    history = await readWordCalendar();
   } catch {
     note("read");
     return null;
   }
-  const permission = await getNotificationPermission();
-  return planAffirmations({
-    now: new Date(Date.now()),
-    timeZone: getDeviceTimezone(),
-    reminders: useOnboardingStore.getState().reminders,
-    enabled,
-    permission,
-    source,
-    userHash: h,
-  });
+  // While the newest reflection is a heavy moment saved the old way (only the person's words) nothing is dealt or sent.
+  const deal = pool.quiet
+    ? []
+    : dealWords({
+        now,
+        timeZone,
+        reminders: useOnboardingStore.getState().reminders,
+        reflections: pool.reflections,
+        history,
+      });
+  const permission = notificationsAvailable() ? await getNotificationPermission() : "undetermined";
+  return {
+    rows: deal.map(toHistoryRow),
+    plan: planAffirmations({ enabled, permission, deal, userHash: h }),
+    nowMs: now.getTime(),
+  };
 }
 
 async function runOnce(): Promise<void> {
   const mine = generation;
-  const plan = await currentPlan();
-  if (plan === null || mine !== generation) return;
+  const computed = await compute();
+  if (computed === null || mine !== generation) return;
+  // The calendar first: Today's card reads it, and a run that stops after it leaves the card and the next plan right.
+  await attempt("calendar", () => saveWordCalendar(computed.rows, computed.nowMs));
+  if (mine !== generation) return;
+  announceCalendar();
+  if (!notificationsAvailable()) return;
+  const plan = computed.plan;
   let scheduled: string[];
   try {
     scheduled = (await listScheduledIds()).filter(isPlannedAffirmationId);
@@ -246,8 +298,9 @@ export function rescheduleAffirmationsNow(): Promise<void> {
 
 // One notification in `delayMs`, with the next planned one's title, headline and tap: false when there is nothing to plan.
 export async function scheduleTestAffirmation(delayMs: number): Promise<boolean> {
-  const plan = await currentPlan();
-  const next = plan?.[0];
+  if (!notificationsAvailable()) return false;
+  const computed = await compute();
+  const next = computed?.plan[0];
   if (next === undefined) return false;
   try {
     await scheduleAt({ ...next, identifier: testAffirmationId(Date.now()), fireAt: new Date(Date.now() + delayMs) });

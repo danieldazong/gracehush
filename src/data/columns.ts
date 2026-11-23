@@ -3,6 +3,8 @@ import type {
   JournalEntryRow,
   JournalEntryUpdate,
   ScholarConversationRow,
+  ScholarCreditsRow,
+  ScholarFreeUseRow,
   ScholarMessageRow,
 } from "@/types/database";
 
@@ -43,5 +45,13 @@ export type PrayerPatch = Pick<JournalEntryUpdate, (typeof PRAYER_PATCH_COLUMNS)
 export const CONVERSATION_COLUMNS = "id, entry_id, title, is_heavy, last_message_at, created_at" as const;
 export const SCHOLAR_MESSAGE_COLUMNS =
   "id, conversation_id, role, reply_to, input_type, status, error_code, content, is_heavy, created_at" as const;
+// A Pro account's credits (2026-11-18): what was used in the current window, the allowance the server gave it, and when the
+// window renews. Read only, and only the person's own row.
+export const SCHOLAR_CREDITS_COLUMNS = "used, allowance, renews_at" as const;
+// The free conversation (2026-11-20): which conversation an account that is not Pro has had for free, and how many of its free
+// messages were answered. Read only, and only the person's own row; there is none until the first free message is answered.
+export const SCHOLAR_FREE_COLUMNS = "conversation_id, messages" as const;
 export type ConversationRow = Omit<ScholarConversationRow, "user_id">;
 export type MessageRow = Omit<ScholarMessageRow, "user_id" | "claimed_at">;
+export type CreditsRow = Pick<ScholarCreditsRow, "used" | "allowance" | "renews_at">;
+export type FreeUseRow = Pick<ScholarFreeUseRow, "conversation_id" | "messages">;

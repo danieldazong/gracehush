@@ -280,6 +280,70 @@ export type Database = {
           },
         ]
       }
+      scholar_credits: {
+        Row: {
+          allowance: number
+          renews_at: string
+          updated_at: string
+          used: number
+          user_id: string
+        }
+        Insert: {
+          allowance: number
+          renews_at: string
+          updated_at?: string
+          used?: number
+          user_id: string
+        }
+        Update: {
+          allowance?: number
+          renews_at?: string
+          updated_at?: string
+          used?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scholar_credits_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "users_profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scholar_free_use: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          messages: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          messages?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          messages?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scholar_free_use_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "users_profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scholar_messages: {
         Row: {
           claimed_at: string | null
@@ -537,12 +601,29 @@ export type Database = {
         }
         Returns: undefined
       }
+      claim_scholar_free_conversation: {
+        Args: { p_conversation: string; p_user: string }
+        Returns: string
+      }
       feature_affirmation: {
         Args: { p_affirmation: string; p_entry: string; p_slot: string }
         Returns: undefined
       }
       reflection_streak_days: { Args: { tz: string }; Returns: number }
       requesting_user_id: { Args: never; Returns: string }
+      spend_scholar_credits: {
+        Args: {
+          p_allowance: number
+          p_cost: number
+          p_user: string
+          p_window_seconds: number
+        }
+        Returns: undefined
+      }
+      use_scholar_free_message: {
+        Args: { p_conversation: string; p_user: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

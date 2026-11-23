@@ -27,7 +27,9 @@ export type MockSubmitOutcome = "ready" | "crisis" | "failed" | "limit" | "too_s
 
 // What the next Scholar message answers on the mock data (step 38): an answer, one written with extra care, a failure, the free
 // limit, or Scholar resting. One-shot, like the submit outcome.
-export type MockScholarOutcome = "ready" | "heavy" | "failed" | "limit" | "resting";
+// "limit" is a Pro account with no credit left; "plan" the free plan and "trial" a free trial, which Scholar is not part of
+// (2026-11-18).
+export type MockScholarOutcome = "ready" | "heavy" | "failed" | "limit" | "plan" | "trial" | "resting";
 
 export function takeMockScholarOutcome(): MockScholarOutcome {
   if (!__DEV__) return "ready";

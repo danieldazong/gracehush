@@ -17,6 +17,7 @@ import {
   recordCustomerInfo,
   restore,
   revenueCatReady,
+  trialStatusFromCustomerInfo,
 } from "@/services/revenuecat";
 import { syncPlanNow } from "@/services/subscriptionSync";
 import { resumeAfterUpgrade } from "@/services/syncEngine";
@@ -42,6 +43,7 @@ const { notices } = copy.paywall;
 // How long a mock call waits, so the screen shows its loading and busy states.
 const READ_MS = __DEV__ ? 300 : 0;
 const PURCHASE_MS = 800;
+const DAY_MS = 86_400_000;
 
 // Neither of the first two is ever shown: a cancelled purchase says nothing, and an already-owned one runs a
 // restore instead.
@@ -174,8 +176,12 @@ async function realPurchase(packageId: string): Promise<PurchaseResult> {
   const pkg = sdkPackages.get(packageId);
   if (pkg === undefined) return failed("UNKNOWN");
   let tier: SubscriptionTier;
+  // When the trial ends, for the trial-end reminder; null unless this purchase started a trial.
+  let trialEndsAt: number | null = null;
   try {
-    tier = recordCustomerInfo((await buyPackage(pkg)).customerInfo);
+    const { customerInfo } = await buyPackage(pkg);
+    tier = recordCustomerInfo(customerInfo);
+    trialEndsAt = trialStatusFromCustomerInfo(customerInfo)?.endsAt ?? null;
   } catch (error) {
     return failed(purchaseErrorCode(error));
   }
@@ -184,7 +190,7 @@ async function realPurchase(packageId: string): Promise<PurchaseResult> {
   // The server reads RevenueCat and the plan reaches this phone before the Paywall says welcome. A failure does not fail the
   // purchase: the webhook and the next foreground catch up.
   await syncPlanNow().catch(() => false);
-  return { ok: true, tier };
+  return { ok: true, tier, trialEndsAt };
 }
 
 async function realRestore(): Promise<RestoreResult> {
@@ -244,7 +250,9 @@ async function mockPurchase(packageId: string): Promise<PurchaseResult> {
       dev.bumpMockProfileVersion();
       // What the free limit held back goes now (step 24). On RevenueCat, upgradeWatcher does this when the plan arrives.
       void resumeAfterUpgrade();
-      return { ok: true, tier };
+      // The mock trial ends after the offering's free days, as the store's would.
+      const trialEndsAt = tier === "trial" && pkg.introOffer !== null ? Date.now() + pkg.introOffer.periodDays * DAY_MS : null;
+      return { ok: true, tier, trialEndsAt };
     }
   }
 }

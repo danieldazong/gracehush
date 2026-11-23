@@ -6,6 +6,9 @@ const daysLabel = (days: number) => (days === 1 ? "1 day" : `${days} days`);
 // "Good evening," before a name, "Good evening" alone (the Journal greeting draws the name in its own colour).
 const greetingPrefix = (period: TimeSlot, withName: boolean) => (withName ? `Good ${period},` : `Good ${period}`);
 
+// "1 day of reflection", "5 days of reflection": the Today tab's week strip says it in its spoken label.
+const reflectionDaysText = (count: number) => (count === 1 ? "1 day of reflection" : `${count} days of reflection`);
+
 // A clock time ("8:00 AM") keeps its digits and its AM or PM on one line (step 34b: the Permissions card and the Sign In
 // subtitle name the three reminder times).
 const unbreakable = (time: string) => time.replace(" ", "\u00A0");
@@ -49,41 +52,61 @@ export const copy = {
   },
   // Scholar's live talk (step 39): the one-time sheet before the first talk names ElevenLabs (Apple's guideline 5.1.2(i)). Nothing
   // is sent and no microphone opens before Allow. Drafted for the owner and the lawyer: what ElevenLabs keeps until GraceHush
-  // deletes a talk there (its words and a summary its own model writes) is said on the face (decision 35).
+  // deletes a talk there (its words and a summary its own model writes) is said on the face (decision 35). Since 2026-11-19 it also
+  // covers Listen in the chosen voice: ElevenLabs reads an answer aloud and GraceHush deletes the reading it keeps right after. The
+  // chat's voice sheet asks it too, before a voice is chosen there.
   voicePermission: {
     title: "Allow ElevenLabs to hear and speak for Scholar?",
-    body: "In a live talk, your voice goes to ElevenLabs, which turns it into text and speaks Scholar’s answers. Google’s AI still writes the answers, as it does when you type.",
-    trust: "ElevenLabs keeps no recording. It holds a talk’s words and a short summary until GraceHush deletes them there, soon after the talk ends, and its use of your talks to train its models is switched off.",
+    body: "ElevenLabs speaks Scholar’s answers in the voice you choose: in a live talk, where it also turns your voice into text, and when you tap Listen. Google’s AI still writes the answers, as it does when you type.",
+    trust: "ElevenLabs keeps no recording of your voice, and its use of what GraceHush sends to train its models is switched off. It holds a talk’s words and a short summary, and each answer it reads aloud, until GraceHush deletes them there soon after.",
     caption: "Nothing is sent until you tap Allow.",
     allow: "Allow",
     notNow: "Not now",
     privacy: "Privacy Policy",
   },
-  // The eight voices of a live talk (step 39): one Scholar, eight voices, named for how they sound (decision 30). The names are
-  // the owner's to change; the keys are constants/scholarVoices.ts's.
+  // The eight voices of a live talk (step 39): one Scholar, eight voices. Since 2026-11-19 (the owner's request) each has a
+  // Christian name and a painted portrait (images.voiceAvatars), and the line under the name says how it sounds; until then each
+  // was named for its sound ("Warm", "Storyteller"). The names are the owner's to change: none is God's, Jesus's, an angel's or
+  // the name of a central figure of the Bible, because Scholar never speaks as one, and every voice still says it is Scholar, an
+  // AI. The keys are constants/scholarVoices.ts's, and the server never sees a name.
   scholarVoice: {
     title: "Choose Scholar’s voice",
     start: "Start talking",
-    changeLater: "You can change this in Profile.",
+    changeLater: "You can change this in the chat or in Profile.",
     preview: "Preview",
     stop: "Stop",
+    // The chat's voice sheet (2026-11-19): the portrait in the conversation's header opens it, under `title`, after the ElevenLabs
+    // permission (voicePermission) when the account has not allowed it.
+    sheet: {
+      body: "The voice Scholar speaks with when you talk out loud and when it reads an answer aloud. Every voice is Scholar, an AI.",
+      done: "Done",
+    },
     voices: {
-      warm: { name: "Warm", description: "A woman’s voice · American · warm and reassuring" },
-      bright: { name: "Bright", description: "A woman’s voice · American · bright and gentle" },
-      clear: { name: "Clear", description: "A woman’s voice · British · clear and calm" },
-      soft: { name: "Soft", description: "A woman’s voice · British · soft and velvety" },
-      storyteller: { name: "Storyteller", description: "A man’s voice · British · a warm storyteller" },
-      deep: { name: "Deep", description: "A man’s voice · American · deep and comforting" },
-      steady: { name: "Steady", description: "A man’s voice · American · smooth and steady" },
-      wise: { name: "Wise", description: "A man’s voice · American · mature and wise" },
+      warm: { name: "Hannah", description: "A woman’s voice · American · warm and reassuring" },
+      bright: { name: "Phoebe", description: "A woman’s voice · American · bright and gentle" },
+      clear: { name: "Lydia", description: "A woman’s voice · British · clear and calm" },
+      soft: { name: "Selah", description: "A woman’s voice · British · soft and velvety" },
+      storyteller: { name: "Nathan", description: "A man’s voice · British · a warm storyteller" },
+      deep: { name: "Gideon", description: "A man’s voice · American · deep and comforting" },
+      steady: { name: "Caleb", description: "A man’s voice · American · smooth and steady" },
+      wise: { name: "Ezra", description: "A man’s voice · American · mature and wise" },
     },
     a11y: {
       // The middle dots are read aloud as words, so the spoken line uses commas.
       voice: (name: string, description: string) => `${name}, ${description.split(" · ").join(", ")}`,
       voices: "Scholar’s voices",
-      preview: (name: string) => `Preview the ${name} voice`,
+      preview: (name: string) => `Preview ${name}’s voice`,
       stop: "Stop the preview",
+      // The chat's header button, the chosen voice's portrait.
+      change: (name: string) => `Scholar’s voice, ${name}`,
+      changeHint: "Shows the voices",
+      // A voice an account that is not subscribed cannot choose (2026-11-20): its row carries a Pro chip and opens the plans.
+      // Its Preview stays free.
+      locked: (name: string, description: string) => `${name}, ${description.split(" · ").join(", ")}, Pro`,
+      lockedHint: "Opens GraceHush Pro",
     },
+    // The chip on a voice that is part of Pro (2026-11-20): Hannah is the free voice, every other is Pro.
+    pro: "Pro",
   },
   onboarding: {
     stepCounter: (step: number, total: number) => `${step} of ${total}`,
@@ -111,6 +134,29 @@ export const copy = {
         stop: "Stop the sample",
         hint: "A short devotional in the app’s own voice, with the Gentle Piano under it",
       },
+    },
+    // The second step (2026-11-20): "How did you hear about GraceHush?", so the team can see which places bring people who
+    // stay. One tap, no typing; Skip is always there. The answer stays on the phone and reaches analytics only once the
+    // person has said yes to sharing usage data.
+    source: {
+      eyebrow: "One quick question",
+      title: "How did you hear about GraceHush?",
+      subtitle: "Your answer helps us reach more people who need a quiet place to pray.",
+      groupLabel: "How you heard about GraceHush",
+      options: {
+        tiktok: "TikTok",
+        instagram: "Instagram",
+        facebook: "Facebook",
+        youtube: "YouTube",
+        google: "Google",
+        app_store: "App Store",
+        friend_family: "Friend or family",
+        church: "My church",
+        other: "Something else",
+      },
+      primary: "Continue",
+      primaryHint: "Choose an answer first, or skip",
+      skip: "Skip",
     },
     rhythm: {
       eyebrow: "Your rhythm",
@@ -178,7 +224,8 @@ export const copy = {
     defaultDevotionalTitle: "Your devotional",
   },
   tabs: {
-    journal: "Journal",
+    // The first tab (route "Journal") is called Today since 2026-11-16: it opens on the hero, the day's word and the history.
+    today: "Today",
     scholar: "Scholar",
     prayers: "Prayers",
     profile: "Profile",
@@ -188,10 +235,18 @@ export const copy = {
   },
   header: {
     // The wordmark is two spans, so the header colours Grace and Hush apart; a screen reader hears one name
-    // and the screen it is on ("GraceHush, Journal"). The screen name itself is no longer drawn.
+    // and the screen it is on ("GraceHush, Today"). The screen name itself is no longer drawn.
     wordmark: { grace: "Grace", hush: "Hush" },
     a11y: (screen: string) => `GraceHush, ${screen}`,
     openProfile: "Open profile",
+    // The picture's button says the plan its tag shows (2026-11-19): "Open profile, Pro plan".
+    openProfileWithPlan: (plan: string) => `Open profile, ${plan}`,
+  },
+  // The plan tag on the profile picture (2026-11-19, PlanTag): one short word on the pill, and how the header's button names it.
+  // A trial reads Trial, because the free trial does not include Scholar.
+  planTag: {
+    label: { free: "Free", trial: "Trial", pro: "Pro" },
+    a11y: { free: "Free plan", trial: "free trial", pro: "Pro plan" },
   },
   dock: {
     write: "Write a reflection",
@@ -259,6 +314,18 @@ export const copy = {
     // Step 37: an affirmation with a verse is its headline in bold (the title) over the verse, in curly quotes as one line,
     // and its reference: “God is our refuge and strength, an ever-present help in times of trouble.” — Psalm 46:1 BSB
     affirmationVerse: (quotedVerse: string, reference: string) => `${quotedVerse} — ${reference} BSB`,
+    // The trial-end reminder (2026-11-18, reworded the same day): one notification, about two days before a free trial ends. It leads
+    // with what the person keeps (unlimited devotionals) and what opens when the plan begins (Scholar, which the trial does not
+    // include), says plainly what happens after the trial (the plan continues at the price the store showed: the store's own string
+    // and the billing period of the package that was bought, never typed here) and where to manage it. It carries no cancel deadline
+    // and no store's name: the Paywall's disclosure says that where the person buys, and a tap opens Profile, whose Manage
+    // subscription opens the store. The same words serve both platforms. The weekday is the phone's own, built by
+    // utils/trialReminder.ts.
+    trialEnding: {
+      title: (weekday: string) => `Your GraceHush trial ends ${weekday}`,
+      body: (price: string, period: string) =>
+        `Keep unlimited devotionals, and Scholar opens when your plan begins. After your trial, Pro continues at ${price} per ${period}. Tap to manage your plan.`,
+    },
   },
   // Step 37: the verse under an affirmation in the app (the Journal card, Reflection's Affirmations tab).
   affirmationVerse: {
@@ -266,14 +333,61 @@ export const copy = {
     // For a row that is one element to a screen reader.
     spoken: (quotedVerse: string, reference: string) => `${quotedVerse} ${reference}, Berean Standard Bible.`,
   },
+  // The Today tab (2026-11-16; the first tab, route "Journal"): the hero card, the row that plays the latest devotional, and
+  // the heading over the day's affirmation.
+  today: {
+    hero: {
+      title: "What’s on your heart today?",
+      // What a person gets, in three icons: the three things the Welcome step lists.
+      gets: { scripture: "Scripture", devotional: "Spoken devotional", affirmations: "Affirmations" },
+      speak: "Tap to speak",
+      speakLabel: "Speak a reflection",
+      speakHint: "Opens a new reflection",
+      write: "or write it",
+      writeLabel: "Write a reflection",
+      writeHint: "Opens a new reflection",
+    },
+    listenAgain: {
+      eyebrow: "Listen again",
+      meta: (reference: string | null, duration: string) => (reference ? `${reference} · ${duration}` : duration),
+      label: (title: string, spoken: string) => `Listen again: ${title}. ${spoken}.`,
+      hint: "Plays the devotional and opens the reflection",
+    },
+    word: {
+      title: "Your word for today",
+      // One accessible element: the headline, then the verse (or the affirmation's own words), then where it goes.
+      openLabel: (headline: string, detail: string) => `${headline}. ${detail}`,
+      openHint: "Opens the reflection",
+      share: "Share this verse",
+      shareHint: "Opens sharing options",
+      // The deck (2026-11-20): today's word lies on a card for each earlier reflection, and a swipe turns them. The heading over
+      // an earlier card says which day it is from ("From Tuesday, Nov 12"), its foot says what it is tied to when its affirmation
+      // has no verse, a link brings today's word back, and a screen reader turns the cards with two actions.
+      from: (day: string) => `From ${day}`,
+      tiedTo: (source: string) => `Tied to ${source}`,
+      today: "Today",
+      todayLabel: "Back to today’s word",
+      next: "Next reflection",
+      previous: "Previous reflection",
+    },
+    // The week strip under the greeting: seven days, oldest first, today last. A screen reader hears one sentence; the count
+    // of days in a row stays here and is no longer drawn. Nothing counts what was missed.
+    week: {
+      label: (reflectedDays: readonly string[], streakDays: number) => {
+        const parts = ["This week."];
+        if (reflectedDays.length > 0) parts.push(`You reflected on ${reflectedDays.join(", ")}.`);
+        if (streakDays > 0) parts.push(`${reflectionDaysText(streakDays)}.`);
+        return parts.join(" ");
+      },
+    },
+  },
   journal: {
     // The greeting is drawn in two spans, the name in rosewood (2026-11-01, the Daily Calm cue); `greeting` is the
     // whole line, for the spoken label.
     greetingPrefix,
     greeting: (period: TimeSlot, name: string | null) =>
       name ? `${greetingPrefix(period, true)} ${name}` : greetingPrefix(period, false),
-    reflectionDays: (count: number) =>
-      count === 1 ? "1 day of reflection" : `${count} days of reflection`,
+    reflectionDays: reflectionDaysText,
     // The analytics question (step 34), asked on the Journal's first visit after sign-in since round 8 of 2026-11-01
     // (until then onboarding's fourth step, before the person had received anything): the card's words and its two choices.
     // Unanswered is no.
@@ -400,10 +514,10 @@ export const copy = {
       permission: "Nothing was sent. You can allow Google’s AI anytime in Profile, or the next time you start a reflection.",
     },
     synced: "All reflections synced",
+    // The hero above is the way in (2026-11-16), so the empty list has nothing to press: it says what will gather here.
     empty: {
-      title: "No reflections yet",
-      body: "Tap the mic to voice your heart, or the pen to write.",
-      action: "Record your first prayer",
+      title: "Your reflections will gather here",
+      body: "Each one keeps its Scripture, its spoken devotional and its affirmations.",
     },
     filteredEmpty: {
       message: "No reflections match this filter.",
@@ -575,6 +689,8 @@ export const copy = {
       // The spoken devotional is still being made behind the answer (2026-11-09): the card becomes the player when it lands.
       audioPending: "Preparing your audio. You can read the devotional below.",
       play: (title: string) => `Play devotional, ${title}`,
+      // Play also opens Now Playing (2026-11-20), so a screen reader hears where it goes.
+      playHint: "Opens the full player",
       pause: "Pause devotional",
       open: "Open full player",
       openLink: "Tap to open player",
@@ -638,7 +754,7 @@ export const copy = {
       },
     },
     footer: {
-      returnToJournal: "Return to Journal",
+      returnToJournal: "Back to Today",
       share: "Share scripture",
     },
     // The one quiet line under a heavy moment's devotional (2026-11-08, when Support Resources was removed), chosen since
@@ -710,7 +826,7 @@ export const copy = {
       // the reason (copy.problems.reason) comes first, then this; the card on Journal offers Review.
       refused: {
         title: "We couldn’t finish this reflection.",
-        body: "It’s in your Journal, where Review shows what you can do.",
+        body: "It’s on your Today screen, where Review shows what you can do.",
       },
       failed: {
         title: "We couldn’t finish this reflection.",
@@ -811,7 +927,7 @@ export const copy = {
       marked: "Marked as answered.",
       view: "View in Answered",
       // Remove from Prayers and Delete reflection… (step 29b).
-      removed: "Removed from Prayers. It’s still in your Journal.",
+      removed: "Removed from Prayers. It’s still in your reflections.",
       deleted: "Reflection deleted.",
       failed: "We couldn’t save that change.",
     },
@@ -850,7 +966,7 @@ export const copy = {
     // flag, so it is removed at once.
     removeFromPrayers: {
       title: "Remove this from Prayers?",
-      body: "Its answered date and gratitude note will be removed. The reflection stays in your Journal.",
+      body: "Its answered date and gratitude note will be removed. The reflection is kept.",
       confirm: "Remove",
       cancel: "Keep",
     },
@@ -917,7 +1033,6 @@ export const copy = {
     loading: "Loading your profile",
     account: {
       friend: "Friend",
-      memberSince: (date: string) => `Member since ${date}`,
     },
     plan: {
       freeTitle: "GraceHush Free",
@@ -966,7 +1081,8 @@ export const copy = {
       // The volume is left out while the sound is off (percent is null): "Soft Rain, 50% volume" or "Off".
       summary: (label: string, percent: number | null) =>
         percent === null ? label : `${label}, ${percent}% volume`,
-      helper: "This is the sound your next devotional starts with.",
+      // Since 2026-11-20 every reflection made on the phone starts with Gentle Piano at 100% (NEW_REFLECTION_AMBIENT).
+      helper: "Your new reflections start with Gentle Piano at 100%. Other devotionals start with the sound you choose here.",
       showHint: "Shows the sounds",
       hideHint: "Hides the sounds",
       // The preview (step 27): a few seconds of the chosen sound, while no devotional is playing.
@@ -996,14 +1112,14 @@ export const copy = {
     // The live talk's two rows (step 39): Scholar's voice under Preferences, and the ElevenLabs permission under Privacy.
     scholarVoice: {
       title: "Scholar’s Voice",
-      helper: "The voice Scholar speaks with in a live talk.",
+      helper: "The voice Scholar speaks with in a live talk and when it reads an answer aloud.",
       showHint: "Shows the voices",
       hideHint: "Hides the voices",
     },
     voicePermission: {
       title: "Share Your Voice with ElevenLabs",
-      on: "On. In a live talk, your voice goes to ElevenLabs, which speaks Scholar’s answers.",
-      off: "Off. Live talks with Scholar are off.",
+      on: "On. ElevenLabs speaks Scholar’s answers in the voice you chose, and hears your voice in a live talk.",
+      off: "Off. Live talks are off, and Listen reads answers in the voice of your devotionals.",
     },
     // The AI permission's switch (2026-11-03): New Entry asks first, and this is where it is changed afterwards.
     aiPermission: {
@@ -1123,11 +1239,12 @@ export const copy = {
     // so both plans sit above the pinned button. The subtitle went with it: the picture carries the mood now.
     hero: { title: "Unlock GraceHush Pro" },
     // The four rows under the title, one per feature that AGENTS.md defines as a Pro gate (Subscription Rules): the
-    // devotionals, and Scholar's three (steps 38 and 39). Since 2026-11-15 every paywall shows all four, as the Welcome's
-    // rows (one line each). To advertise another, first make it a real gate there, then add its row here.
+    // devotionals, and Scholar with its two voices (steps 38 and 39; since 2026-11-18 Scholar is part of Pro alone, not of the free
+    // plan or the trial). Since 2026-11-15 every paywall shows all four, as the Welcome's rows (one line each). To advertise
+    // another, first make it a real gate there, then add its row here.
     features: {
       devotionals: "Unlimited audio devotionals",
-      scholarMessages: "Longer conversations with Scholar",
+      scholarMessages: "Scholar, your Bible companion",
       scholarListen: "Scholar reads its answers aloud",
       scholarTalk: "Talk with Scholar out loud",
     },
@@ -1143,10 +1260,14 @@ export const copy = {
     // From Scholar (step 38): the banner under the title says what sent the person here. What Pro adds there is in
     // `features` above since 2026-11-15, on every paywall.
     scholar: {
-      messages: "You’ve used today’s free messages with Scholar.",
+      messages: "Scholar is part of GraceHush Pro.",
       listen: "Hearing Scholar’s answers is part of GraceHush Pro.",
       // Step 39: opened from Talk.
       talk: "Talking with Scholar is part of GraceHush Pro.",
+      // 2026-11-20: a free account's message after its free conversation (its ninth there, or any in another conversation),
+      // and a voice other than Hannah chosen by an account that is not subscribed.
+      conversation: "You’ve had your free conversation with Scholar. Scholar is part of GraceHush Pro.",
+      voice: "Scholar’s other voices are part of GraceHush Pro.",
     },
     plan: {
       groupLabel: "Plans",
@@ -1186,16 +1307,27 @@ export const copy = {
       separator: "•",
       openError: "We couldn’t open that page.",
     },
+    // Under the plan cards while the selected plan has a free trial (2026-11-18): what the trial covers, before anything is bought.
+    trialScope: "Your free trial includes unlimited devotionals. Scholar opens when your plan begins.",
+    // The switch under the plans, "Remind me before my trial ends", and what the done view says about it afterwards (2026-11-18).
+    // The notification's own words are copy.notifications.trialEnding. Nothing here promises more than one notification.
+    reminder: {
+      title: "Remind me before my trial ends",
+      detail: "One notification, about two days before it ends.",
+      scheduled: (day: string) => `We’ll remind you on ${day}, before your trial ends.`,
+      denied: "Notifications are off for GraceHush, so we couldn’t set a reminder.",
+      failed: "We couldn’t set the reminder.",
+    },
     later: "Maybe later",
     done: {
       title: "Welcome to GraceHush Pro.",
       body: "Your devotionals are unlimited.",
-      bodyTrial: "Your free trial has started. Your devotionals are unlimited.",
+      bodyTrial: "Your free trial has started. Your devotionals are unlimited, and Scholar opens when your plan begins.",
       action: "Continue",
     },
     member: {
       title: "You’re already a Pro member.",
-      bodyTrial: "Your free trial is active.",
+      bodyTrial: "Your free trial is active. Scholar opens when your plan begins.",
       bodyPro: "Thank you for being part of GraceHush.",
       manage: "Manage subscription",
       manageError: "We couldn’t open your subscription settings.",
@@ -1220,20 +1352,57 @@ export const copy = {
     },
     days: daysLabel,
   },
-  // Scholar (step 38, Part two): the tab, the Conversation screen and the Reflection row. The day's numbers come from the
-  // server's `usage`, so no limit is written here, and a help line under an answer is copy.reflection.help's (HelpLine).
+  // Scholar (step 38, Part two): the tab, the Conversation screen and the Reflection row. The plan and a Pro account's credits
+  // come from the server's `usage` (2026-11-18), so no limit is written here, and a help line under an answer is
+  // copy.reflection.help's (HelpLine).
   scholar: {
-    title: "Ask Scholar",
-    caption: "An AI Bible companion for your questions and your hard days.",
-    groups: { starters: "Try asking", recent: "Recent conversations" },
-    // As rows on the tab and as chips in a new conversation; each is sent as it is written.
+    groups: { starters: "Start with a question", recent: "Recent conversations" },
+    // The Conversations screen behind the tab's "See all" (2026-11-16): every conversation, grouped by day, searchable by title.
+    history: {
+      title: "Conversations",
+      seeAll: "See all",
+      search: "Search conversations",
+      clearSearch: "Clear search",
+      sections: { today: "Today", yesterday: "Yesterday", week: "Previous 7 days" },
+      empty: { title: "No conversations yet", body: "Your conversations with Scholar will be kept here." },
+      noResults: (query: string) => `No conversations match “${query}”.`,
+      loadingMore: "Loading more conversations",
+      moreFailed: "We couldn’t load more conversations.",
+      deleted: "Conversation deleted",
+      a11y: {
+        seeAll: "See all conversations",
+        back: "Back",
+        rowHint: "Opens the conversation",
+        deleteAction: "Delete conversation",
+        searchField: "Search conversations by title",
+      },
+    },
+    // The tab's hero card (2026-11-16; reworded the same day, because "Ask Scholar" and "Ask a question" beside the ask bar said
+    // "ask" three times): the small name label, the pitch in the person's own terms, what Scholar is and does (and that it is AI),
+    // and one button that leads to the live talk, the one thing the ask bar under it cannot do. A free account sees "Pro" on the
+    // button, because talking is a Pro gate and says so before the Paywall does. The line under the card says what is true of
+    // every passage card (the server reads the Berean Standard Bible itself).
+    hero: {
+      eyebrow: "Scholar",
+      // One line: the text column is about 189 wide on a 375-wide phone and 198 on a 390-wide one, and this is 180 at 24pt
+      // (the first wording, "Find words for hard days.", is 286 and wrapped to two lines).
+      title: "Hard days, held.",
+      caption: "AI Bible companion. Explains Scripture and prays with you.",
+      cta: "Talk it through",
+      pro: "Pro",
+      ctaFreeLabel: "Talk it through, Pro",
+      // Said to a free account (the tap shows the plans) and a trial (the tap opens a conversation that says when Scholar opens).
+      ctaFreeHint: "Part of GraceHush Pro.",
+      proof: "Word for word from the Berean Standard Bible.",
+    },
+    // As cards on the tab and as chips in a new conversation; each is sent as it is written.
     starters: {
       verse: "Explain John 3:16 simply",
       anxious: "A verse for when I’m anxious",
       pray: "Help me pray about today",
     },
     untitled: "A conversation with Scholar",
-    askBar: "Ask Scholar…",
+    askBar: "Ask about a verse or your day…",
     input: "Message Scholar…",
     header: "Scholar",
     // The name over an answer, in sentence case (2026-11-15; it was an uppercase eyebrow).
@@ -1276,17 +1445,52 @@ export const copy = {
       offline: "Scholar needs a connection.",
       resting: "Scholar is resting right now. Please try again later.",
       rateLimited: "You’re sending messages quickly. Please wait a moment.",
-      freeLimit: "You’ve used today’s free messages with Scholar. They return tomorrow. Your message is saved.",
+      // Scholar is part of Pro (2026-11-18). A free account's message is saved and waits for the plan (Try again answers it). A
+      // trial's opens when its plan begins: the day is the server's, or RevenueCat's trial for a tap on Listen or Talk, and the
+      // words stand alone when it is not known. Never a paywall in a heavy conversation, which is answered for everyone.
+      plan: "Scholar is part of GraceHush Pro. Your message is saved.",
       seePlans: "See plans",
-      proLimit: "You’ve reached today’s limit with Scholar. It resets tomorrow.",
-      listenLimit: "Scholar has read aloud as much as it can today. You can keep reading its answers.",
+      opens: (day: string | null) =>
+        day === null ? "Scholar opens when your plan begins." : `Scholar opens when your plan begins on ${day}.`,
+      opensSaved: (day: string | null) =>
+        day === null
+          ? "Scholar opens when your plan begins. Your message is saved."
+          : `Scholar opens when your plan begins on ${day}. Your message is saved.`,
+      // A Pro account with no credit left; the countdown to the renewal is credits.renew, on its own line under it.
+      creditsOut: "You’ve used today’s Scholar credits.",
+      // The free conversation (2026-11-20): how many of its free messages are left, from SCHOLAR_LEFT_NOTICE_FROM down. The number
+      // is the server's, from the last answer.
+      freeLeft: (count: number) =>
+        count === 1 ? "1 free message left in this conversation." : `${count} free messages left in this conversation.`,
       // The server's own words for SCHOLAR_ADULTS_ONLY (_shared/errors.ts), with the app's support address.
       adultsOnly: (email: string) =>
         `Scholar is for adults, so it isn’t available on this account. If you think this is a mistake, write to ${email}.`,
       breakNote: "You’ve been here a while. It’s okay to pause and come back. Scholar will be here.",
       permissionNote: "Scholar uses the same Google AI as your devotionals. You can change this in Profile.",
     },
-    remaining: (count: number) => (count === 1 ? "1 free message left today" : `${count} free messages left today`),
+    // A Pro account's credits (2026-11-18): every number is the server's. The time until they renew is rounded up to the minute
+    // and moves while the screen is open; its spoken form says the words a screen reader would otherwise spell out.
+    credits: {
+      renewsIn: (minutes: number) => {
+        const hours = Math.floor(minutes / 60);
+        const rest = minutes % 60;
+        if (hours === 0) return `${rest} min`;
+        return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+      },
+      renewsInSpoken: (minutes: number) => {
+        const hours = Math.floor(minutes / 60);
+        const rest = minutes % 60;
+        const hourWords = hours === 1 ? "1 hour" : `${hours} hours`;
+        const minuteWords = rest === 1 ? "1 minute" : `${rest} minutes`;
+        if (hours === 0) return minuteWords;
+        return rest === 0 ? hourWords : `${hourWords} ${minuteWords}`;
+      },
+      renew: (renewsIn: string) => `They renew in ${renewsIn}.`,
+      // The line above the composer from SCHOLAR_CREDITS_LOW_PERCENT left: "Scholar credits: 15% left · renews in 6 h 12 min".
+      low: (percent: number, renewsIn: string) => `Scholar credits: ${percent}% left · renews in ${renewsIn}`,
+      lowSpoken: (percent: number, renewsIn: string) =>
+        `Scholar credits: ${percent} percent left. They renew in ${renewsIn}.`,
+    },
     // The readers' request (2026-11-11): in a heavy conversation a small help button stays within reach.
     help: {
       button: "Get help",
@@ -1321,8 +1525,8 @@ export const copy = {
       button: "Talk with Scholar",
       hint: "Starts a live voice talk",
       title: "Scholar",
-      // Under the title: the voice the person chose, by its name ("Warm voice").
-      voice: (name: string) => `${name} voice`,
+      // Under the title: the voice the person chose, by its name ("Hannah’s voice"), with its portrait beside it.
+      voice: (name: string) => `${name}’s voice`,
       status: {
         connecting: "Connecting…",
         listening: "Listening",

@@ -234,7 +234,9 @@ function isDeleteAccountResponse(value: unknown): value is DeleteAccountResponse
 // ---- Scholar (step 38) ----
 const HELP_KINDS: readonly string[] = ["crisis", "abuse", "harm_others", "emergency"];
 const MESSAGE_STATUSES: readonly string[] = ["pending", "ready", "failed"];
-const USAGE_KINDS: readonly string[] = ["free_day", "pro_day", "listen_day", "listen_plan", "talk_plan", "talk_month"];
+// 2026-11-18: Scholar is Pro's, and a Pro account spends credits ("credits"); the plan kinds carry no numbers. 2026-11-20: an
+// account that is not Pro has one free conversation, whose answers carry its messages ("free").
+const USAGE_KINDS: readonly string[] = ["credits", "free", "scholar_plan", "listen_plan", "talk_plan", "talk_month"];
 
 function isScholarBlock(value: unknown): value is ScholarBlock {
   if (!isRecord(value)) return false;
@@ -456,7 +458,8 @@ export function deleteAccount(appleAuthorizationCode: string | null): Promise<Fu
 }
 
 // scholar-turn (step 38): one message of a Scholar conversation and its answer, screened before any of it is shown. A spoken
-// message waits longer (its recording is transcribed first). LIMIT_REACHED (402) carries the day's numbers (readScholarUsage).
+// message waits longer (its recording is transcribed first). LIMIT_REACHED (402) carries the plan (scholar_plan) or a Pro
+// account's credits (readScholarUsage).
 export function scholarTurn(request: ScholarTurnRequest): Promise<FunctionResult<ScholarTurnResponse>> {
   const timeout = request.input.type === "audio" ? SCHOLAR_SPOKEN_TURN_TIMEOUT_MS : SCHOLAR_TURN_TIMEOUT_MS;
   return callFunction("scholar-turn", request, timeout, isScholarTurnResponse, FunctionRegion.UsEast1);
@@ -485,7 +488,7 @@ export function scholarVoiceEnd(talkId: string): Promise<FunctionResult<ScholarV
   return callFunction("scholar-voice-end", body, SCHOLAR_VOICE_END_TIMEOUT_MS, isScholarVoiceEndResponse, FunctionRegion.UsEast1);
 }
 
-// The day's numbers a Scholar 402 carries beside its error, or null for any other body.
+// What a Scholar 402 carries beside its error (the plan, or a Pro account's credits), or null for any other body.
 export function readScholarUsage(body: unknown): ScholarUsage | null {
   return isRecord(body) && isScholarUsage(body.usage) ? body.usage : null;
 }

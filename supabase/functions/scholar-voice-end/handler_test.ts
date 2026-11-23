@@ -14,7 +14,7 @@ import {
 import { handle } from "./handler.ts";
 
 // scholar-voice-end (step 39): the phone says a talk is over. The talk's row gets its end and its length, and the person is told
-// what is left of the month.
+// what is left of the month (an account that is not Pro, since 2026-11-20: what is left of its free conversation's talk time).
 
 type Row = Record<string, unknown>;
 
@@ -28,6 +28,8 @@ function flow(work: (world: World) => Promise<void>) {
     const world = installWorld();
     voiceOn(world);
     world.seedUser(USER);
+    // A Pro account, whose talk time is the month's; the free conversation has a test of its own.
+    (world.users.find((row) => row.id === USER) as Row).subscription_tier = "pro";
     try {
       await work(world);
       await world.settleBackground();
@@ -140,7 +142,7 @@ Deno.test(
     assert(ended >= before && ended <= Date.now(), "ended now");
     assertEquals(talk.turns, 3);
     assertEquals(body, {
-      limits: { talkSeconds: 600, monthSecondsLeft: 1_800 - Number(talk.seconds), resetsAt: monthEnd() },
+      limits: { talkSeconds: 600, monthSecondsLeft: 3_600 - Number(talk.seconds), resetsAt: monthEnd() },
     });
 
     // The log line: the shared fields, one word, and nothing that identifies the talk.
@@ -154,6 +156,50 @@ Deno.test(
       assert(!logged.includes(secret), "never logged");
     }
     assertEquals(unscopedRequests(world, USER), []);
+  }),
+);
+
+Deno.test(
+  "end: an account that is not Pro is told what is left of its free conversation's 3 minutes, with no month",
+  flow(async (world) => {
+    for (const tier of ["free", "trial"]) {
+      (world.users.find((row) => row.id === USER) as Row).subscription_tier = tier;
+      world.voiceSessions.length = 0;
+      // An earlier talk in the same conversation already used 40 seconds; one in another conversation does not count.
+      world.voiceSessions.push({
+        id: crypto.randomUUID(),
+        user_id: USER,
+        conversation_id: CONVERSATION,
+        voice: "warm",
+        started_at: ago(900),
+        last_turn_at: ago(860),
+        ended_at: ago(860),
+        cap_seconds: 180,
+        seconds: 40,
+        turns: 2,
+        is_heavy: false,
+      });
+      world.voiceSessions.push({
+        id: crypto.randomUUID(),
+        user_id: USER,
+        conversation_id: "c0a8012e-0000-4000-8000-000000000009",
+        voice: "warm",
+        started_at: ago(1_200),
+        last_turn_at: ago(1_100),
+        ended_at: ago(1_100),
+        cap_seconds: 600,
+        seconds: 600,
+        turns: 9,
+        is_heavy: false,
+      });
+      const talk = seedTalk(world, { cap_seconds: 140 });
+      const body = await ok(await send(world, { talkId: TALK }));
+      between(talk.seconds, 95, 98);
+      assertEquals(body, {
+        limits: { talkSeconds: 140 - Number(talk.seconds), monthSecondsLeft: null, resetsAt: monthEnd() },
+      });
+      assertEquals(lastLog(world).limitUsed, 40 + Number(talk.seconds));
+    }
   }),
 );
 
@@ -173,7 +219,7 @@ Deno.test(
     const closedAt = closed.ended_at;
     const body = await ok(await send(world, { talkId: closed.id }));
     assertEquals([closed.ended_at, closed.seconds], [closedAt, 60]);
-    assertEquals(body.limits.monthSecondsLeft, 1_800 - Number(seconds) - 60);
+    assertEquals(body.limits.monthSecondsLeft, 3_600 - Number(seconds) - 60);
   }),
 );
 
@@ -199,7 +245,7 @@ Deno.test(
     const long = seedTalk(world, { started_at: ago(640), last_turn_at: ago(30), seconds: 610 });
     const body = await ok(await send(world, { talkId: TALK }));
     between(long.seconds, 640, 643);
-    assertEquals(body.limits, { talkSeconds: 600, monthSecondsLeft: 1_200, resetsAt: monthEnd() });
+    assertEquals(body.limits, { talkSeconds: 600, monthSecondsLeft: 3_000, resetsAt: monthEnd() });
 
     // A talk whose row already says more than the clock does keeps the larger number.
     const ahead = seedTalk(world, { id: crypto.randomUUID(), started_at: ago(100), seconds: 200, cap_seconds: 300 });
@@ -215,7 +261,7 @@ Deno.test(
     });
     const after = await ok(await send(world, { talkId: stale.id }));
     assertEquals(stale.seconds, 1_900);
-    assertEquals(after.limits.monthSecondsLeft, 1_800 - 600 - 200 - 120);
+    assertEquals(after.limits.monthSecondsLeft, 3_600 - 600 - 200 - 120);
   }),
 );
 
@@ -250,7 +296,7 @@ Deno.test(
       seconds: 30,
     });
     const last = await ok(await send(world, { talkId: clear.id }));
-    assertEquals(last.limits.monthSecondsLeft, 1_800 - Number(clear.seconds));
+    assertEquals(last.limits.monthSecondsLeft, 3_600 - Number(clear.seconds));
     // Another person's heavy conversation with the same id would never be read: every query names the user.
     assertEquals(unscopedRequests(world, USER), []);
   }),
@@ -271,7 +317,7 @@ Deno.test(
     assert(talk.ended_at !== null);
     assertEquals([running.ended_at, running.seconds], [null, 25]);
     // The talk still running is counted as far as its last turn.
-    assertEquals(body.limits.monthSecondsLeft, 1_800 - Number(talk.seconds) - 25);
+    assertEquals(body.limits.monthSecondsLeft, 3_600 - Number(talk.seconds) - 25);
   }),
 );
 

@@ -17,6 +17,8 @@ import { endLiveTalk } from "@/services/scholarTalk";
 import { startPlanWatch, stopPlanWatch } from "@/services/subscriptionSync";
 import { getSupabaseUserId } from "@/services/supabaseClient";
 import { isSyncEngineStarted, startSyncEngine, stopSyncEngine } from "@/services/syncEngine";
+import { clearTrialReminder } from "@/services/trialReminder";
+import { deleteWordPictures } from "@/services/wordCardShare";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { usePlayerStore } from "@/store/playerStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
@@ -132,9 +134,14 @@ export async function signOutCleanup(): Promise<void> {
   // remembers go with the session. Conversations themselves live on the server and nothing of them is kept on the phone.
   clearScholarAudio();
   forgetScholarSession();
+  // The picture of the word card made for the last share (2026-11-20): it holds a headline and a verse from this account's
+  // reflection, so it goes with the session too.
+  deleteWordPictures();
   // The affirmation notifications this account scheduled, and the ones still in the notification center (step 28): an
   // affirmation must not reach the phone, or open, after its account has gone.
   await clearAffirmations();
+  // The trial-end reminder (2026-11-18): it names this account's trial, so it must not reach the phone after the account has gone.
+  await clearTrialReminder();
   // RevenueCat (step 30): the plan watch stops, so nothing asks the server about this account any more, then RevenueCat logs
   // out of it and the entitlement it reported is forgotten.
   stopPlanWatch();

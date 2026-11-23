@@ -1,6 +1,7 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { TRIAL_REMINDER_MIN_TRIAL_DAYS } from "@/constants/app";
 import { getEntry, getUsage } from "@/data/journalRepository";
 import { track } from "@/services/analytics";
 import { haptics } from "@/services/haptics";
@@ -10,19 +11,29 @@ import {
   purchasePackage,
   restorePurchases,
 } from "@/services/purchases";
+import {
+  canOfferTrialReminder,
+  scheduleTrialReminder,
+  type TrialReminderResult,
+} from "@/services/trialReminder";
 import type { Offering, PlanPackage, PlanUsage, PurchaseErrorCode, RestoreResult } from "@/types";
+import { activeIntroOffer } from "@/utils/pricing";
 
 // A line under the button. It stays until the next purchase or restore, never on a timer.
 export type PaywallNotice = "pending" | "error" | "notAllowed" | "restoreNone" | "restoreError";
 
 type PaidTier = "trial" | "pro";
 
+// What a success leaves for the done view: the plan, and what became of the trial-end reminder the person asked for (null when none
+// was asked for: a plan with no trial, the switch off, or a restore).
+type Done = { tier: PaidTier; reminder: TrialReminderResult | null };
+
 export type PaywallState =
   | { status: "loading" }
   // The entry that sent the user here is a crisis entry: the screen replaces itself with Reflection.
   | { status: "crisis" }
   // A purchase or a restore succeeded.
-  | { status: "done"; tier: PaidTier }
+  | { status: "done"; tier: PaidTier; reminder: TrialReminderResult | null }
   // Already subscribed when the screen opened.
   | { status: "member"; tier: PaidTier }
   | {
@@ -45,13 +56,25 @@ export type PaywallState =
       purchasing: boolean;
       restoring: boolean;
       notice: PaywallNotice | null;
+      // The "Remind me before my trial ends" switch (2026-11-18): shown only for a trial of at least
+      // TRIAL_REMINDER_MIN_TRIAL_DAYS days that the store confirmed for this user, on a phone that can be reminded. It starts on,
+      // and the purchase schedules the reminder when it is.
+      reminder: { available: boolean; on: boolean; set: (value: boolean) => void };
     };
 
 type Loaded =
   | { kind: "crisis" }
   | { kind: "member"; tier: PaidTier }
   | { kind: "unavailable" }
-  | { kind: "ready"; offering: Offering; eligibility: Record<string, boolean>; usage: PlanUsage };
+  | {
+      kind: "ready";
+      offering: Offering;
+      eligibility: Record<string, boolean>;
+      usage: PlanUsage;
+      // Whether this phone can show the reminder (notifications can load and are not turned off for GraceHush). Read only when
+      // some plan has a trial to sell; nothing is asked of the person.
+      canRemind: boolean;
+    };
 
 // The yearly plan is the one to see selected first.
 function defaultPackage(packages: PlanPackage[]): PlanPackage | null {
@@ -78,7 +101,10 @@ async function loadPaywall(entryId: string | undefined): Promise<Loaded> {
     if (entry?.isCrisis === true) return { kind: "crisis" };
     if (usage.tier !== "free") return { kind: "member", tier: usage.tier };
     if (offering === null || offering.packages.length === 0) return { kind: "unavailable" };
-    return { kind: "ready", offering, eligibility: await readEligibility(offering), usage };
+    const eligibility = await readEligibility(offering);
+    const sellsTrial = offering.packages.some((pkg) => activeIntroOffer(pkg, eligibility[pkg.id] ?? false) !== null);
+    const canRemind = sellsTrial ? await canOfferTrialReminder().catch(() => false) : false;
+    return { kind: "ready", offering, eligibility, usage, canRemind };
   } catch {
     return { kind: "unavailable" };
   }
@@ -112,7 +138,9 @@ export function usePaywall(entryId: string | undefined): PaywallState {
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [notice, setNotice] = useState<PaywallNotice | null>(null);
-  const [done, setDone] = useState<PaidTier | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
+  // The reminder switch. On by default: it is the whole point of showing it, and the person can turn it off before they buy.
+  const [remind, setRemind] = useState(true);
   // Only the latest load may set state. Touched in callbacks and effects only, never in render.
   const latestLoad = useRef(0);
   // True while a purchase or a restore runs.
@@ -158,6 +186,15 @@ export function usePaywall(entryId: string | undefined): PaywallState {
       : (offering.packages.find((pkg) => pkg.id === picked) ?? defaultPackage(offering.packages));
   const selectedId = selected?.id ?? null;
   const selectedKind = selected?.kind;
+  // What the plan costs after the trial, for the reminder's words: the package's own price string and period.
+  const selectedPrice = selected?.priceString ?? null;
+  const selectedPeriod = selected?.periodLabel ?? null;
+  // The switch is offered for a trial long enough to remind about, that the store confirmed for this user.
+  const trialDays =
+    selected !== null && loaded?.kind === "ready"
+      ? (activeIntroOffer(selected, loaded.eligibility[selected.id] ?? false)?.periodDays ?? 0)
+      : 0;
+  const reminderAvailable = loaded?.kind === "ready" && loaded.canRemind && trialDays >= TRIAL_REMINDER_MIN_TRIAL_DAYS;
 
   const select = useCallback(
     (packageId: string) => {
@@ -165,6 +202,14 @@ export function usePaywall(entryId: string | undefined): PaywallState {
       setPicked(packageId);
     },
     [selectedId],
+  );
+
+  const setReminder = useCallback(
+    (value: boolean) => {
+      if (value !== remind) haptics.selection();
+      setRemind(value);
+    },
+    [remind],
   );
 
   const purchase = useCallback(async () => {
@@ -178,9 +223,26 @@ export function usePaywall(entryId: string | undefined): PaywallState {
       // is CANCELLED: behaviour, not an error.
       if (!result.ok) track("purchase_failed", { code: result.code });
       else if (selectedKind !== undefined) track("purchase_completed", { plan: selectedKind, trial: result.tier === "trial" });
+      // The reminder the person asked for is set whether or not the screen is still open, like the event above: the trial has
+      // started. It names the price the person was shown, so the terms are the bought package's own. A failure to set it never
+      // fails the purchase; the done view says what happened.
+      let reminder: TrialReminderResult | null = null;
+      if (
+        result.ok &&
+        result.tier === "trial" &&
+        reminderAvailable &&
+        remind &&
+        typeof result.trialEndsAt === "number" &&
+        selectedPrice !== null &&
+        selectedPeriod !== null
+      ) {
+        reminder = await scheduleTrialReminder(result.trialEndsAt, { price: selectedPrice, period: selectedPeriod }).catch(
+          (): TrialReminderResult => ({ status: "failed" }),
+        );
+      }
       if (!mounted.current) return;
       if (result.ok) {
-        setDone(result.tier);
+        setDone({ tier: result.tier, reminder });
       } else if (result.code === "ALREADY_OWNED") {
         // The store says this account already has it: restore it instead of buying twice.
         setPurchasing(false);
@@ -189,7 +251,7 @@ export function usePaywall(entryId: string | undefined): PaywallState {
         if (answer.ok) track("restore_completed", { found: answer.restored });
         const restored = restoreOutcome(answer);
         if (!mounted.current) return;
-        if ("tier" in restored) setDone(restored.tier);
+        if ("tier" in restored) setDone({ tier: restored.tier, reminder: null });
         else setNotice(restored.notice);
       } else {
         setNotice(noticeForPurchase(result.code));
@@ -204,7 +266,7 @@ export function usePaywall(entryId: string | undefined): PaywallState {
         setRestoring(false);
       }
     }
-  }, [selectedId, selectedKind]);
+  }, [selectedId, selectedKind, selectedPrice, selectedPeriod, reminderAvailable, remind]);
 
   const restore = useCallback(async () => {
     if (running.current) return;
@@ -216,7 +278,7 @@ export function usePaywall(entryId: string | undefined): PaywallState {
       if (answer.ok) track("restore_completed", { found: answer.restored });
       const restored = restoreOutcome(answer);
       if (!mounted.current) return;
-      if ("tier" in restored) setDone(restored.tier);
+      if ("tier" in restored) setDone({ tier: restored.tier, reminder: null });
       else setNotice(restored.notice);
     } catch {
       if (mounted.current) setNotice("restoreError");
@@ -226,7 +288,7 @@ export function usePaywall(entryId: string | undefined): PaywallState {
     }
   }, []);
 
-  if (done !== null) return { status: "done", tier: done };
+  if (done !== null) return { status: "done", tier: done.tier, reminder: done.reminder };
   if (loaded === null) return { status: "loading" };
   if (loaded.kind === "crisis") return { status: "crisis" };
   if (loaded.kind === "member") return { status: "member", tier: loaded.tier };
@@ -245,5 +307,6 @@ export function usePaywall(entryId: string | undefined): PaywallState {
     purchasing,
     restoring,
     notice,
+    reminder: { available: reminderAvailable, on: remind, set: setReminder },
   };
 }

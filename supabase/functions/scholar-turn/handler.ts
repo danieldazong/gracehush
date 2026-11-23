@@ -26,8 +26,8 @@ import {
 //
 // The log line is the shared one (43 fields). Its reason says what happened in a word (scholar:answered,
 // scholar:answered:typed_verse, scholar:heavy, scholar:heavy:closed, scholar:emergency, scholar:adults_only,
-// scholar:fallback:<why>, scholar:replayed, scholar:off, scholar:budget, or an error's own); it never holds a message, an answer,
-// a title, a passage, a conversation or message id, a help line or a phrase.
+// scholar:fallback:<why>, scholar:replayed, scholar:off, or an error's own); it never holds a message, an answer, a title, a
+// passage, a conversation or message id, a help line or a phrase.
 
 // A conversation and a message id are made on the phone: a canonical, lowercase UUID v4.
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;

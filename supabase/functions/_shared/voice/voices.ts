@@ -2,9 +2,9 @@ import { optionalEnv } from "../env.ts";
 import { AppError } from "../errors.ts";
 
 // Scholar's eight voices for a live talk (step 39): four women and four men, chosen by the owner on 2026-11-13 from ElevenLabs'
-// ready-made voices. One Scholar, eight voices: no personas and no people's names. A voice is known by its key here and in the app
-// (src/constants/scholarVoices.ts, which a Node check keeps equal to this list); the name beside each key in a comment is
-// ElevenLabs' own, and it is never shown.
+// ready-made voices. One Scholar, eight voices. A voice is known by its key here and in the app (src/constants/scholarVoices.ts,
+// which a Node check keeps equal to this list). The app shows each voice with a Christian name and a portrait (2026-11-19), which
+// the server never sees; the name beside each key in a comment is ElevenLabs' own, and it is never shown.
 //
 // Ready-made voices only: a voice from ElevenLabs' community library can be withdrawn by its owner, and a cloned voice is never
 // offered. The server decides the voice: each one is its own ElevenLabs agent, and the phone cannot pass a voice id.
@@ -23,6 +23,13 @@ export type VoiceKey = (typeof VOICES)[number]["key"];
 
 export const VOICE_KEYS: readonly VoiceKey[] = VOICES.map((voice) => voice.key);
 export const DEFAULT_VOICE: VoiceKey = "warm";
+
+// Each voice's ElevenLabs voice, by key: Listen reads an answer in it (scholar-speak, 2026-11-19), as the voice's agent speaks a
+// talk.
+export const VOICE_IDS = Object.fromEntries(VOICES.map((voice) => [voice.key, voice.elevenLabsVoiceId])) as Record<
+  VoiceKey,
+  string
+>;
 
 export function isVoiceKey(value: unknown): value is VoiceKey {
   return typeof value === "string" && (VOICE_KEYS as readonly string[]).includes(value);

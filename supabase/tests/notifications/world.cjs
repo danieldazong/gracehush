@@ -1,6 +1,6 @@
 // Fakes for the step 28 checks: expo-notifications shaped like 58.1.x on iOS and Android (what the phone keeps scheduled, the
 // notification center, the permission, the foreground handler, taps and the last response), the navigation container's ref,
-// the sync engine's events and a repository whose newest reflection a check sets. The app's real planner, scheduler, tap
+// the sync engine's events and a repository whose week of reflections and word calendar a check sets. The app's real deck, planner, scheduler, tap
 // routing, notifications service, zoned time and stores run on top of them, on the recording checks' virtual clock, so a
 // week of notifications takes no real time.
 const crypto = require("node:crypto");
@@ -55,9 +55,11 @@ function makeNotifications({ platform = "ios", expoGoOthers = [] } = {}) {
   for (const other of expoGoOthers) scheduled.set(other, { content: { title: "x", body: "y", data: {} }, trigger: {}, at: Infinity });
   const presented = []; // { request: { identifier, content }, date }
   const listeners = new Set();
-  const calls = { schedule: [], cancel: [], dismiss: [], handler: [], channels: [], list: 0, presentedList: 0 };
+  const calls = { schedule: [], cancel: [], dismiss: [], handler: [], channels: [], requests: [], list: 0, presentedList: 0 };
   const state = {
     permission: { granted: true, status: "granted", canAskAgain: true, ios: { status: 2 } },
+    // What a permission request answers (2026-11-18, the trial reminder asks in context): null leaves the permission as it is.
+    requestAnswer: null,
     lastResponse: null,
     failSchedule: new Set(), // identifiers whose scheduling fails
     failScheduleAll: false,
@@ -76,7 +78,11 @@ function makeNotifications({ platform = "ios", expoGoOthers = [] } = {}) {
     IosAuthorizationStatus: { NOT_DETERMINED: 0, DENIED: 1, AUTHORIZED: 2, PROVISIONAL: 3, EPHEMERAL: 4 },
     AndroidImportance: { DEFAULT: 3 },
     getPermissionsAsync: async () => ({ ...state.permission }),
-    requestPermissionsAsync: async () => ({ ...state.permission }),
+    requestPermissionsAsync: async (options) => {
+      calls.requests.push(options);
+      if (state.requestAnswer !== null) state.permission = { ...state.requestAnswer };
+      return { ...state.permission };
+    },
     setNotificationChannelAsync: async (id, channel) => void calls.channels.push({ id, channel }),
     getAllScheduledNotificationsAsync: async () => {
       calls.list += 1;
@@ -156,7 +162,9 @@ function makeNotifications({ platform = "ios", expoGoOthers = [] } = {}) {
     state.lastResponse = responseFor(identifier, data, options);
   }
   const ours = () => [...scheduled.keys()].filter((identifier) => identifier.startsWith("aff-"));
-  return { module, scheduled, presented, listeners, calls, state, deliverDue, tap, coldTap, ours };
+  // The trial reminder's own (2026-11-18): "trial-ending", and the developer button's "trial-test-{ms}".
+  const trialIds = () => [...scheduled.keys()].filter((identifier) => identifier.startsWith("trial-"));
+  return { module, scheduled, presented, listeners, calls, state, deliverDue, tap, coldTap, ours, trialIds };
 }
 
 // ------------------------------------------------------------------ the navigation container's ref
@@ -170,7 +178,9 @@ function makeNavigation() {
       navigationRef: {
         isReady: () => state.ready,
         getRootState: () => (state.ready ? { routeNames: state.routeNames } : undefined),
-        navigate: (name, params) => void navigations.push({ name, params }),
+        // The third argument (navigate's options, for example { pop: true }) is recorded only when it is given, so a call without
+        // one reads { name, params } as it always has.
+        navigate: (name, params, options) => void navigations.push(options === undefined ? { name, params } : { name, params, options }),
       },
     },
     signedIn() {
@@ -202,10 +212,11 @@ function makeSync() {
 
 // ------------------------------------------------------------------ the repository: the newest reflection on the phone
 function affirmationsFor(entryId, headlines = {}) {
-  return ["morning", "afternoon", "evening"].map((slot) => ({
+  return ["morning", "afternoon", "evening"].map((slot, index) => ({
     id: `${entryId}-${slot}`,
     entryId,
     slot,
+    position: index + 1,
     headline: headlines[slot] ?? `You are held this ${slot}`,
     text: `The longer words of the ${slot} affirmation, which the lock screen must never show.`,
     isFavorite: false,
@@ -213,22 +224,55 @@ function affirmationsFor(entryId, headlines = {}) {
   }));
 }
 
-function makeRepository(readPrefs) {
+// The Word Deck's pool (2026-11-17): a check sets `state.source` (one reflection, as before) or `state.reflections` (the week's
+// reflections, newest first, each { entryId, tier, affirmations }), and `state.quiet` for a legacy heavy moment as the newest.
+// The calendar is kept here the way the real one is: rows after now are rewritten at each save, rows before it are history.
+function makeRepository(readPrefs, deckWordsOf) {
   const state = {
     source: { entryId: "entry-1", affirmations: affirmationsFor("entry-1") },
+    reflections: null,
+    quiet: false,
     // The Daily Affirmations switch: "prefs" reads it from the real prefs store as the real repository does (null until the
     // profile was read on the phone); true, false or null overrides it.
     enabled: "prefs",
     readFails: false,
+    calendarFails: false,
     reads: 0,
+    calendar: [], // { day, slot, fireAt, entryId, affirmationId }
+    saves: [],
+  };
+  const reflections = () => {
+    if (state.reflections !== null) return state.reflections;
+    return state.source === null ? [] : [{ entryId: state.source.entryId, tier: "week", affirmations: state.source.affirmations }];
   };
   return {
     state,
     module: {
-      readAffirmationSource: async () => {
+      readWordPool: async () => {
         state.reads += 1;
         if (state.readFails) throw new Error("the cache could not be read");
-        return state.source === null ? null : JSON.parse(JSON.stringify(state.source));
+        return {
+          reflections: JSON.parse(JSON.stringify(reflections())).map((item) => ({
+            entryId: item.entryId,
+            tier: item.tier ?? "week",
+            words: deckWordsOf(item.affirmations),
+          })),
+          quiet: state.quiet,
+          missing: [],
+        };
+      },
+      readWordCalendar: async () => {
+        if (state.readFails) throw new Error("the calendar could not be read");
+        return state.calendar.map((row) => ({ ...row })).sort((a, b) => a.fireAt - b.fireAt);
+      },
+      saveWordCalendar: async (rows, nowMs) => {
+        if (state.calendarFails) throw new Error("the calendar could not be written");
+        state.saves.push(rows.map((row) => ({ ...row })));
+        state.calendar = state.calendar.filter((row) => row.fireAt <= nowMs);
+        for (const row of rows) {
+          state.calendar = state.calendar.filter((old) => !(old.day === row.day && old.slot === row.slot));
+          state.calendar.push({ ...row });
+        }
       },
       getKnownAffirmationsEnabled: (userId) => {
         if (state.enabled !== "prefs") return state.enabled;
@@ -241,13 +285,16 @@ function makeRepository(readPrefs) {
 
 // ------------------------------------------------------------------ a whole world
 // `platform` "ios" or "android"; `expoGo` with `platform` "android" skips the module as the app does in Expo Go on Android.
-function world({ platform = "ios", expoGo = false, zone = "America/New_York", expoGoOthers = [] } = {}) {
+function world({ platform = "ios", expoGo = false, zone = "America/New_York", expoGoOthers = [], extraFakes = {} } = {}) {
   installClock();
   const notifications = makeNotifications({ platform, expoGoOthers });
   const navigation = makeNavigation();
   const sync = makeSync();
   let env = null;
-  const repository = makeRepository(() => env.use("@/store/profilePrefsStore").useProfilePrefsStore.getState());
+  const repository = makeRepository(
+    () => env.use("@/store/profilePrefsStore").useProfilePrefsStore.getState(),
+    (affirmations) => env.use("@/utils/wordDeck").deckWordsOf(affirmations),
+  );
   const appState = makeAppState();
   const device = { zone };
   // The analytics service imports PostHog, which plain Node cannot load: a stand-in records what the app would send.
@@ -274,6 +321,7 @@ function world({ platform = "ios", expoGo = false, zone = "America/New_York", ex
       "@/data/mappers": { getDeviceTimezone: () => device.zone },
       "@/db/database": { userHash: async (id) => sha16(id) },
       "@/services/analytics": analytics,
+      ...extraFakes,
     },
   });
   const use = (spec) => env.use(spec);
@@ -289,6 +337,7 @@ function world({ platform = "ios", expoGo = false, zone = "America/New_York", ex
     analyticsCalls,
     scheduler: () => use("@/services/affirmationScheduler"),
     routing: () => use("@/services/notificationRouting"),
+    trial: () => use("@/services/trialReminder"),
     stores: () => ({
       onboarding: use("@/store/onboardingStore").useOnboardingStore,
       prefs: use("@/store/profilePrefsStore").useProfilePrefsStore,

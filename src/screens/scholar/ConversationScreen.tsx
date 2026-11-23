@@ -28,6 +28,9 @@ import { SuggestionChips } from "@/components/scholar/SuggestionChips";
 import { TalkSheet, type TalkSheetStep } from "@/components/scholar/TalkSheet";
 import { TypingIndicator } from "@/components/scholar/TypingIndicator";
 import { UserMessage } from "@/components/scholar/UserMessage";
+import { VoiceAvatar } from "@/components/scholar/VoiceAvatar";
+import { VoicePermissionStep } from "@/components/scholar/VoicePermissionStep";
+import { VoiceRows } from "@/components/scholar/VoiceRows";
 import { MODAL_HANDOFF_FALLBACK_MS, PRIVACY_POLICY_URL, SCHOLAR_TALK_LOW_S, SUPPORT_EMAIL } from "@/constants/app";
 import { copy } from "@/constants/copy";
 import { colors, layout, shadows } from "@/constants/theme";
@@ -51,6 +54,7 @@ import { getTalkState, resetTalk, subscribeTalk } from "@/services/scholarTalk";
 import { voiceSupported } from "@/services/voiceSupport";
 import { selectIsOnline, useOfflineStore } from "@/store/offlineStore";
 import type { ScholarMessage } from "@/types";
+import { formatResetDay } from "@/utils/format";
 import { answerShareText, type ConversationRow } from "@/utils/scholarRows";
 
 import { AiPermissionSheet } from "../journal/AiPermissionSheet";
@@ -72,15 +76,18 @@ function RowGap() {
   return <View style={styles.gap} />;
 }
 
-function noticeText(kind: NoticeKind): string {
+// `opensDay` is the day a trial's plan begins ("Friday, Nov 21"), or null when it is not known.
+function noticeText(kind: NoticeKind, opensDay: string | null): string {
   const { notices, speak } = copy.scholar;
   switch (kind) {
     case "offline":
       return notices.offline;
-    case "freeLimit":
-      return notices.freeLimit;
-    case "proLimit":
-      return notices.proLimit;
+    case "plan":
+      return notices.plan;
+    case "opens":
+      return notices.opens(opensDay);
+    case "opensSaved":
+      return notices.opensSaved(opensDay);
     case "rateLimited":
       return notices.rateLimited;
     case "resting":
@@ -99,10 +106,9 @@ function noticeText(kind: NoticeKind): string {
 function listenView(state: ScholarListenState, messageId: string): ListenView {
   if (state.phase === "idle" || state.messageId !== messageId) return { phase: "idle" };
   if (state.phase === "failed") {
-    return {
-      phase: "failed",
-      line: state.usage?.kind === "listen_day" ? copy.scholar.notices.listenLimit : copy.scholar.listen.failed,
-    };
+    // A refusal by the plan or the credits (2026-11-18) is said above the composer, not under the answer.
+    if (state.usage !== null) return { phase: "idle" };
+    return { phase: "failed", line: copy.scholar.listen.failed };
   }
   return { phase: state.phase };
 }
@@ -124,7 +130,7 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
   const { allowed, setAllowed } = useAiPermission();
   const { show: showWordingNote, seen: wordingSeen } = useAiWordingNote();
   const listen = useSyncExternalStore(subscribeScholarListen, getScholarListenState);
-  const { isPaid, known } = useEntitlement();
+  const { tier, known, trialEndsAt } = useEntitlement();
   const online = useOfflineStore(selectIsOnline);
   const shareSheet = useShareSheet();
   // The screen's side padding: 20, or 16 on a narrow screen (the rule .screen__content applies to views).
@@ -141,10 +147,15 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
   const afterMenu = useRef<(() => void) | null>(null);
   // The live talk (step 39): its one-time sheet, the microphone line, and the talk that last ended.
   const { allowed: voiceAllowed, setAllowed: setVoiceAllowed } = useVoicePermission();
-  const { voice, setVoice } = useScholarVoice();
+  const { voice, setVoice, locked: voicesLocked } = useScholarVoice();
+  // The voice sheet (2026-11-19): the chosen voice's portrait in the header opens it, to change Scholar's voice from the chat. The
+  // chosen voice reads answers aloud through ElevenLabs, so an account that has not allowed ElevenLabs is asked first.
+  const [voicesStep, setVoicesStep] = useState<"permission" | "voices" | null>(null);
   const [talkSheet, setTalkSheet] = useState<TalkSheetStep | null>(null);
   const [micOff, setMicOff] = useState(false);
   const afterTalkSheet = useRef<(() => void) | null>(null);
+  // A Pro voice tapped in the voice sheet (2026-11-20): the plans open once the sheet has closed.
+  const afterVoices = useRef<(() => void) | null>(null);
   const talk = useSyncExternalStore(subscribeTalk, getTalkState);
   const seenTalk = useRef(getTalkState().last?.seq ?? null);
 
@@ -162,6 +173,32 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
     const timer = setTimeout(() => inputRef.current?.focus(), FOCUS_DELAY_MS);
     return () => clearTimeout(timer);
   }, [params.compose, allowed, chat.phase]);
+
+  // From the Scholar tab's hero button (`compose: "talk"`): the talk's own order starts once, as soon as the permission is
+  // answered and the conversation is ready, as if the Talk button had been pressed here. Once only, so coming back from the
+  // Talk screen leaves the conversation as it is. It waits out the screen's own slide first (as the keyboard does), runs after
+  // every render on purpose (it reads the latest state through `openTalk`, and the ref stops it after the first start) and its
+  // timer ends with the screen, so leaving within that moment starts nothing.
+  const talkOnOpen = useRef(params.compose === "talk");
+  const talkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (talkTimer.current !== null) clearTimeout(talkTimer.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!talkOnOpen.current || !allowed || chat.phase !== "ready") return;
+    talkOnOpen.current = false;
+    talkTimer.current = setTimeout(openTalk, FOCUS_DELAY_MS);
+  });
+
+  // A free account's message after its free conversation (2026-11-20): the message is kept, and the plans open by themselves,
+  // once for each refusal.
+  const { paywallAsk } = chat;
+  useEffect(() => {
+    if (paywallAsk > 0) navigation.navigate("Paywall", { source: "scholar", reason: "conversation" });
+  }, [paywallAsk, navigation]);
 
   // The newest message stays in view when the keyboard opens.
   useEffect(() => {
@@ -193,27 +230,38 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
     if (text !== null) shareSheet.share(text);
   }
 
+  // Scholar is part of Pro (2026-11-18), with one free conversation for every account (2026-11-20): Listen works on its answers,
+  // and a talk may start in it, or in a new conversation while none is claimed yet. Elsewhere an account RevenueCat reports as free
+  // sees the plans, and a trial is told, above the composer, the day its plan begins and Scholar opens. Until RevenueCat and the
+  // free conversation's read have answered, the server decides.
+  function outsidePlan(reason: "listen" | "talk"): boolean {
+    if (!known || tier === "pro" || !chat.freeKnown) return false;
+    if (reason === "listen" ? chat.freeHere : chat.freeOpen) return false;
+    if (tier === "trial") chat.noteOpens(trialEndsAt);
+    else navigation.navigate("Paywall", { source: "scholar", reason });
+    return true;
+  }
+
   async function onListen(message: ScholarMessage) {
-    // A free account hears Scholar with Pro, except in a heavy conversation, where the tap plays for everyone.
-    if (!chat.heavy && known && !isPaid) {
-      navigation.navigate("Paywall", { source: "scholar", reason: "listen" });
-      return;
-    }
+    // In a heavy conversation the tap plays for everyone, and is never counted.
+    if (!chat.heavy && outsidePlan("listen")) return;
     await playScholarAnswer(message.id);
     const after = getScholarListenState();
-    if (after.phase === "failed" && after.messageId === message.id && after.usage?.kind === "listen_plan") {
+    if (after.phase !== "failed" || after.messageId !== message.id || after.usage === null) return;
+    if (after.usage.kind === "listen_plan") {
       stopScholarAudio();
-      navigation.navigate("Paywall", { source: "scholar", reason: "listen" });
+      if (after.usage.resetsAt !== null) chat.noteOpens(after.usage.resetsAt);
+      else navigation.navigate("Paywall", { source: "scholar", reason: "listen" });
+    } else if (after.usage.kind === "credits") {
+      // No credit left: the notice above the composer says when they renew.
+      chat.noteUsage(after.usage);
     }
   }
 
-  // Talk, in the plan's order: a free account goes to the Paywall; no voice permission yet, the one-time sheet; then the
-  // microphone, asked with the recorder's own functions; then the Talk screen.
+  // Talk, in the plan's order: an account Scholar is not part of is told so (above); no voice permission yet, the one-time sheet;
+  // then the microphone, asked with the recorder's own functions; then the Talk screen.
   function openTalk() {
-    if (known && !isPaid) {
-      navigation.navigate("Paywall", { source: "scholar", reason: "talk" });
-      return;
-    }
+    if (outsidePlan("talk")) return;
     if (!voiceAllowed) {
       setTalkSheet("permission");
       return;
@@ -235,6 +283,35 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
       conversationId: chat.conversationId,
       ...(entryId === undefined ? {} : { entryId }),
     });
+  }
+
+  // The voice sheet's previews would play over Scholar reading an answer aloud, so that stops first.
+  function openVoices() {
+    stopScholarAudio();
+    setVoicesStep(voiceAllowed ? "voices" : "permission");
+  }
+
+  function runAfterVoices() {
+    const run = afterVoices.current;
+    afterVoices.current = null;
+    run?.();
+  }
+
+  // A Pro voice tapped by an account that is not subscribed (2026-11-20): the sheet closes first (iOS presents one Modal at a time),
+  // then the plans open.
+  function voiceLocked() {
+    setVoicesStep(null);
+    afterVoices.current = () => navigation.navigate("Paywall", { source: "scholar", reason: "voice" });
+    if (Platform.OS === "ios") setTimeout(runAfterVoices, MODAL_HANDOFF_FALLBACK_MS);
+    else runAfterVoices();
+  }
+
+  // The same from the Talk sheet's voices.
+  function talkVoiceLocked() {
+    setTalkSheet(null);
+    afterTalkSheet.current = () => navigation.navigate("Paywall", { source: "scholar", reason: "voice" });
+    if (Platform.OS === "ios") setTimeout(runAfterTalkSheet, MODAL_HANDOFF_FALLBACK_MS);
+    else runAfterTalkSheet();
   }
 
   function runAfterTalkSheet() {
@@ -289,8 +366,13 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
 
   // One notice at a time: what the last turn said, else no connection.
   const noticeKind: NoticeKind | null = chat.notice ?? (online === false ? "offline" : null);
-  // Talk shows in a build that can hold one, and never for a free account in a heavy conversation (no paywall there).
-  const canTalk = voiceSupported() && !(chat.heavy && known && !isPaid);
+  // Talk shows in a build that can hold one, and in a heavy conversation only for Pro (no paywall and no plan notice there).
+  const canTalk = voiceSupported() && !(chat.heavy && known && tier !== "pro");
+  // The voice's portrait shows where a talk can run, once the conversation has loaded, and never in a heavy conversation, whose
+  // header keeps Get help beside the menu and nothing else (Profile still changes the voice there).
+  const showVoice = voiceSupported() && chat.phase === "ready" && !chat.heavy;
+  const opensDay = chat.opensAt === null ? null : formatResetDay(chat.opensAt);
+  const { credits } = copy.scholar;
   // After a talk from this conversation, when little of the month is left (the server's numbers).
   const talkLeft =
     lastTalk !== null &&
@@ -374,6 +456,19 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
             </Text>
           ) : null}
         </View>
+        {showVoice ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copy.scholarVoice.a11y.change(copy.scholarVoice.voices[voice].name)}
+            accessibilityHint={copy.scholarVoice.a11y.changeHint}
+            onPress={openVoices}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <View className="size-11 items-center justify-center">
+              <VoiceAvatar voice={voice} size={32} />
+            </View>
+          </Pressable>
+        ) : null}
         {/* The readers: in a heavy conversation help stays within reach for the rest of it. */}
         {chat.heavy ? (
           <Pressable
@@ -479,16 +574,26 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
           {noticeKind !== null ? (
             <View className="px-4 pb-2">
               <ConversationNotice
-                text={noticeText(noticeKind)}
+                text={noticeText(noticeKind, opensDay)}
                 action={
-                  noticeKind === "freeLimit"
+                  noticeKind === "plan"
                     ? {
                       label: copy.scholar.notices.seePlans,
-                      onPress: () => navigation.navigate("Paywall", { source: "scholar", reason: "messages" }),
+                      onPress: () => navigation.navigate("Paywall", { source: "scholar", reason: "conversation" }),
                     }
                     : undefined
                 }
                 help={noticeKind === "rateLimited" && chat.heavy ? chat.help : null}
+              />
+            </View>
+          ) : chat.creditsOut !== null ? (
+            <View className="px-4 pb-2">
+              <ConversationNotice
+                text={copy.scholar.notices.creditsOut}
+                detail={{
+                  text: credits.renew(credits.renewsIn(chat.creditsOut)),
+                  label: credits.renew(credits.renewsInSpoken(chat.creditsOut)),
+                }}
               />
             </View>
           ) : micOff ? (
@@ -507,9 +612,21 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
             <Text accessibilityLiveRegion="polite" className="px-4 pb-2 text-center text-body-sm text-mauve">
               {copy.scholar.talk.low(talkLeft)}
             </Text>
-          ) : chat.headsUp !== null ? (
-            <Text accessibilityLiveRegion="polite" className="px-4 pb-2 text-center text-body-sm text-mauve">
-              {copy.scholar.remaining(chat.headsUp)}
+          ) : chat.freeLeft !== null ? (
+            // The free conversation's last few messages (2026-11-20): the number is the server's, from the last answer.
+            <Text className="px-4 pb-2 text-center text-body-sm text-mauve">
+              {copy.scholar.notices.freeLeft(chat.freeLeft)}
+            </Text>
+          ) : chat.creditsLow !== null ? (
+            // Not a live region: its countdown moves every minute.
+            <Text
+              accessibilityLabel={credits.lowSpoken(
+                chat.creditsLow.percent,
+                credits.renewsInSpoken(chat.creditsLow.renewsInMinutes),
+              )}
+              className="px-4 pb-2 text-center text-body-sm text-mauve"
+            >
+              {credits.low(chat.creditsLow.percent, credits.renewsIn(chat.creditsLow.renewsInMinutes))}
             </Text>
           ) : chat.breakNote ? (
             <Text className="px-4 pb-2 text-center text-body-sm text-mauve">{copy.scholar.notices.breakNote}</Text>
@@ -574,6 +691,30 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
         </View>
       </BottomSheet>
 
+      {/* A new voice is kept the moment it is chosen; the next talk and the next answer read aloud speak with it. Without the
+          ElevenLabs permission the sheet asks first; "Not now" closes it, and answers are read in the devotional's voice. */}
+      <BottomSheet visible={voicesStep !== null} onClose={() => setVoicesStep(null)} onDismiss={runAfterVoices}>
+        {voicesStep === "permission" ? (
+          <VoicePermissionStep
+            onAllow={() => {
+              setVoiceAllowed(true);
+              setVoicesStep("voices");
+            }}
+            onNotNow={() => setVoicesStep(null)}
+            onOpenPrivacy={() => void openLegalPage(PRIVACY_POLICY_URL)}
+          />
+        ) : (
+          <View className="gap-4">
+            <Text accessibilityRole="header" className="text-headline text-plum-deep">
+              {copy.scholarVoice.title}
+            </Text>
+            <Text className="text-body text-mauve">{copy.scholarVoice.sheet.body}</Text>
+            <VoiceRows selected={voice} onSelect={setVoice} locked={voicesLocked} onLocked={voiceLocked} />
+            <PrimaryButton label={copy.scholarVoice.sheet.done} onPress={() => setVoicesStep(null)} />
+          </View>
+        )}
+      </BottomSheet>
+
       <ShareSheet text={shareSheet.text} whatsApp={shareSheet.whatsApp} onClose={shareSheet.close} />
 
       <ConfirmDialog
@@ -607,6 +748,8 @@ export function ConversationScreen({ navigation, route }: RootStackScreenProps<"
         onClose={() => setTalkSheet(null)}
         onDismiss={runAfterTalkSheet}
         onOpenPrivacy={() => void openLegalPage(PRIVACY_POLICY_URL)}
+        locked={voicesLocked}
+        onLocked={talkVoiceLocked}
       />
 
       {/* Nothing is sent until this account has allowed Google's AI (Apple's guideline 5.1.2(i)). A starter waits for Allow;

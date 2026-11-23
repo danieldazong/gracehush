@@ -66,6 +66,12 @@ export function calendarDayIn(instant: Date, zone: string): CalendarDay {
   return { year, month, day };
 }
 
+// The calendar day and the clock (hour 0 to 23) of `zone` at this instant.
+export function clockIn(instant: Date, zone: string): CalendarDay & { hour: number; minute: number } {
+  const { year, month, day, hour, minute } = wall(instant.getTime(), zone);
+  return { year, month, day, hour, minute };
+}
+
 // The calendar day that is `days` after this one (negative: before).
 export function addDays(day: CalendarDay, days: number): CalendarDay {
   const moved = new Date(Date.UTC(day.year, day.month - 1, day.day + days));

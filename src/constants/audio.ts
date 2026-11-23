@@ -1,6 +1,6 @@
 import { AudioQuality, IOSOutputFormat, type RecordingOptions } from "expo-audio";
 
-import type { AudioMimeType } from "@/types";
+import type { AmbientDefault, AudioMimeType } from "@/types";
 
 // Speech, not music: AAC in an .m4a file, one channel, 64 kbps. That is about 0.5 MB a minute, so the longest
 // recording (MAX_RECORDING_MS, 5:00) is about 2.4 MB, far under the function's limit below. `directory: "document"`
@@ -86,6 +86,13 @@ export const AMBIENT_FADE_OUT_MS = 800;
 export const AMBIENT_SWITCH_MS = 250;
 // One step of a fade.
 export const AMBIENT_FADE_STEP_MS = 30;
+
+// The sound and the volume every reflection made on this phone starts with under its devotional (2026-11-20, the owner's
+// request), whatever was chosen before. The choice is then the person's again, until the next reflection is made.
+export const NEW_REFLECTION_AMBIENT = {
+  ambientSound: "gentle-piano",
+  ambientVolume: 1,
+} as const satisfies AmbientDefault;
 
 // How long Profile's preview plays, its fade in included, before it fades out by itself.
 export const AMBIENT_PREVIEW_MS = 8_000;

@@ -1,4 +1,6 @@
+import { useIsFocused } from "@react-navigation/native";
 import type { SymbolViewProps } from "expo-symbols";
+import { useEffect, useRef } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Icon } from "@/components/Icon";
@@ -29,6 +31,10 @@ type AudioCardProps = {
 // buttons inside it from VoiceOver. The card takes touches but is not an element: the labels are on the controls.
 function AudioCard({ track, ambientDefault, onOpen }: AudioCardProps) {
   const playback = usePlayback();
+  const isFocused = useIsFocused();
+  // Blocks a second press of the play button before Now Playing has covered this screen: it is a pause button by then,
+  // so a quick double tap would open the player paused. It resets when the reflection is focused again (the dock's guard).
+  const opening = useRef(false);
   const { title, durationMs } = track;
   // The store holds one track at a time. Another entry's card shows 0:00 and paused, and loads its track
   // only when the user acts on it (never because the reflection was merely viewed).
@@ -41,13 +47,28 @@ function AudioCard({ track, ambientDefault, onOpen }: AudioCardProps) {
   const percent = Math.min(100, (positionMs / durationMs) * 100);
   const minutes = Math.max(1, Math.round(durationMs / 60000));
 
+  useEffect(() => {
+    if (isFocused) {
+      opening.current = false;
+    }
+  }, [isFocused]);
+
   function load() {
     if (!isCurrent) playback.load(track, ambientDefault);
   }
 
-  function toggle() {
+  // Play starts the devotional and opens Now Playing on it (2026-11-20, the owner's request); pause pauses here, in place.
+  // The button does what it shows: a report that lands between the render and the press never turns a pause into a play.
+  function playOrPause() {
+    if (opening.current) return;
+    if (isPlaying) {
+      playback.pause();
+      return;
+    }
+    opening.current = true;
     load();
-    playback.toggle();
+    playback.play();
+    onOpen();
   }
 
   // Now Playing opens with the track already loaded, so it never flashes a skeleton.
@@ -67,8 +88,9 @@ function AudioCard({ track, ambientDefault, onOpen }: AudioCardProps) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? player.pause : player.play(title)}
+            accessibilityHint={isPlaying ? undefined : player.playHint}
             accessibilityState={isBuffering ? { busy: true } : undefined}
-            onPress={toggle}
+            onPress={playOrPause}
             style={({ pressed }) => pressed && styles.pressed}
           >
             <View className="size-12 items-center justify-center rounded-full bg-rose">

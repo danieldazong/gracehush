@@ -42,6 +42,8 @@ let stopped = false;
 const realSetTimeout = setTimeout;
 const realClearTimeout = clearTimeout;
 const CHECK_LIMIT_MS = 20000;
+// When the fake trial ends: seven days after the virtual clock starts.
+const TRIAL_END = BASE + 7 * 86_400_000;
 
 // Ids, keys, prices and products that must never reach the development log.
 const FORBIDDEN_IN_LOGS = [
@@ -180,6 +182,9 @@ function makePurchases(mode) {
     eligibility: {},
     failNext: {},
     listeners: [],
+    // A trial's end and whether it renews, as RevenueCat's entitlement info carries them (2026-11-18).
+    trialEnds: TRIAL_END,
+    willRenew: true,
   };
   const call = (name) => {
     state.calls.push(name);
@@ -193,7 +198,9 @@ function makePurchases(mode) {
   const tierOf = (id) => (world?.server.state.revenueCatPlans[id]) ?? "free";
   const customerInfo = (id) => {
     const tier = tierOf(id);
-    const active = tier === "free" ? {} : { pro: { identifier: "pro", isActive: true, periodType: tier === "trial" ? "TRIAL" : "NORMAL" } };
+    const pro = { identifier: "pro", isActive: true, periodType: tier === "trial" ? "TRIAL" : "NORMAL" };
+    if (tier === "trial") Object.assign(pro, { expirationDate: new Date(state.trialEnds).toISOString(), willRenew: state.willRenew });
+    const active = tier === "free" ? {} : { pro };
     return {
       entitlements: { all: active, active, verification: "NOT_REQUESTED" },
       activeSubscriptions: [],
@@ -316,17 +323,21 @@ async function test(name, run, options = {}) {
   clock.now = options.now ?? BASE;
   const sdk = makePurchases(options.mode ?? "browser");
   const profileSync = makeProfileSync();
+  // Clerk's signed-in user, which the plan tag's hook reads (2026-11-19); a check changes it through `w.clerk.userId`.
+  const clerk = { userId: "user_a" };
   const w = makeLiveWorld({
     ...options,
     fakes: {
       "react-native-purchases": sdk.module,
       expo: { __esModule: true, isRunningInExpoGo: () => sdk.state.mode === "browser" },
       "@/services/profileSync": profileSync.module,
+      "@clerk/expo": { __esModule: true, useAuth: () => ({ userId: clerk.userId }) },
     },
   });
   // react-native's Platform, beside the world's AppState (read when a module uses it, so this is in time).
   w.appState.module.Platform = { OS: options.platform ?? "ios" };
   w.order = [];
+  w.clerk = clerk;
   w.sdk = sdk;
   sdk.attach(w);
   profileSync.attach(w);
@@ -502,6 +513,41 @@ async function mappingChecks() {
     assert.equal(tierFromCustomerInfo(info({ premium: { periodType: "NORMAL" } })), "free");
   }, { signIn: false });
 
+  await test("trial: an active pro in its trial period gives when it ends and whether it renews; anything else gives none", async (w) => {
+    const { trialStatusFromCustomerInfo } = rc(w);
+    const END = "2026-11-30T12:00:00.000Z";
+    const info = (active) => ({ entitlements: { active, all: active } });
+    assert.deepEqual(trialStatusFromCustomerInfo(info({ pro: { periodType: "TRIAL", expirationDate: END, willRenew: true } })), {
+      endsAt: Date.parse(END),
+      willRenew: true,
+    });
+    assert.deepEqual(
+      trialStatusFromCustomerInfo(info({ pro: { periodType: "trial", expirationDate: END, willRenew: false } })),
+      { endsAt: Date.parse(END), willRenew: false },
+      "a trial cancelled in the store will not renew",
+    );
+    assert.deepEqual(
+      trialStatusFromCustomerInfo(info({ pro: { periodType: "TRIAL", expirationDate: END } })),
+      { endsAt: Date.parse(END), willRenew: false },
+      "a renewal that is not stated is not assumed",
+    );
+    for (const pro of [
+      { periodType: "TRIAL", expirationDate: null, willRenew: true },
+      { periodType: "TRIAL", expirationDate: "not a date", willRenew: true },
+      { periodType: "TRIAL", willRenew: true },
+      { periodType: "NORMAL", expirationDate: END, willRenew: true },
+      { periodType: "INTRO", expirationDate: END, willRenew: true },
+    ]) {
+      assert.equal(trialStatusFromCustomerInfo(info({ pro })), null, JSON.stringify(pro));
+    }
+    assert.equal(trialStatusFromCustomerInfo(info({})), null);
+    assert.equal(
+      trialStatusFromCustomerInfo(info({ premium: { periodType: "TRIAL", expirationDate: END, willRenew: true } })),
+      null,
+      "only the pro entitlement counts",
+    );
+  }, { signIn: false });
+
   await test("offering: the yearly and the monthly package are mapped as RevenueCat sends them; any other package, and a product with no period, is left out", async (w) => {
     await rc(w).startRevenueCat("user_a");
     const offering = await purchases(w).getCurrentOffering();
@@ -662,7 +708,7 @@ async function purchaseChecks() {
     assert.equal(answered, false, "the purchase waits for the server");
     assert.equal(entitlement(w).tier, "pro", "RevenueCat's answer shows at once");
     release();
-    assert.deepEqual(await pending, { ok: true, tier: "pro" });
+    assert.deepEqual(await pending, { ok: true, tier: "pro", trialEndsAt: null });
     assert.deepEqual(w.order.filter((step) => ["rc:purchasePackage", "sync-subscription", "profile sync"].includes(step)), [
       "rc:purchasePackage",
       "sync-subscription",
@@ -678,11 +724,36 @@ async function purchaseChecks() {
     await rc(w).startRevenueCat("user_a");
     await purchases(w).getCurrentOffering();
     recordSync(w, { answer: fnError(503, "BILLING_UNAVAILABLE") });
-    assert.deepEqual(await purchases(w).purchasePackage("$rc_monthly"), { ok: true, tier: "pro" });
+    assert.deepEqual(await purchases(w).purchasePackage("$rc_monthly"), { ok: true, tier: "pro", trialEndsAt: null });
     assert.deepEqual(entitlement(w).lastSync && [entitlement(w).lastSync.ok, entitlement(w).lastSync.code], [false, "BILLING_UNAVAILABLE"]);
     assert.ok(!w.order.includes("profile sync"), "no profile sync after a failed sync");
     assert.equal(snapshotTier(w), "free");
     assert.equal((await repo(w).getUsage()).tier, "pro", "the screens still show what RevenueCat said");
+  });
+
+  await test("purchase: a trial purchase answers when the trial ends and the entitlement store holds the trial; the next answers follow it and the sign-out forgets it", async (w) => {
+    await rc(w).startRevenueCat("user_a");
+    await purchases(w).getCurrentOffering();
+    recordSync(w);
+    w.sdk.state.alert.push("trial");
+    assert.deepEqual(await purchases(w).purchasePackage("$rc_annual"), { ok: true, tier: "trial", trialEndsAt: TRIAL_END });
+    assert.deepEqual(entitlement(w).trial, { endsAt: TRIAL_END, willRenew: true });
+    // The trial is cancelled in the store: the next answer says it will not renew, and the end is the same.
+    w.sdk.state.willRenew = false;
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    assert.deepEqual(entitlement(w).trial, { endsAt: TRIAL_END, willRenew: false });
+    // It turns into a paid plan: there is no trial any more.
+    w.server.state.revenueCatPlans.user_a = "pro";
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    assert.equal(entitlement(w).trial, null);
+    w.server.state.revenueCatPlans.user_a = "trial";
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    assert.notEqual(entitlement(w).trial, null);
+    await rc(w).endRevenueCatSession();
+    assert.equal(entitlement(w).trial, null, "nothing of the account is kept");
   });
 
   await test("purchase: a purchase that did not give Pro (a product not attached to pro), or a package never read, is UNKNOWN", async (w) => {
@@ -786,6 +857,65 @@ async function watchChecks() {
     assert.equal(count(w, "getCustomerInfo"), reads + 2, "only coming to the front reads it");
   });
 
+  await test("watch: the trial reminder follows RevenueCat's answer for this account, once for each answer, on the real data source only", async (w) => {
+    const calls = w.trialReminderCalls.reconciled;
+    planSync(w).startPlanWatch("user_a");
+    await settle(10);
+    assert.deepEqual(calls, [], "RevenueCat has not answered yet");
+    w.server.state.revenueCatPlans.user_a = "trial";
+    await rc(w).startRevenueCat("user_a");
+    await settle(20);
+    assert.deepEqual(calls, [{ endsAt: TRIAL_END, willRenew: true }], "its first answer");
+    // Another change of the store is not an answer.
+    entitlement(w).setLastSync({ at: clock.now, ok: true, code: null });
+    await settle(10);
+    assert.equal(calls.length, 1);
+    // The trial is cancelled in the store, then it ends.
+    w.sdk.state.willRenew = false;
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    await settle(10);
+    assert.deepEqual(calls[1], { endsAt: TRIAL_END, willRenew: false });
+    w.server.state.revenueCatPlans.user_a = "free";
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    await settle(10);
+    assert.equal(calls[2], null, "a trial that is gone is told as none");
+    assert.equal(calls.length, 3);
+    // Another account's answer, a stopped watch and the mock data source reconcile nothing.
+    entitlement(w).setEntitlement("someone_else", "trial", null, { endsAt: TRIAL_END, willRenew: true });
+    await settle(10);
+    assert.equal(calls.length, 3, "another account's answer is not this account's");
+    planSync(w).stopPlanWatch();
+    w.server.state.revenueCatPlans.user_a = "trial";
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    await settle(10);
+    assert.equal(calls.length, 3, "a stopped watch");
+    dev(w).setDataSource("mock");
+    planSync(w).startPlanWatch("user_a");
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    await settle(10);
+    assert.equal(calls.length, 3, "the mock data source never reaches the reminder");
+  });
+
+  await test("watch: an answer that was already there when the watch starts is reconciled once, at the start", async (w) => {
+    const calls = w.trialReminderCalls.reconciled;
+    w.server.state.revenueCatPlans.user_a = "trial";
+    w.sdk.state.willRenew = false;
+    await rc(w).startRevenueCat("user_a");
+    await settle(20);
+    assert.deepEqual(calls, [], "no watch yet: nothing is reconciled");
+    planSync(w).startPlanWatch("user_a");
+    await settle(10);
+    assert.deepEqual(calls, [{ endsAt: TRIAL_END, willRenew: false }], "the answer that was already there, once");
+    // Nothing else changes, so nothing more is told.
+    entitlement(w).setLastSync({ at: clock.now, ok: true, code: null });
+    await settle(10);
+    assert.equal(calls.length, 1);
+  });
+
   await test("watch: stopped (sign-out, another account) it asks nothing; on the mock data source it does nothing", async (w) => {
     await rc(w).startRevenueCat("user_a");
     w.server.state.revenueCatPlans.user_a = "pro";
@@ -826,7 +956,9 @@ async function mockChecks() {
     assert.equal((await settled(purchases(w).purchasePackage("$rc_annual"))).code, "CANCELLED");
     dev(w).setNextPurchaseOutcome("pending");
     assert.equal((await settled(purchases(w).purchasePackage("$rc_annual"))).code, "PENDING");
-    assert.deepEqual(await settled(purchases(w).purchasePackage("$rc_annual")), { ok: true, tier: "trial" });
+    const trialPurchase = await settled(purchases(w).purchasePackage("$rc_annual"));
+    assert.deepEqual([trialPurchase.ok, trialPurchase.tier], [true, "trial"]);
+    assert.ok(Math.abs(trialPurchase.trialEndsAt - (clock.now + 3 * 86_400_000)) <= 2_000, "the mock's trial ends when its three days are over");
     assert.equal(repo(w).getMockSubscriptionTier(), "trial");
     assert.equal(await settled(purchases(w).isTrialEligible("$rc_annual")), false, "the trial is used up");
     dev(w).setRestoreFindsPurchase(true);
@@ -834,6 +966,166 @@ async function mockChecks() {
     assert.equal(repo(w).getKnownTier(), "pro", "on the mock data source the mock plan is the plan");
     assert.equal(w.sdk.state.calls.length, before, "RevenueCat was never asked");
     assert.equal(syncCalls(w).length, 0, "and nothing reached the server");
+  });
+}
+
+// ================================================================== the Paywall's words (2026-11-18)
+async function paywallChecks() {
+  await test("paywall: the rows name Scholar, the trial is said to cover the devotionals and not Scholar, and that line shows only with a trial", async (w) => {
+    const { paywall } = w.use("@/constants/copy").copy;
+    assert.deepEqual(Object.values(paywall.features), [
+      "Unlimited audio devotionals",
+      "Scholar, your Bible companion",
+      "Scholar reads its answers aloud",
+      "Talk with Scholar out loud",
+    ]);
+    assert.equal(paywall.scholar.messages, "Scholar is part of GraceHush Pro.");
+    assert.equal(paywall.trialScope, "Your free trial includes unlimited devotionals. Scholar opens when your plan begins.");
+    assert.equal(paywall.done.bodyTrial, "Your free trial has started. Your devotionals are unlimited, and Scholar opens when your plan begins.");
+    assert.equal(paywall.member.bodyTrial, "Your free trial is active. Scholar opens when your plan begins.");
+    for (const s of [...Object.values(paywall.features), paywall.scholar.messages, paywall.trialScope, paywall.done.bodyTrial, paywall.member.bodyTrial]) {
+      assert.ok(!/cancel|hurry|last chance|only today|longer conversations/i.test(s), `no pressure, no way out and no old promise: ${s}`);
+    }
+    const screen = require("node:fs").readFileSync(
+      require("node:path").join(process.env.GRACEHUSH_REPO, "src", "screens", "paywall", "PaywallScreen.tsx"),
+      "utf8",
+    );
+    assert.match(
+      screen,
+      /activeIntroOffer\(state\.selected, state\.eligibility\[state\.selected\.id\] \?\? false\) !== null \? \(\s*<Text[^>]*>\{paywall\.trialScope\}<\/Text>/,
+      "the trial's line, only while the selected plan has a trial the store confirmed",
+    );
+    assert.match(screen, /body=\{state\.tier === "trial" \? paywall\.done\.bodyTrial : paywall\.done\.body\}/, "a trial's welcome");
+    assert.match(screen, /body=\{state\.tier === "trial" \? paywall\.member\.bodyTrial : paywall\.member\.bodyPro\}/, "a trial's member view");
+  });
+
+  await test("paywall: the development preview's offering is the launch pricing, and the Paywall works out its 30% saving and the trial's button", async (w) => {
+    const offering = w.use("@/data/mock/offerings").buildMockOffering();
+    const annual = offering.packages.find((pkg) => pkg.kind === "annual");
+    const monthly = offering.packages.find((pkg) => pkg.kind === "monthly");
+    assert.deepEqual([annual.priceString, annual.price, annual.introOffer], ["$125.99", 125.99, { kind: "free_trial", periodDays: 3 }]);
+    assert.deepEqual([monthly.priceString, monthly.price, monthly.introOffer], ["$14.99", 14.99, null]);
+    const { annualSavingsPercent, trialCtaLabel } = w.use("@/utils/pricing");
+    assert.equal(annualSavingsPercent(annual, monthly), 30, "1 - 125.99 / (12 × 14.99), rounded");
+    assert.equal(trialCtaLabel(annual, true), "Start 3-day free trial");
+    assert.equal(trialCtaLabel(monthly, true), "Subscribe for $14.99/month", "the monthly plan has no trial");
+  });
+}
+
+// ================================================================== the plan tag on the profile picture (2026-11-19)
+// The repo's own files, for the checks that read how the screens are put together.
+const source = (...parts) => require("node:fs").readFileSync(require("node:path").join(process.env.GRACEHUSH_REPO, ...parts), "utf8");
+
+async function planTagChecks() {
+  await test("plan tag: the picture shows the plan Profile's card shows for this account (RevenueCat first, then the server's plan), and nothing until one is known", async (w) => {
+    const { usePlanTier } = w.use("@/hooks/usePlanTier");
+    const hook = w.renderHook(usePlanTier);
+    assert.equal(hook.result.current, null, "before the first sync and RevenueCat's answer nothing is known: no tag");
+    await w.signIn();
+    await settle();
+    assert.equal(hook.result.current, "free", "the server's plan from the last profile sync");
+    // RevenueCat has started for this account and not answered yet: the server's plan stays, so the tag never blinks out.
+    const store = w.use("@/store/entitlementStore").useEntitlementStore;
+    store.getState().start("user_a", "test_store");
+    await settle();
+    assert.equal(hook.result.current, "free", "while RevenueCat has not answered for this account, the server's plan stays");
+    await rc(w).startRevenueCat("user_a");
+    w.server.state.revenueCatPlans.user_a = "pro";
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    await settle();
+    assert.equal(hook.result.current, "pro", "RevenueCat's answer for this account comes first, so a purchase shows at once");
+    assert.equal(hook.result.current, (await repo(w).getUsage()).tier, "the same plan as Profile's plan card");
+    w.server.state.revenueCatPlans.user_a = "trial";
+    clock.now += 60_000;
+    await rc(w).refreshEntitlement();
+    await settle();
+    assert.equal(hook.result.current, "trial", "a free trial has its own tag");
+    assert.equal(hook.result.current, (await repo(w).getUsage()).tier);
+    // RevenueCat's answer for another account never counts for this one: the server's plan for user_a again.
+    store.getState().start("user_b", "test_store");
+    store.getState().setEntitlement("user_b", "pro", null);
+    await settle();
+    assert.equal(hook.result.current, "free", "another account's answer is not this account's plan");
+    // The server's plan moves with the profile sync (another phone's purchase, the webhook).
+    const prefs = w.use("@/store/profilePrefsStore").useProfilePrefsStore;
+    prefs.getState().saveSnapshot("user_a", { ...prefs.getState().byUser.user_a.snapshot, subscriptionTier: "pro" });
+    await settle();
+    assert.equal(hook.result.current, "pro", "the tag follows the server's plan when the sync brings it");
+    const renders = hook.renders();
+    prefs.getState().setAiPermission("user_a", "2026-11-19T12:00:00.000Z");
+    await settle();
+    assert.equal(hook.renders(), renders, "a change that is not the plan does not draw the tag again");
+    assert.equal(repo(w).shownTierFor(null), null, "with nobody signed in there is no plan and no tag");
+    assert.equal(repo(w).shownTierFor("user_c"), null, "nor for an account this phone has never synced");
+    hook.unmount();
+  }, { signIn: false });
+
+  await test("plan tag: on the mock data source the tag is the mock plan, as Profile's card shows it, and follows the developer panel", async (w) => {
+    const { usePlanTier } = w.use("@/hooks/usePlanTier");
+    const hook = w.renderHook(usePlanTier);
+    assert.equal(hook.result.current, "free", "the real data: the server's plan");
+    dev(w).setDataSource("mock");
+    repo(w).setMockSubscriptionTier("pro");
+    dev(w).bumpMockProfileVersion();
+    await settle();
+    assert.equal(hook.result.current, "pro", "the mock plan");
+    // RevenueCat's answer does not change the mock data's plan, as Profile's card ignores it there too.
+    await rc(w).startRevenueCat("user_a");
+    w.use("@/store/entitlementStore").useEntitlementStore.getState().setEntitlement("user_a", "trial", null);
+    await settle();
+    assert.equal(hook.result.current, "pro");
+    const usage = repo(w).getUsage();
+    await advance(1_000);
+    assert.equal((await usage).tier, "pro", "Profile's card on the mock data says the same");
+    repo(w).setMockSubscriptionTier("free");
+    dev(w).bumpMockProfileVersion();
+    await settle();
+    assert.equal(hook.result.current, "free");
+    dev(w).setDataSource("supabase");
+    await settle();
+    assert.equal(hook.result.current, "trial", "back on the real data, RevenueCat's answer for this account");
+    hook.unmount();
+  });
+
+  await test("plan tag: the words, the colours from the theme, and the tag drawn outside the clipped circle with the header's button naming the plan", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    assert.deepEqual(copy.planTag.label, { free: "Free", trial: "Trial", pro: "Pro" });
+    assert.deepEqual(copy.planTag.a11y, { free: "Free plan", trial: "free trial", pro: "Pro plan" });
+    assert.equal(copy.header.openProfileWithPlan(copy.planTag.a11y.pro), "Open profile, Pro plan");
+    assert.equal(copy.header.openProfileWithPlan(copy.planTag.a11y.trial), "Open profile, free trial");
+    assert.equal(copy.header.openProfile, "Open profile", "the button's name while the plan is not known");
+    // The theme's tokens: the bodies and the shine are made from the palette, never a raw colour.
+    w.appState.module.StyleSheet = { create: (styles) => styles };
+    const { colors, gradients, shadows } = w.use("@/constants/theme");
+    assert.deepEqual(gradients.planTagPro, { colors: [colors.plum, colors.plumDeep], locations: [0, 1] });
+    assert.deepEqual(gradients.planTagFree, { colors: [colors.blush, colors.petal], locations: [0, 1] });
+    assert.deepEqual(gradients.planTagShinePro, { colors: [`${colors.card}47`, `${colors.card}00`], locations: [0, 0.6] });
+    assert.deepEqual(gradients.planTagShineFree, { colors: [`${colors.card}BF`, `${colors.card}00`], locations: [0, 0.6] });
+    assert.deepEqual(shadows.planTagPro.boxShadow.map((s) => [s.offsetY, s.blurRadius, s.color]), [[1, 2, `${colors.ink}59`], [2, 5, `${colors.ink}26`]]);
+    assert.deepEqual(shadows.planTagFree.boxShadow.map((s) => [s.offsetY, s.blurRadius, s.color]), [[1, 2, `${colors.ink}38`], [2, 5, `${colors.ink}1A`]]);
+    // The avatar: an outer view that does not clip, then the clipped circle, then the tag, only once the plan is known.
+    const avatar = source("src", "components", "UserAvatar.tsx");
+    assert.match(avatar, /const tier = usePlanTier\(\);/);
+    assert.match(
+      avatar,
+      /<View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" className="items-center">\s*<View className=\{`\$\{circle\} items-center justify-center overflow-hidden rounded-full border border-petal bg-blush`\}>[^]*?<\/View>\s*\{tier !== null \? <PlanTag size=\{size\} tier=\{tier\} \/> : null\}\s*<\/View>/,
+      "the tag is the outer view's second child, after the circle that clips, and only with a plan",
+    );
+    // The header's button says the plan the tag shows.
+    const header = source("src", "components", "ScreenHeader.tsx");
+    assert.match(header, /const tier = usePlanTier\(\);/);
+    assert.match(header, /tier === null \? copy\.header\.openProfile : copy\.header\.openProfileWithPlan\(copy\.planTag\.a11y\[tier\]\)/);
+    // The tag: the two sizes, Free's pale look and the plum look for Pro and a trial, the lift outside and the clip inside.
+    const tag = source("src", "components", "PlanTag.tsx");
+    assert.match(tag, /32: \{ pill: "h-\[11px\] px-\[3\.5px\]", text: "text-\[6\.5px\] leading-\[9px\] tracking-\[0\.15px\]", hang: "-bottom-\[3px\]" \}/);
+    assert.match(tag, /64: \{ pill: "h-\[16px\] px-\[5\.5px\]", text: "text-\[9px\] leading-\[14px\] tracking-\[0\.2px\]", hang: "-bottom-\[5px\]" \}/);
+    assert.match(tag, /const look = tier === "free" \? LOOKS\.free : LOOKS\.paid;/);
+    assert.match(tag, /paid: \{\s*body: gradients\.planTagPro,\s*shine: gradients\.planTagShinePro,\s*rim: "border-rose",\s*text: "text-white",\s*lift: shadows\.planTagPro,/);
+    assert.match(tag, /free: \{\s*body: gradients\.planTagFree,\s*shine: gradients\.planTagShineFree,\s*rim: "border-rose\/75",\s*text: "text-plum",\s*lift: shadows\.planTagFree,/);
+    assert.match(tag, /<View pointerEvents="none" className=\{`absolute \$\{hang\} rounded-full`\} style=\{look\.lift\}>\s*<View className=\{`\$\{pill\} justify-center overflow-hidden rounded-full border \$\{look\.rim\}`\}>/);
+    assert.match(tag, /<Text allowFontScaling=\{false\} numberOfLines=\{1\} className=\{`font-dm-bold \$\{text\} \$\{look\.text\}`\}>\s*\{copy\.planTag\.label\[tier\]\}/);
+    assert.ok(!/haptics|console\.|Pressable|#[0-9A-Fa-f]{3,8}\b/.test(tag), "no haptic, no log, nothing to press and no raw colour");
   });
 }
 
@@ -862,6 +1154,8 @@ async function logChecks() {
   await purchaseChecks();
   await watchChecks();
   await mockChecks();
+  await paywallChecks();
+  await planTagChecks();
   await logChecks();
   finished = true;
   console.log(`${passed} checks passed${failures.length > 0 ? `, ${failures.length} FAILED` : ""}`);

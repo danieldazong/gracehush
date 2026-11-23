@@ -9,9 +9,15 @@ import type {
   Prayer,
   TimeSlot,
 } from "@/types";
+import { byPosition } from "@/utils/affirmationOrder";
 import { calendarDaysBetween } from "@/utils/format";
+import { rankScenes } from "@/utils/sceneMatch";
+import { addDays, calendarDayIn, isTimeZone, type CalendarDay } from "@/utils/zonedTime";
 
 const SLOTS: readonly TimeSlot[] = ["morning", "afternoon", "evening"];
+
+// How many of a reflection's best scenes Now Playing's card drifts through while its voice is heard (20 seconds each).
+const PLAYER_SCENES_SHOWN = 5;
 
 export type JournalFilter = "all" | EmotionKey | "prayers";
 
@@ -67,6 +73,49 @@ export function getReflectionDays(entries: JournalEntry[], now: Date): number {
     offset += 1;
   }
   return count;
+}
+
+// The Today tab's week strip (2026-11-16): the last seven calendar days in the profile's time zone, oldest first, today last.
+// A day is "reflected" when it holds a finished reflection (the rule of getReflectionDays: ready, with its devotional). Nothing
+// here counts what was missed: a day without one is just a day.
+export type WeekDot = {
+  // "2026-11-16", for a list key.
+  key: string;
+  // "M", the strip's letter.
+  letter: string;
+  // "Monday", for the spoken label.
+  name: string;
+  reflected: boolean;
+  today: boolean;
+};
+
+const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+export function getWeekDots(entries: readonly JournalEntry[], now: Date, timeZone: string): WeekDot[] {
+  // A time zone Intl does not know falls back to the phone's own, so the strip never throws.
+  const zone = isTimeZone(timeZone) ? timeZone : Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const key = (day: CalendarDay) =>
+    `${day.year}-${String(day.month).padStart(2, "0")}-${String(day.day).padStart(2, "0")}`;
+  const reflectedDays = new Set(
+    entries
+      .filter((entry) => entry.status === "ready" && entry.devotional !== null)
+      .map((entry) => key(calendarDayIn(new Date(entry.createdAt), zone))),
+  );
+  const today = calendarDayIn(now, zone);
+  const dots: WeekDot[] = [];
+  for (let back = 6; back >= 0; back -= 1) {
+    const day = addDays(today, -back);
+    const weekday = new Date(Date.UTC(day.year, day.month - 1, day.day)).getUTCDay();
+    dots.push({
+      key: key(day),
+      letter: WEEKDAY_LETTERS[weekday],
+      name: WEEKDAY_NAMES[weekday],
+      reflected: reflectedDays.has(key(day)),
+      today: back === 0,
+    });
+  }
+  return dots;
 }
 
 export function getPrayerCounts(prayers: Prayer[]): {
@@ -171,6 +220,7 @@ export function filterEntries<T extends JournalEntry>(entries: T[], filter: Jour
 // What a player plays for this entry, or null when there is nothing to play: an entry that is not finished, one with no
 // devotional (a heavy moment saved before 2026-11-08), and a devotional with no audio or no measured length (a length is never
 // invented). A heavy moment's devotional plays like any other. The mini player and Now Playing both build their track with it.
+// Its scenes are the five that interpret the reflection best (rankScenes), for Now Playing's card and the lock screen.
 export function getPlaybackTrack(entry: JournalEntry): PlaybackTrack | null {
   const { devotional } = entry;
   if (entry.status !== "ready" || devotional === null) return null;
@@ -184,7 +234,14 @@ export function getPlaybackTrack(entry: JournalEntry): PlaybackTrack | null {
     subtitle: copy.nowPlaying.subtitle(entry.scripture?.reference ?? null),
     durationMs,
     audioPath,
+    scenes: rankScenes(entry).slice(0, PLAYER_SCENES_SHOWN),
   };
+}
+
+// The reflection the Today tab's "Listen again" row plays (2026-11-16): the newest one whose devotional can be played. A heavy
+// moment is never put on the first screen, so a glance at the phone shows nothing of one. Entries come newest first.
+export function getListenAgainEntry<T extends JournalEntry>(entries: readonly T[]): T | null {
+  return entries.find((entry) => !entry.isCrisis && getPlaybackTrack(entry) !== null) ?? null;
 }
 
 // A finished reflection whose spoken devotional is still being made (2026-11-09): the server answers as soon as the text is
@@ -206,12 +263,38 @@ export function getGreeting(now: Date): TimeSlot {
   return "evening";
 }
 
-// The player's painted scene for an hour of the day, 0 to 23, as an index into `playerScenes`, which runs in the day's
-// order: the bedside at night, the back steps at first light, the armchair in the morning, the park bench in the
-// afternoon. These are the greeting's parts of the day (getGreeting), with its morning split at 9.
+// The painted scene for an hour of the day, 0 to 23, as an index into `playerScenes`: the bedside at night, the back steps at
+// first light, the armchair in the morning, the park bench in the afternoon. These are the greeting's parts of the day
+// (getGreeting), with its morning split at 9. Since 2026-11-20 a reflection takes the scene that interprets it
+// (utils/sceneMatch.ts), and this is the scene of a card whose reflection the screen does not hold.
 export function getPlayerSceneForHour(hour: number): number {
   if (hour >= 5 && hour <= 8) return 1;
   if (hour >= 9 && hour <= 11) return 2;
   if (hour >= 12 && hour <= 16) return 3;
   return 0;
+}
+
+// One card of the Today tab's deck of words (2026-11-20): an affirmation, the reflection it is from when the screen holds it,
+// and the slot it was delivered at, which only today's word has.
+export type WordStackCard = { affirmation: Affirmation; entry: JournalEntry | null; slot: TimeSlot | null };
+
+// The deck: today's word first, then one card for each other finished reflection in `entries`, in their order (newest first).
+// A reflection's card is its first affirmation in position order that has a verse, else its first. The reflection today's word
+// is from is not repeated, so each reflection is one card, and a reflection with no affirmations in `words` (by entry id) is
+// passed over: its card joins once they are on the phone. A heavy moment is a card like any other, never labelled; one saved
+// before 2026-11-08 has no devotional and no affirmations. With no word for today there is no deck.
+export function getWordStack(
+  top: WordStackCard | null,
+  entries: readonly JournalEntry[],
+  words: Readonly<Record<string, readonly Affirmation[]>>,
+): WordStackCard[] {
+  if (top === null) return [];
+  const cards = [top];
+  for (const entry of entries) {
+    if (entry.status !== "ready" || entry.devotional === null || entry.id === top.affirmation.entryId) continue;
+    const list = [...(words[entry.id] ?? [])].sort(byPosition);
+    const affirmation = list.find((item) => item.verse !== null) ?? list[0];
+    if (affirmation) cards.push({ affirmation, entry, slot: null });
+  }
+  return cards;
 }

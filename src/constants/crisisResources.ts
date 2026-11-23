@@ -1,11 +1,11 @@
 // The numbers the quiet line under a heavy moment's devotional names (components/HelpLine.tsx): the only file of the app that
 // holds a service's number. Scholar's spoken help line (supabase/functions/_shared/scholar/heavyChat.ts) spells the same numbers
 // out, and a test keeps the two equal. Re-check every number before each App Store and Play release, then change the date:
-//   988lifeline.org                 988 takes calls and texts, "available 24/7/365" (checked 2026-10-20, 2026-11-07, 2026-11-11)
-//   thehotline.org                  1-800-799-7233, and text START to 88788, 24/7 (checked 2026-11-11)
-//   findahelpline.com               ThroughLine's directory of help lines, by country (checked 2026-11-11)
+//   988lifeline.org                 988 takes calls and texts, "available 24/7/365" (checked 2026-10-20, 2026-11-07, 2026-11-11, 2026-11-23)
+//   thehotline.org                  1-800-799-7233, and text START to 88788, 24/7 (checked 2026-11-11, 2026-11-23)
+//   findahelpline.com               ThroughLine's directory of help lines, by country (checked 2026-11-11, 2026-11-23)
 // The app states availability only: no cost, confidentiality or outcome claim (AGENTS.md Crisis Safety Rules).
-export const HELPLINE_LAST_VERIFIED = "2026-11-11";
+export const HELPLINE_LAST_VERIFIED = "2026-11-23";
 
 // The 988 Suicide & Crisis Lifeline: call or text, any time (United States).
 export const HELPLINE_NUMBER = "988";

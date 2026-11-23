@@ -4,6 +4,7 @@ import { AppState } from "react-native";
 
 import { startAffirmationSchedule, stopAffirmationSchedule } from "@/services/affirmationScheduler";
 import { startConnectivity, stopConnectivity } from "@/services/connectivity";
+import { startNewReflectionAmbient, stopNewReflectionAmbient } from "@/services/newReflectionAmbient";
 import { endOfflineSession, startOfflineSession } from "@/services/offlineSession";
 import { syncProfile, syncProfileOnForeground, watchReminderEdits } from "@/services/profileSync";
 import { startRealtime, stopRealtime } from "@/services/realtime";
@@ -55,6 +56,8 @@ export function SupabaseAuthBridge() {
     const stopPlanWatch = startPlanWatch(signedInUserId);
     // The daily affirmation notifications follow this account until the session ends (step 28).
     startAffirmationSchedule(signedInUserId);
+    // Each reflection made on this phone starts with Gentle Piano at 100% under its devotional (2026-11-20).
+    startNewReflectionAmbient();
     // Realtime follows this account's entries while the app is in front (step 33): it waits for its own conditions.
     startRealtime(signedInUserId);
     const subscription = AppState.addEventListener("change", (status) => {
@@ -66,6 +69,7 @@ export function SupabaseAuthBridge() {
       stopWatchingPlan();
       stopPlanWatch();
       stopAffirmationSchedule();
+      stopNewReflectionAmbient();
       void stopRealtime();
     };
   }, [signedInUserId]);

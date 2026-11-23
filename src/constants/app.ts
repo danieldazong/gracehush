@@ -1,4 +1,4 @@
-import type { AmbientSound, PlaybackRate, TimeSlot } from "@/types";
+import type { AcquisitionSource, AmbientSound, PlaybackRate, TimeSlot } from "@/types";
 
 // Keep in sync with supabase/functions/_shared/limits/constants.ts (step 22).
 export const FREE_DEVOTIONALS_PER_WEEK = 3;
@@ -19,9 +19,29 @@ export const AFFIRMATION_CHANNEL_ID = "affirmations";
 export const AFFIRMATION_DAYS_AHEAD = 7;
 export const AFFIRMATION_MIN_LEAD_MS = 10_000;
 export const AFFIRMATION_RESCHEDULE_DEBOUNCE_MS = 500;
+// The trial-end reminder (2026-11-18): a person who starts a free trial may switch on one local notification, at TRIAL_REMINDER_AT
+// local time, TRIAL_REMINDER_DAYS_BEFORE calendar days before the day the trial ends (38 to 62 hours before it, an hour more or
+// less where the clocks change), which leaves Apple's 24-hour cancellation window a day to spare. It is made only for a trial of
+// at least TRIAL_REMINDER_MIN_TRIAL_DAYS days, and only while it is still TRIAL_REMINDER_MIN_LEAD_MS ahead.
+export const TRIAL_REMINDER_DAYS_BEFORE = 2;
+export const TRIAL_REMINDER_AT = "10:00";
+export const TRIAL_REMINDER_MIN_LEAD_MS = 10_000;
+export const TRIAL_REMINDER_MIN_TRIAL_DAYS = 3;
 // A reflection has at most this many affirmations (2026-11-09): the three made with it, and up to seven more the person adds one
 // at a time from Reflection. Keep in sync with AFFIRMATION_LIMIT in supabase/functions/process-entry/constants.ts.
 export const MAX_AFFIRMATIONS = 10;
+// The Word Deck (2026-11-17): which words the three daily reminders carry. The deck draws from the finished reflections of the last
+// WORD_DECK_WEEK_DAYS local days, at most WORD_DECK_WEEK_MAX of them, newest first; a week with fewer than WORD_DECK_MIN_REFLECTIONS
+// is topped up with older reflections to that many, so a week of 21 reminders has seven reflections' best words to draw from and
+// does not repeat. The cache is read for its WORD_DECK_LOOKBACK newest entries to find them. The calendar (the local table
+// word_calendar: what each reminder carried) is kept WORD_CALENDAR_KEEP_DAYS days. Today's card shows the word of the reminder that
+// fired last, when that was within WORD_CURRENT_MAX_AGE_MS (a reminder days old is not today's).
+export const WORD_DECK_WEEK_DAYS = 7;
+export const WORD_DECK_WEEK_MAX = 14;
+export const WORD_DECK_MIN_REFLECTIONS = 7;
+export const WORD_DECK_LOOKBACK = 40;
+export const WORD_CALENDAR_KEEP_DAYS = 14;
+export const WORD_CURRENT_MAX_AGE_MS = 26 * 3_600_000;
 
 // Keep in sync with supabase/functions/process-entry/contracts.ts (step 19)
 export const MAX_RECORDING_MS = 300_000;
@@ -114,6 +134,21 @@ export const AMBIENT_SOUNDS: readonly AmbientSound[] = [
   "morning-birds",
 ];
 
+// Onboarding's "How did you hear about GraceHush?" (2026-11-20): every answer, and "skipped". The step's tiles are the
+// first nine; the onboarding store keeps one of these, and analytics sends it once the person has said yes to sharing.
+export const ACQUISITION_SOURCES: readonly AcquisitionSource[] = [
+  "tiktok",
+  "instagram",
+  "facebook",
+  "youtube",
+  "google",
+  "app_store",
+  "friend_family",
+  "church",
+  "other",
+  "skipped",
+];
+
 // Profile (step 15). Step 16 reads these three URL constants by name.
 // Checked 2026-10-21: both addresses load (Apple's goes to the Apple ID sign-in, Google's to the Google sign-in).
 export const MANAGE_SUBSCRIPTION_URL = {
@@ -137,11 +172,19 @@ export const SCHOLAR_SPOKEN_WARNING_MS = 105_000;
 export const SCHOLAR_TURN_TIMEOUT_MS = 45_000; // above the server's 40 s for a typed message
 export const SCHOLAR_SPOKEN_TURN_TIMEOUT_MS = 60_000; // above its 50 s for a spoken one
 export const SCHOLAR_SPEAK_TIMEOUT_MS = 20_000;
-export const SCHOLAR_RECENTS_LIMIT = 30; // conversations listed on the Scholar tab
+export const SCHOLAR_HOME_RECENTS = 3; // conversations the Scholar tab shows; the rest are behind "See all"
+export const SCHOLAR_HISTORY_PAGE = 30; // conversations the Conversations screen loads at a time
+export const SCHOLAR_SEARCH_DEBOUNCE_MS = 350; // a title search waits for the typing to pause this long
 export const SCHOLAR_MESSAGES_LIMIT = 200; // messages read when a conversation opens
 export const SCHOLAR_PENDING_MS = 60_000; // an unanswered message younger than this is still being answered
 export const SCHOLAR_PENDING_POLL_MS = 3_000;
-export const SCHOLAR_LOW_REMAINING = 2; // a free account sees how many messages are left from this many
+// A Pro account's credits (2026-11-18): the line above the composer shows how much is left from this share of the allowance, and
+// its countdown to the renewal moves this often. The allowance and the costs are the server's.
+export const SCHOLAR_CREDITS_LOW_PERCENT = 20;
+export const SCHOLAR_CREDITS_TICK_MS = 30_000;
+// The free conversation (2026-11-20): with this many of its free messages left, or fewer, the line above the composer says how
+// many. A threshold for the display only: how many there are is the server's, in each answer's `usage`.
+export const SCHOLAR_LEFT_NOTICE_FROM = 3;
 export const SCHOLAR_BREAK_NUDGE_TURNS = 20; // the break note, once a visit
 // The AI reminder (2026-11-11, the public page and New York's companion law): at the start of a conversation, and again before a
 // message sent this long after the last reminder.

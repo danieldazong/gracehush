@@ -96,6 +96,8 @@ function serviceFakes({ entryId = null } = {}) {
         state.onReschedule?.();
       },
       clearAffirmations: async () => void state.order.push("affirmations"),
+      // 2026-11-17: Journal follows the Word Deck's calendar; Realtime's checks need no calendar.
+      subscribeWordCalendar: () => () => undefined,
     },
     "@/services/revenuecat": {
       __esModule: true,

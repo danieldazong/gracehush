@@ -1,5 +1,7 @@
 import type { LimitProfile, MonthWindow } from "../limits/weekly.ts";
 import type { ScholarUsage, ScholarUsageKind, ScholarVoiceLimits } from "../../process-entry/contracts.ts";
+import { SCHOLAR_FREE } from "../scholar/constants.ts";
+import { planUsage } from "../scholar/usage.ts";
 import { VOICE_LIMITS, VOICE_SESSION_MAX_SECONDS, VOICE_SESSION_TTL_MS } from "./constants.ts";
 
 // A live talk's time (step 39), decided on the server: the app shows the numbers scholar-voice-start and scholar-voice-end send
@@ -13,8 +15,6 @@ import { VOICE_LIMITS, VOICE_SESSION_MAX_SECONDS, VOICE_SESSION_TTL_MS } from ".
 // These functions are pure: the caller has confirmed the plan (confirmPaidPlan) and read the month's and the day's sessions.
 
 type Tier = LimitProfile["tier"];
-
-const paid = (tier: Tier) => tier === "trial" || tier === "pro";
 
 // The part of a session's row the sums read.
 export type TalkTime = { seconds: number; cap_seconds: number | null; is_heavy: boolean };
@@ -55,6 +55,19 @@ function monthLeft(monthSeconds: number): number {
   return left < VOICE_LIMITS.minTalkSeconds ? 0 : left;
 }
 
+// The free conversation's talk time (2026-11-20): what is left of SCHOLAR_FREE.talkSeconds once `secondsUsed` (the billable
+// seconds of the talks already held in it) are taken off. Less than minTalkSeconds counts as used up, as for the month.
+export function freeTalkLeft(secondsUsed: number): number {
+  const left = Math.max(0, SCHOLAR_FREE.talkSeconds - Math.max(0, secondsUsed));
+  return left < VOICE_LIMITS.minTalkSeconds ? 0 : left;
+}
+
+// The numbers an account that is not Pro sees for its free conversation: the cap a talk started now would have, and no month
+// (monthSecondsLeft null: the app says nothing about minutes in a month it does not have).
+export function freeTalkLimits(secondsUsed: number, window: MonthWindow): ScholarVoiceLimits {
+  return { talkSeconds: freeTalkLeft(secondsUsed), monthSecondsLeft: null, resetsAt: window.end.toISOString() };
+}
+
 // The numbers a person sees: the cap a talk started now would have, what is left of the month, and when the month's time returns.
 // In a heavy conversation both numbers are null: nothing there is counted, cut or said about minutes.
 export function talkLimits(args: { heavy: boolean; monthSeconds: number; window: MonthWindow }): ScholarVoiceLimits {
@@ -65,7 +78,9 @@ export function talkLimits(args: { heavy: boolean; monthSeconds: number; window:
 }
 
 export type TalkAllowance =
-  // A free account: a live talk is part of trial and Pro (LIMIT_REACHED with usage.kind talk_plan), in a heavy conversation too.
+  // A free account or a free trial outside its free conversation, in a heavy conversation, or with the free conversation's talk
+  // time used up: a live talk is part of Pro (LIMIT_REACHED with usage.kind talk_plan; for a trial, resetsAt is the day its plan
+  // begins).
   | { kind: "plan"; usage: ScholarUsage }
   // startsPerDay talks were already started today (RATE_LIMITED): the one limit a heavy conversation shares.
   | { kind: "starts" }
@@ -74,23 +89,38 @@ export type TalkAllowance =
   | { kind: "resting" }
   // The month's talk time is used up (LIMIT_REACHED with usage.kind talk_month and when it returns).
   | { kind: "month"; usage: ScholarUsage }
-  // A talk may start. `capSeconds` is its own cap (the smaller of talkSeconds and what is left of the month), or null in a heavy
-  // conversation, whose talk is never counted and never cut.
+  // A talk may start. `capSeconds` is its own cap (the smaller of talkSeconds and what is left of the month; for the free
+  // conversation, what is left of its talk time), or null in a heavy conversation, whose talk is never counted and never cut.
   | { kind: "ok"; capSeconds: number | null; limits: ScholarVoiceLimits };
 
-// May a talk start? `monthSeconds` is monthSecondsUsed of the sessions that started in the profile's calendar month,
-// `heavySecondsToday` is heavySecondsUsed of today's, and `startsToday` counts today's sessions, whatever became of them.
+// May a talk start? `tier` and `expiresAt` are the confirmed plan, `monthSeconds` is monthSecondsUsed of the sessions that
+// started in the profile's calendar month, `heavySecondsToday` is heavySecondsUsed of today's, and `startsToday` counts today's
+// sessions, whatever became of them. `free` is the free conversation (2026-11-20), read only for an account that is not Pro:
+// whether this talk's conversation may be it (it is, or nothing has claimed it), and the billable seconds of the talks already
+// held in it.
 export function checkTalkAllowance(
   args: {
     tier: Tier;
+    expiresAt: string | null;
+    now: number;
     heavy: boolean;
     monthSeconds: number;
     heavySecondsToday: number;
     startsToday: number;
     window: MonthWindow;
+    free: { open: boolean; secondsUsed: number };
   },
 ): TalkAllowance {
-  if (!paid(args.tier)) return { kind: "plan", usage: usage("talk_plan", 0, 0, null) };
+  if (args.tier !== "pro") {
+    // The free conversation's talk: never in a heavy conversation (the app shows an account that is not Pro no Talk button
+    // there, so no paywall appears in a hard moment), never in another conversation, and only while its talk time lasts.
+    const left = args.free.open && !args.heavy ? freeTalkLeft(args.free.secondsUsed) : 0;
+    if (left === 0) {
+      return { kind: "plan", usage: planUsage("talk_plan", { tier: args.tier, expiresAt: args.expiresAt }, args.now) };
+    }
+    if (args.startsToday >= VOICE_LIMITS.startsPerDay) return { kind: "starts" };
+    return { kind: "ok", capSeconds: left, limits: freeTalkLimits(args.free.secondsUsed, args.window) };
+  }
   if (args.startsToday >= VOICE_LIMITS.startsPerDay) return { kind: "starts" };
   const limits = talkLimits({ heavy: args.heavy, monthSeconds: args.monthSeconds, window: args.window });
   if (args.heavy) {

@@ -16,8 +16,9 @@ export const EXPIRY_CHECK = { attempts: 1, timeoutMs: 6_000 };
 // The plan as the profile row holds it.
 export type StoredPlan = LimitProfile & { expiresAt: string | null };
 
-// The plan to use, and what billing did for the log line (`billing` null and `billingMs` 0 when no look was needed).
-export type ConfirmedPlan = { profile: LimitProfile; billing: BillingStatus | null; billingMs: number };
+// The plan to use, with its end as RevenueCat now says (Scholar tells a trial account the day its plan begins, 2026-11-18), and
+// what billing did for the log line (`billing` null and `billingMs` 0 when no look was needed).
+export type ConfirmedPlan = { profile: StoredPlan; billing: BillingStatus | null; billingMs: number };
 
 export async function confirmPaidPlan(
   admin: SupabaseClient,
@@ -34,5 +35,9 @@ export async function confirmPaidPlan(
   const synced = await syncSubscription(admin, config.apiKey, userId, new Date(), EXPIRY_CHECK);
   const billingMs = Date.now() - started;
   if (!synced.ok) return { profile, billing: `failed:${synced.reason}`, billingMs };
-  return { profile: { ...profile, tier: synced.plan.tier }, billing: "synced", billingMs };
+  return {
+    profile: { ...profile, tier: synced.plan.tier, expiresAt: synced.plan.expiresAt },
+    billing: "synced",
+    billingMs,
+  };
 }

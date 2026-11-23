@@ -1,13 +1,14 @@
 // Live talk (step 39): every limit, size and time of a talk, in one place. The app holds no limit number: scholar-voice-start and
 // scholar-voice-end send the numbers a person sees, so a limit changes with a function deploy.
 
-// Trial and Pro: monthSeconds of talk a calendar month (the profile's time zone) and at most talkSeconds a talk; less than
-// minTalkSeconds left counts as used up. A talk has its own limits in place of the day's messages: maxTurns a talk and
+// Pro (2026-11-18: the month was 30 minutes before): monthSeconds of talk a calendar month (the profile's time zone) and at most
+// talkSeconds a talk; since 2026-11-20 the free plan and the free trial have SCHOLAR_FREE.talkSeconds in all, in their free
+// conversation (_shared/scholar/constants.ts); less than minTalkSeconds left counts as used up. A talk has its own limits in place of the day's messages: maxTurns a talk and
 // startsPerDay talks a day. A heavy conversation's talk is never counted and never cut, up to two backstops that stand in front
 // of cost for everyone: ElevenLabs ends any talk at backstopSeconds (the agent's own limit), and one account can start heavy talks
 // for at most heavySecondsPerDay in a day.
 export const VOICE_LIMITS = {
-  monthSeconds: 1_800,
+  monthSeconds: 3_600,
   talkSeconds: 600,
   minTalkSeconds: 30,
   backstopSeconds: 1_800,
@@ -100,3 +101,27 @@ export const VOICE_SWEEP = { maxDeletes: 30, requestTimeoutMs: 15_000 } as const
 // talk ElevenLabs is working on: four runs at most. The phone ends a talk the moment End is pressed, and the walk-through of
 // 2026-11-14 saw the first run find that talk still being closed and leave it, with its words, for the next talk. Tests shorten it.
 export const endSweepTiming: { retryAtMs: number[] } = { retryAtMs: [10_000, 20_000, 30_000] };
+
+// The voice's own settings, pinned so that every agent sounds as the owner heard it when choosing (2026-11-13): a model
+// ElevenLabs changes its default for would otherwise change Scholar's voice without anyone deciding it. The agents
+// (agent_setup.ts) and Listen in the chosen voice (scholar-speak, 2026-11-19) use the same ones, so an answer read aloud sounds
+// like the same voice in a talk.
+export const SPEECH = { model: "eleven_v4_turbo", stability: 0.5, similarity: 0.75, speed: 1 } as const;
+
+// Listen in the chosen voice (2026-11-19): ElevenLabs' text to speech answers a WAV at 24 kHz, 16-bit mono, the format the
+// devotional's Google voice answers (measured: a fmt chunk, a LIST chunk and the data; 0.65 to 3 seconds a part).
+export const LISTEN_SPEECH_FORMAT = "wav_24000";
+
+// How long a part read in the chosen voice may take before the Google voice reads it instead (answerMs), and how long the request
+// itself is kept open so that a reading that comes late can still be deleted from ElevenLabs' history (capMs). An object, so that
+// a test can shorten it. With Google's own 10 seconds after a fallback (scholarTiming.speechPart) a part ends by about 18 seconds,
+// inside the app's 20. The deletion runs after the response: each DELETE may take deleteMs, and one that answers 404 (the item is
+// not saved yet: deleteSpeech) is tried again every deleteEveryMs until deleteForMs have passed (measured 2026-11-21: saved by
+// about 1.2 seconds after the reading answered).
+export const listenSpeechTiming = {
+  answerMs: 6_000,
+  capMs: 15_000,
+  deleteMs: 10_000,
+  deleteEveryMs: 1_000,
+  deleteForMs: 15_000,
+};

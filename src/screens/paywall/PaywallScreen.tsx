@@ -16,6 +16,7 @@ import { BenefitList, type BenefitItem } from "@/components/BenefitList";
 import { Icon } from "@/components/Icon";
 import { PaywallFooter, PaywallLinks } from "@/components/paywall/PaywallFooter";
 import { PlanOption } from "@/components/paywall/PlanOption";
+import { TrialReminderRow } from "@/components/paywall/TrialReminderRow";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { Skeleton } from "@/components/Skeleton";
 import { WelcomeScenes } from "@/components/WelcomeScenes";
@@ -28,6 +29,7 @@ import type { RootStackScreenProps } from "@/navigation/types";
 import { MessageView } from "@/screens/journal/ReflectionStateViews";
 import { track } from "@/services/analytics";
 import { openLegalPage, openManageSubscription } from "@/services/externalLinks";
+import type { TrialReminderResult } from "@/services/trialReminder";
 import { formatResetDay } from "@/utils/format";
 import { activeIntroOffer, annualSavingsPercent, pricePerMonthLabel } from "@/utils/pricing";
 
@@ -113,6 +115,21 @@ function PurchaseNotice({ notice }: { notice: PaywallNotice }) {
   );
 }
 
+// What the done view says about the reminder the person asked for (2026-11-18), in a calm line that stays. "skipped" says
+// nothing: this build cannot show notifications, or the trial is too short for a reminder, and the switch was not offered then.
+function reminderMessage(reminder: TrialReminderResult): string | null {
+  switch (reminder.status) {
+    case "scheduled":
+      return paywall.reminder.scheduled(reminder.day);
+    case "denied":
+      return paywall.reminder.denied;
+    case "failed":
+      return paywall.reminder.failed;
+    case "skipped":
+      return null;
+  }
+}
+
 // The shape of the page: the scene's place, the title, the four rows, two plans and the button. The scene itself comes
 // with the plans, so the heavy-moment redirect (the crisis status draws this too) shows nothing of the paywall
 // meanwhile.
@@ -157,7 +174,7 @@ function PaywallReady({
 }: {
   state: ReadyState;
   source: "profile" | "limit" | "scholar";
-  reason: "messages" | "listen" | "talk" | undefined;
+  reason: "messages" | "listen" | "talk" | "conversation" | "voice" | undefined;
   hasEntry: boolean;
   pinned: boolean;
   linkNotice: LinkNotice | null;
@@ -258,6 +275,22 @@ function PaywallReady({
               />
             ))}
           </View>
+          {/* What the free trial covers (2026-11-18: the devotionals, not Scholar), said before anything is bought and only
+              while the selected plan has a trial the store confirmed. In the scrolling page, so the plans keep their place. */}
+          {activeIntroOffer(state.selected, state.eligibility[state.selected.id] ?? false) !== null ? (
+            <Text className="mt-3 text-center text-body-sm text-mauve">{paywall.trialScope}</Text>
+          ) : null}
+          {/* Under the plans, in the scrolling page and never in the pinned block, so both plans stay above the button. Offered
+              only when a trial is on offer, this build can show notifications and they are not turned off (usePaywall). */}
+          {state.reminder.available ? (
+            <View className="mt-3">
+              <TrialReminderRow
+                value={state.reminder.on}
+                onChange={state.reminder.set}
+                disabled={busy}
+              />
+            </View>
+          ) : null}
         </View>
         {pinned ? null : footer}
         <PaywallLinks showLater={source !== "profile"} onLater={onClose} onOpenPage={onOpenPage} />
@@ -280,7 +313,16 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
   // The scene's motion and the rows' arrival run only while this screen is in front.
   const focused = useIsFocused();
   const [linkNotice, setLinkNotice] = useState<LinkNotice | null>(null);
-  useAnnounce(state.status === "done" ? paywall.done.title : null);
+  // What happened to the reminder, after a trial purchase with the switch on: announced once, with the title.
+  const reminderLine =
+    state.status === "done" && state.reminder !== null ? reminderMessage(state.reminder) : null;
+  useAnnounce(
+    state.status === "done"
+      ? reminderLine === null
+        ? paywall.done.title
+        : `${paywall.done.title}. ${reminderLine}`
+      : null,
+  );
   // Sent once per screen, when the plans (or "Plans aren’t available") first show: never for the crisis redirect, which
   // draws nothing of the paywall, nor for a member (step 34).
   const viewed = useRef(false);
@@ -384,6 +426,11 @@ export function PaywallScreen({ navigation, route }: RootStackScreenProps<"Paywa
           title={paywall.done.title}
           body={state.tier === "trial" ? paywall.done.bodyTrial : paywall.done.body}
         >
+          {reminderLine !== null ? (
+            <Text accessibilityLiveRegion="polite" className="text-center text-body-sm text-mauve">
+              {reminderLine}
+            </Text>
+          ) : null}
           <PrimaryButton label={paywall.done.action} onPress={close} />
         </MessageView>
       );

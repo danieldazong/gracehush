@@ -4,10 +4,11 @@ import { Animated, Easing, Text, View } from "react-native";
 import { colors } from "@/constants/theme";
 import { useReduceMotion } from "@/hooks/useReduceMotion";
 
-// The steps a new person walks through: Welcome, Rhythm, Permissions, and then Sign In, counted as the last step so the
-// progress never resets between the two screens (step 34b). The analytics choice was a fourth step, when a PostHog token
-// was set, from step 34 until round 8 of 2026-11-01, when it moved to the Journal's first visit.
-export const ONBOARDING_STEPS = 3;
+// The steps a new person walks through: Welcome, "How did you hear about GraceHush?" (2026-11-20), Rhythm, Permissions, and
+// then Sign In, counted as the last step so the progress never resets between the two screens (step 34b). The analytics
+// choice was a step of its own, when a PostHog token was set, from step 34 until round 8 of 2026-11-01, when it moved to the
+// Journal's first visit.
+export const ONBOARDING_STEPS = 4;
 export const TOTAL_STEPS = ONBOARDING_STEPS + 1;
 
 // A step is an 8-dp dot; the current one is a 28-dp pill. When the step moves, the pill behind shrinks to a dot and the

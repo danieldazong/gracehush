@@ -336,35 +336,54 @@ async function dataChecks() {
     assert.equal(getAffirmationForSlot([added, unknown], "morning"), null);
   }, { signIn: false });
 
-  await test("planner: only the three that carry a slot reach the lock screen, so an added affirmation changes nothing and one that took a slot over is the one sent", async (w) => {
+  // 2026-11-17 (the Word Deck): the lock screen no longer sends only the three words that carry a slot. A reflection's words, the
+  // added ones included, take turns: the three best come first in day order, then the added ones by position, and a word is not
+  // heard again until the others have been.
+  await test("planner: an added affirmation joins its reflection's words after the three best, and one that took a slot over leads them", async (w) => {
     const { planAffirmations } = w.use("@/services/affirmationPlanner");
+    const { dealWords, deckWordsOf } = w.use("@/utils/wordDeck");
     const { toAffirmation } = w.use("@/data/mappers");
     const rows = affirmationRows(idOf(1));
     const three = rows.map(toAffirmation);
-    const input = (affirmations) => ({
-      source: { entryId: idOf(1), affirmations },
-      enabled: true,
-      permission: "granted",
-      userHash: "0123456789abcdef",
-      timeZone: "UTC",
-      now: new Date(BASE),
-      reminders: { morning: "08:00", afternoon: "13:00", evening: "20:00" },
-      days: 2,
-    });
-    const plain = planAffirmations(input(three));
-    assert.ok(plain.length > 0);
+    const plan = (affirmations) =>
+      planAffirmations({
+        enabled: true,
+        permission: "granted",
+        userHash: "0123456789abcdef",
+        deal: dealWords({
+          now: new Date(BASE),
+          timeZone: "UTC",
+          reminders: { morning: "08:00", afternoon: "13:00", evening: "20:00" },
+          reflections: [{ entryId: idOf(1), tier: "week", words: deckWordsOf(affirmations) }],
+          history: [],
+          days: 2,
+        }),
+      });
+    const carries = (item, headline) => item.title === headline || item.body === headline;
+    const plain = plan(three);
+    assert.ok(plain.length >= 5, "today's last two reminders and tomorrow's three");
+    assert.ok(plain.every((p) => !carries(p, "Added headline")));
     const extra = toAffirmation({ ...rows[0], id: "added", time_slot: null, position: 4, headline: "Added headline" });
-    const withExtra = planAffirmations(input([...three, extra]));
-    assert.deepEqual(withExtra.map((p) => p.identifier), plain.map((p) => p.identifier));
-    assert.ok(withExtra.every((p) => p.title !== "Added headline" && p.body !== "Added headline"));
-    // The added one took the morning over: it is the morning notification, and the old morning one is gone from the plan.
+    const withExtra = plan([...three, extra]);
+    assert.deepEqual(
+      withExtra.slice(0, 3).map((p) => p.identifier),
+      plain.slice(0, 3).map((p) => p.identifier),
+      "the first round is the three best words, as before",
+    );
+    assert.ok(!withExtra.slice(0, 3).some((p) => carries(p, "Added headline")));
+    assert.ok(carries(withExtra[3], "Added headline"), "the added word is the next one that has not been heard");
+    // The added one took the morning over: it leads the reflection's words, and the old morning one, now unslotted, comes last.
     const moved = [{ ...three[0], slot: null }, three[1], three[2], { ...extra, slot: "morning" }];
-    const withMoved = planAffirmations(input(moved));
-    assert.equal(withMoved.length, plain.length);
-    assert.ok(withMoved.some((p) => p.body === "Added headline" || p.title === "Added headline"));
-    assert.ok(withMoved.every((p) => p.title !== "Headline morning" && p.body !== "Headline morning"));
-    // With one slot's affirmation gone (nothing took it over) nothing is sent, as before.
-    assert.deepEqual(planAffirmations(input([{ ...three[0], slot: null }, three[1], three[2]])), []);
+    const withMoved = plan(moved);
+    assert.ok(withMoved.slice(0, 3).every((p) => !carries(p, "Headline morning")), "the old morning word waits its turn");
+    assert.ok(withMoved.slice(0, 3).some((p) => carries(p, "Added headline")), "the one that took the morning over is heard in the first round");
+    assert.ok(carries(withMoved[3], "Headline morning"));
+    // A reflection that lost one slot's word still deals the words it has (nothing is silenced because one is gone).
+    const two = plan([{ ...three[0], slot: null }, three[1], three[2]]);
+    assert.ok(two.length > 0);
+    assert.ok(two.some((p) => carries(p, "Headline morning")), "the unslotted word still takes its turn");
+    // The lock screen sends a word's headline and verse only, never its longer text.
+    assert.ok(withExtra.every((p) => !p.title.includes("Text ") && !p.body.includes("Text ")));
   }, { signIn: false });
 }
 
@@ -454,7 +473,7 @@ async function policyChecks() {
     assert.equal(sanitizeEvent({ event: "affirmation_added", properties: {} }), null);
   }, { signIn: false });
 
-  await test("source: the screen sends affirmation_added only after a success and never for a heavy moment, the button is a quiet ghost with no haptic, the planner skips a null slot, and the copy is typographic", async (w) => {
+  await test("source: the screen sends affirmation_added only after a success and never for a heavy moment, the button is a quiet ghost with no haptic, the deck deals an unslotted word after the three best, and the copy is typographic", async (w) => {
     const screen = read("src/screens/journal/ReflectionScreen.tsx");
     const tracks = screen.match(/track\("affirmation_added"/g) ?? [];
     assert.equal(tracks.length, 1);
@@ -469,7 +488,10 @@ async function policyChecks() {
     const hook = read("src/hooks/useReflection.ts");
     assert.ok(/added\.ok[\s\S]{0,400}requestAffirmationReschedule\(\)/.test(hook), "the notifications are planned again after a success");
     assert.ok(!/console\./.test(hook));
-    assert.ok(/if \(affirmation\.slot === null\) continue;/.test(read("src/services/affirmationPlanner.ts")));
+    // 2026-11-17: an affirmation with no slot is a word like the others (the deck deals it after the three best), so the planner
+    // no longer skips it; it plans what the deck deals.
+    assert.ok(!/slot === null\) continue;/.test(read("src/services/affirmationPlanner.ts")));
+    assert.ok(/a\.word\.slot !== null/.test(read("src/utils/wordDeck.ts")) || /aSlotted/.test(read("src/utils/wordDeck.ts")), "the deck puts slotted words first");
     assert.ok(/Affirmation & \{ slot: TimeSlot \}/.test(read("src/components/AffirmationCard.tsx")));
     assert.ok(!/MAX_AFFIRMATIONS = (?!10)/.test(read("src/constants/app.ts")));
     const { affirmations: text } = copyOf(w).reflection;

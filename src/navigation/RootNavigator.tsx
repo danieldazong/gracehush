@@ -10,6 +10,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "@/constants/theme";
 import { SignInScreen } from "@/screens/auth/SignInScreen";
 import { ConversationScreen } from "@/screens/scholar/ConversationScreen";
+import { ScholarHistoryScreen } from "@/screens/scholar/ScholarHistoryScreen";
 import { NewEntryScreen } from "@/screens/journal/NewEntryScreen";
 import { NowPlayingScreen } from "@/screens/journal/NowPlayingScreen";
 import { ReflectionScreen } from "@/screens/journal/ReflectionScreen";
@@ -95,6 +96,7 @@ export function RootNavigator() {
           />
           <Stack.Screen name="Reflection" component={ReflectionScreen} />
           <Stack.Screen name="Conversation" component={ConversationScreen} />
+          <Stack.Screen name="ScholarHistory" component={ScholarHistoryScreen} />
           <Stack.Screen name="ScholarTalk" getComponent={loadTalkScreen} options={talkOptions} layout={modalLayout} />
           <Stack.Screen
             name="NowPlaying"

@@ -50,6 +50,8 @@ globalThis.fetch = async (input) => {
 const QUESTION = "What does Philippians four mean for a worried week";
 const FORBIDDEN_IN_LOGS = [QUESTION, "tokA", "tokB", "user_a", "user_b", "chat-", "/raw/", "HEAVY"];
 const CONV = "00000000-0000-4000-8000-0000000000c1";
+// Another conversation, which claimed an account's free conversation (2026-11-20) in a check that needs it used up elsewhere.
+const OTHER_CONV = "00000000-0000-4000-8000-0000000000c9";
 const mid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), "utf8").replace(/\r\n/g, "\n");
 
@@ -114,6 +116,7 @@ async function test(name, run, options = {}) {
         "@/store/playerStore": { usePlayerStore: { getState: () => ({ pause: () => void (audio.devotionalPauses += 1) }) } },
       }
       : {}),
+    ...(options.fakes ?? {}),
   };
   const w = makeLiveWorld({
     aiPermission: options.permission ? "real" : "fake",
@@ -125,6 +128,8 @@ async function test(name, run, options = {}) {
   let limit;
   try {
     await w.signIn();
+    // Scholar is for Pro alone (2026-11-18): the server holds the test account as Pro unless a check says otherwise.
+    w.server.state.serverPlans.user_a = "pro";
     await Promise.race([
       run(w),
       new Promise((_, reject) => {
@@ -187,13 +192,13 @@ function holdTurn(w) {
 }
 
 // A conversation and its messages, written on the server as scholar-turn writes them.
-function seedConversation(w, { id = CONV, sub = "user_a", heavy = false, entryId = null, messages = [] } = {}) {
+function seedConversation(w, { id = CONV, sub = "user_a", heavy = false, entryId = null, messages = [], title } = {}) {
   const at = stamp(clock.now);
   w.server.state.scholarConversations.push({
     id,
     user_id: sub,
     entry_id: entryId,
-    title: heavy ? null : "A question about peace",
+    title: title === undefined ? (heavy ? null : "A question about peace") : title,
     is_heavy: heavy,
     last_message_at: at,
     created_at: at,
@@ -212,6 +217,13 @@ function seedConversation(w, { id = CONV, sub = "user_a", heavy = false, entryId
       ...message,
     });
   }
+}
+
+// The free conversation (2026-11-20), already claimed by another conversation: an account that is not Pro is then told by its
+// plan in every other one, as scholar-turn does.
+function freeUsedElsewhere(w, { sub = "user_a", messages = 2 } = {}) {
+  const at = stamp(clock.now);
+  w.server.state.scholarFreeUse.push({ user_id: sub, conversation_id: OTHER_CONV, messages, created_at: at, updated_at: at });
 }
 
 const userRow = (n, words, extra = {}) => ({ id: mid(n), role: "user", content: { blocks: [{ type: "text", text: words }] }, ...extra });
@@ -242,27 +254,62 @@ async function dataChecks() {
     assert.equal(answer.blocks[0].type, "passage");
     assert.equal(answer.blocks[0].scripture.verified, true);
     assert.equal(answer.blocks[0].scripture.translation, "BSB");
-    assert.equal(usage.kind, "free_day");
-    assert.equal(usage.remaining, 4);
+    // A Pro account's credits: the message cost 4 of the 400, and the window renews 24 hours after this first spend.
+    assert.deepEqual(
+      { kind: usage.kind, used: usage.used, limit: usage.limit, remaining: usage.remaining },
+      { kind: "credits", used: 4, limit: 400, remaining: 396 },
+    );
+    assert.ok(Math.abs(Date.parse(usage.resetsAt) - (BASE + 86_400_000)) < 1_000, "the window renews in 24 hours");
     // The function answers with PostgREST's microseconds; the app keeps three digits and a Z, as every server time.
     for (const time of [conversation.createdAt, conversation.lastMessageAt, message.createdAt, answer.createdAt]) {
       assert.match(time, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, `a time the phone can read: ${time}`);
     }
   });
 
-  await test("gateway: an answer that is not the contract is UNKNOWN, and a 402 carries the day's numbers", async (w) => {
+  await test("gateway: an answer that is not the contract is UNKNOWN, and a 402 carries the plan or the credits", async (w) => {
     w.server.state.functions["scholar-turn"].push(() => json(200, { conversation: { id: CONV }, answer: "nonsense" }));
     const odd = await repo(w).sendTurn(text(QUESTION));
     assert.equal(odd.ok, false);
     assert.equal(odd.code, "UNKNOWN");
-    w.server.state.scholarFreeLimit = 0;
-    const held = await repo(w).sendTurn(text(QUESTION, 2));
-    assert.equal(held.ok, false);
-    assert.equal(held.code, "LIMIT_REACHED");
+    const numbers = (result) => ({
+      kind: result.usage.kind,
+      used: result.usage.used,
+      limit: result.usage.limit,
+      remaining: result.usage.remaining,
+      resetsAt: result.usage.resetsAt,
+    });
+    // The free plan, its free conversation used in another one: Scholar is part of Pro, with no numbers and no day it opens.
+    w.server.state.serverPlans.user_a = "free";
+    freeUsedElsewhere(w);
+    const free = await repo(w).sendTurn(text(QUESTION, 2));
+    assert.equal(free.ok, false);
+    assert.equal(free.code, "LIMIT_REACHED");
+    assert.deepEqual(numbers(free), { kind: "scholar_plan", used: 0, limit: 0, remaining: 0, resetsAt: null });
+    // A free trial: the same refusal, with the day its plan begins.
+    const ends = new Date(BASE + 3 * 86_400_000).toISOString();
+    w.server.state.serverPlans.user_a = "trial";
+    w.server.state.serverPlanEnds.user_a = ends;
+    const trial = await repo(w).sendTurn(text(QUESTION, 3));
+    assert.equal(trial.code, "LIMIT_REACHED");
+    assert.equal(trial.usage.kind, "scholar_plan");
+    assert.equal(Date.parse(trial.usage.resetsAt), Date.parse(ends), "Scholar opens when the plan begins");
+    // Pro with every credit of the window spent: the credits, and when they renew.
+    w.server.state.serverPlans.user_a = "pro";
+    w.server.state.scholarCreditRows.push({
+      user_id: "user_a",
+      used: 400,
+      allowance: 400,
+      renews_at: stamp(BASE + 3_600_000),
+      updated_at: stamp(BASE),
+    });
+    const out = await repo(w).sendTurn(text(QUESTION, 4));
+    assert.equal(out.code, "LIMIT_REACHED");
+    const left = numbers(out);
     assert.deepEqual(
-      { kind: held.usage.kind, remaining: held.usage.remaining, limit: held.usage.limit },
-      { kind: "free_day", remaining: 0, limit: 0 },
+      { kind: left.kind, used: left.used, limit: left.limit, remaining: left.remaining },
+      { kind: "credits", used: 400, limit: 400, remaining: 0 },
     );
+    assert.ok(Math.abs(Date.parse(left.resetsAt) - (BASE + 3_600_000)) < 1_000, "they renew in an hour");
   });
 
   await test("gateway: a typed turn gives up after 45 seconds and a spoken one after 60, as NETWORK", async (w) => {
@@ -325,9 +372,10 @@ async function dataChecks() {
     clock.now = BASE;
     seedConversation(w, { id: CONV, messages: [userRow(1, "first"), answerRow(2, 1)] });
     seedConversation(w, { id: mid(90), sub: "user_b", messages: [userRow(91, "someone else's")] });
-    const list = await repo(w).listConversations();
+    const list = await repo(w).listConversations({ limit: 30 });
     assert.equal(list.ok, true);
-    assert.deepEqual(list.data.map((item) => item.id), [CONV, mid(80)], "only this account's, the newest first");
+    assert.deepEqual(list.data.conversations.map((item) => item.id), [CONV, mid(80)], "only this account's, the newest first");
+    assert.equal(list.data.nextCursor, null, "two conversations fit one page");
     const one = await repo(w).getConversation(CONV);
     assert.deepEqual(one.data.messages.map((message) => message.id), [mid(1), mid(2)]);
     const foreign = await repo(w).getConversation(mid(90));
@@ -390,6 +438,8 @@ async function dataChecks() {
 
   await test("repository: the mock data answers every outcome without a request", async (w) => {
     w.use("@/store/devStore").useDevStore.getState().setDataSource("mock");
+    // A Pro account on the mock plan: the credits below are Pro's (the free conversation has a check of its own).
+    w.use("@/data/journalRepository").setMockSubscriptionTier("pro");
     const mock = w.use("@/data/mock/scholar");
     mock.resetMockScholar();
     const dev = w.use("@/store/devStore").useDevStore;
@@ -398,8 +448,11 @@ async function dataChecks() {
       await advance(1_300);
       return promise;
     };
+    assert.equal(await repo(w).readScholarCredits(), null, "no credits before the first spend");
     const ready = await viaMock(repo(w).sendTurn(text(QUESTION)));
     assert.equal(ready.ok, true);
+    assert.deepEqual([ready.data.usage.kind, ready.data.usage.remaining], ["credits", 396], "a message spends the mock's credits");
+    assert.equal((await repo(w).readScholarCredits()).remaining, 396, "and the credits read back the same");
     dev.getState().setNextScholarOutcome("heavy");
     const heavy = await viaMock(repo(w).sendTurn(text("a hard night", 2)));
     assert.equal(heavy.data.answer.helpLine, "crisis");
@@ -408,7 +461,349 @@ async function dataChecks() {
     const resting = await viaMock(repo(w).sendTurn(text(QUESTION, 3, { conversationId: mid(70) })));
     assert.equal(resting.code, "SCHOLAR_UNAVAILABLE");
     assert.equal(dev.getState().nextScholarOutcome, "ready", "the outcome is used once");
+    dev.getState().setNextScholarOutcome("plan");
+    const plan = await viaMock(repo(w).sendTurn(text(QUESTION, 4, { conversationId: mid(71) })));
+    assert.equal(plan.code, "LIMIT_REACHED");
+    assert.deepEqual([plan.usage.kind, plan.usage.resetsAt], ["scholar_plan", null], "the free plan");
+    dev.getState().setNextScholarOutcome("trial");
+    const trial = await viaMock(repo(w).sendTurn(text(QUESTION, 5, { conversationId: mid(72) })));
+    assert.equal(trial.usage.kind, "scholar_plan");
+    assert.ok(Date.parse(trial.usage.resetsAt) > clock.now, "a trial is told the day its plan begins");
+    dev.getState().setNextScholarOutcome("limit");
+    const limit = await viaMock(repo(w).sendTurn(text(QUESTION, 6, { conversationId: mid(73) })));
+    assert.deepEqual([limit.code, limit.usage.kind, limit.usage.remaining], ["LIMIT_REACHED", "credits", 0], "no credit left");
     assert.equal(calls(w, "scholar-turn").length, 0, "the mock never reaches the server");
+    assert.equal(w.server.state.requests.filter((r) => r.path === "/rest/v1/scholar_credits").length, 0, "nor its credits");
+    mock.resetMockScholar();
+  });
+
+  await test("repository: the credits are read for this account, as the server holds them, and none once the window has ended", async (w) => {
+    assert.equal(await repo(w).readScholarCredits(), null, "no row, no credits");
+    w.server.state.scholarCreditRows.push(
+      { user_id: "user_b", used: 9, allowance: 400, renews_at: "2026-10-25T20:00:00.123456+00:00", updated_at: stamp(BASE) },
+      { user_id: "user_a", used: 120, allowance: 400, renews_at: "2026-10-25T18:00:00.123456+00:00", updated_at: stamp(BASE) },
+    );
+    assert.deepEqual(await repo(w).readScholarCredits(), {
+      kind: "credits",
+      used: 120,
+      limit: 400,
+      remaining: 280,
+      resetsAt: "2026-10-25T18:00:00.123Z",
+    });
+    const reads = w.server.state.requests.filter((r) => r.path === "/rest/v1/scholar_credits");
+    const params = new URLSearchParams(reads[reads.length - 1].search);
+    assert.equal(params.get("select"), "used,allowance,renews_at", "the explicit columns, never user_id");
+    assert.equal(params.get("user_id"), "eq.user_a", "only this account's row");
+    clock.now = Date.parse("2026-10-25T18:00:01Z");
+    assert.equal(await repo(w).readScholarCredits(), null, "a window that has ended is a whole allowance: nothing to show");
+  });
+}
+
+// ================================================================== the Conversations screen (2026-11-16)
+// `count` conversations on the server, number 0 the newest and each `step` ms older than the one before it.
+function seedMany(w, count, { title = (i) => `Conversation ${i}`, step = 60_000, heavyAt = [] } = {}) {
+  for (let i = 0; i < count; i += 1) {
+    clock.now = BASE - i * step;
+    seedConversation(w, { id: mid(1000 + i), title: title(i), heavy: heavyAt.includes(i) });
+  }
+  clock.now = BASE;
+}
+
+// The screen's hook with a search the check can type into, as the screen's own field does.
+function renderHistory(w, initial = "") {
+  const react = w.use("react");
+  const { useScholarHistory } = w.use("@/hooks/useScholarHistory");
+  return w.renderHook(() => {
+    const [query, setQuery] = react.useState(initial);
+    return { query, setQuery, ...useScholarHistory(query) };
+  });
+}
+
+async function untilHistory(handle, predicate, label, rounds = 120) {
+  for (let i = 0; i < rounds; i += 1) {
+    const current = handle.result.current;
+    if (predicate(current.state, current)) return current;
+    await settle(2);
+  }
+  const { state } = handle.result.current;
+  assert.fail(`${label}: never reached (phase ${state.phase}, ${state.conversations?.length} loaded)`);
+}
+
+// The list requests the app made for the conversations (not the single-conversation reads), as their query strings.
+const listRequests = (w) =>
+  w.server.state.requests
+    .filter((r) => r.path === "/rest/v1/scholar_conversations" && new URLSearchParams(r.search).get("order") !== null)
+    .map((r) => new URLSearchParams(r.search));
+
+async function historyChecks() {
+  await test("history: 65 conversations load 30 at a time as the list is scrolled, once at a time, none repeated and none missed", async (w) => {
+    seedMany(w, 65);
+    const handle = renderHistory(w);
+    let current = await untilHistory(handle, (s) => s.phase === "ready", "the first page");
+    assert.equal(current.state.conversations.length, 30);
+    assert.notEqual(current.state.nextCursor, null, "more follow");
+    assert.equal(listRequests(w).length, 1);
+    assert.equal(listRequests(w)[0].get("limit"), "31", "one more than a page, to know whether another follows");
+    assert.equal(listRequests(w)[0].get("user_id"), "eq.user_a", "only this account's");
+    // Two calls at once (the list can ask twice while a page is on its way) are one request.
+    current.loadMore();
+    current.loadMore();
+    current = await untilHistory(handle, (s) => s.phase === "ready" && s.conversations.length === 60 && !s.loadingMore, "the second page");
+    assert.equal(listRequests(w).length, 2, "two quick calls made one request");
+    const lastOfFirstPage = w.server.state.scholarConversations.find((row) => row.id === mid(1029)).last_message_at;
+    assert.equal(
+      listRequests(w)[1].get("last_message_at"),
+      `lt.${lastOfFirstPage}`,
+      "the next page starts after the last row as the server wrote its time, microseconds and all",
+    );
+    current.loadMore();
+    current = await untilHistory(handle, (s) => s.phase === "ready" && s.conversations.length === 65 && !s.loadingMore, "the last page");
+    assert.equal(current.state.nextCursor, null, "nothing follows the last page");
+    assert.deepEqual(
+      current.state.conversations.map((conversation) => conversation.id),
+      Array.from({ length: 65 }, (_, i) => mid(1000 + i)),
+      "newest first, none repeated and none missed across three pages",
+    );
+    current.loadMore();
+    await settle(6);
+    assert.equal(listRequests(w).length, 3, "at the end, scrolling asks for nothing");
+  });
+
+  await test("history: a page that fails keeps the list and says so, and asking again loads it", async (w) => {
+    seedMany(w, 40);
+    const handle = renderHistory(w);
+    let current = await untilHistory(handle, (s) => s.phase === "ready", "the first page");
+    w.server.state.offline = true;
+    current.loadMore();
+    current = await untilHistory(handle, (s) => s.phase === "ready" && s.moreFailed, "the failed page");
+    assert.equal(current.state.conversations.length, 30, "the list stays");
+    assert.equal(current.state.loadingMore, false);
+    w.server.state.offline = false;
+    current.loadMore();
+    current = await untilHistory(handle, (s) => s.phase === "ready" && s.conversations.length === 40 && !s.moreFailed, "the retried page");
+    assert.equal(current.state.nextCursor, null);
+  });
+
+  await test("history: a first load that fails is the error state, and Try again loads the list", async (w) => {
+    seedMany(w, 3);
+    w.server.state.offline = true;
+    const handle = renderHistory(w);
+    let current = await untilHistory(handle, (s) => s.phase === "error", "the error state");
+    w.server.state.offline = false;
+    current.retry();
+    current = await untilHistory(handle, (s) => s.phase === "ready", "the list after Try again");
+    assert.equal(current.state.conversations.length, 3);
+  });
+
+  await test("history: a search waits for the typing to pause, matches titles case-insensitively with % and _ taken literally, and never matches a conversation with no title", async (w) => {
+    const titles = [
+      "Peace in the storm",
+      "A peaceful morning",
+      "Hope for tomorrow",
+      "100% sure",
+      "1000 sure",
+      "a_b",
+      "axb",
+      null,
+    ];
+    seedMany(w, titles.length, { title: (i) => titles[i], heavyAt: [7] });
+    const handle = renderHistory(w);
+    let current = await untilHistory(handle, (s) => s.phase === "ready" && s.conversations.length === 8, "everything");
+    assert.equal(current.state.conversations.length, 8, "a conversation with no title is listed when nothing is searched");
+    assert.equal(listRequests(w)[0].get("title"), null, "no search, no title filter");
+    const before = listRequests(w).length;
+
+    handle.result.current.setQuery("pea");
+    await advance(300);
+    assert.equal(handle.result.current.applied, "", "not applied while the person is still typing");
+    handle.result.current.setQuery("peac");
+    await advance(300);
+    assert.equal(listRequests(w).length, before, "typing again starts the wait over: still no request");
+    await advance(100);
+    current = await untilHistory(handle, (s, c) => c.applied === "peac" && s.phase === "ready" && s.conversations.length === 2, "the search for peac");
+    assert.equal(listRequests(w).length, before + 1, "one request for the whole word");
+    assert.equal(listRequests(w).at(-1).get("title"), "ilike.%peac%");
+    assert.deepEqual(current.state.conversations.map((c) => c.id), [mid(1000), mid(1001)]);
+
+    const search = async (words, expectIds, label) => {
+      handle.result.current.setQuery(words);
+      await advance(400);
+      const found = await untilHistory(
+        handle,
+        (s, c) => c.applied === words.trim() && s.phase === "ready" && s.conversations.length === expectIds.length,
+        label,
+      );
+      assert.deepEqual(found.state.conversations.map((c) => c.id), expectIds, label);
+      return found;
+    };
+    await search("PEACE", [mid(1000), mid(1001)], "upper case finds the same two");
+    assert.equal(listRequests(w).at(-1).get("title"), "ilike.%PEACE%");
+    await search("100%", [mid(1003)], "a percent sign is a percent sign, so 1000 sure is not found");
+    assert.equal(listRequests(w).at(-1).get("title"), "ilike.%100\\%%");
+    await search("a_b", [mid(1005)], "an underscore is an underscore, so axb is not found");
+    const noMatch = await search("zzz", [], "nothing matches");
+    assert.equal(noMatch.applied, "zzz", "the screen says what it searched for");
+    const withE = await search("e", [mid(1000), mid(1001), mid(1002), mid(1003), mid(1004)], "a letter");
+    assert.ok(!withE.state.conversations.some((c) => c.id === mid(1007)), "a conversation with no title is never a match");
+    const all = await search("   ", Array.from({ length: 8 }, (_, i) => mid(1000 + i)), "spaces are no search at all");
+    assert.equal(all.applied, "");
+    assert.equal(listRequests(w).at(-1).get("title"), null, "and no title filter is sent");
+  });
+
+  await test("history: deleting takes the conversation off the list and the server; offline it says so and sends nothing", async (w) => {
+    seedMany(w, 3);
+    const handle = renderHistory(w);
+    const current = await untilHistory(handle, (s) => s.phase === "ready", "the list");
+    assert.equal(await current.deleteOne(mid(1001)), "ok");
+    assert.deepEqual(
+      handle.result.current.state.conversations.map((c) => c.id),
+      [mid(1000), mid(1002)],
+      "the row is gone from the screen",
+    );
+    assert.deepEqual(w.server.state.scholarConversations.map((c) => c.id), [mid(1000), mid(1002)], "and from the server");
+    const deletes = () => w.server.state.requests.filter((r) => r.method === "DELETE").length;
+    assert.equal(deletes(), 1);
+    offline(w);
+    assert.equal(await handle.result.current.deleteOne(mid(1000)), "offline");
+    assert.equal(handle.result.current.state.conversations.length, 2, "the row stays");
+    assert.equal(deletes(), 1, "nothing was sent");
+  });
+
+  await test("history: the first page of a refresh is merged into the pages already loaded, and the helpers group, search and page as the screen needs", async (w) => {
+    const h = w.use("@/utils/scholarHistory");
+    const at = (hour) => `2026-11-10T${String(hour).padStart(2, "0")}:00:00.000Z`;
+    const row = (id, hour) => ({ id, title: id, lastMessageAt: at(hour) });
+    const previous = { conversations: [row("P1", 6), row("P2", 5), row("P3", 4), row("P4", 3), row("P5", 2), row("P6", 1)], nextCursor: "after-P6" };
+    // A new conversation on top, P2 deleted meanwhile (it is inside what the page covers, so it drops out), and the older
+    // pages already scrolled to are kept below with their own cursor.
+    const merged = h.mergeFirstPage(previous, { conversations: [row("N0", 7), row("P1", 6), row("P3", 4)], nextCursor: "after-P3" });
+    assert.deepEqual(merged.conversations.map((c) => c.id), ["N0", "P1", "P3", "P4", "P5", "P6"]);
+    assert.equal(merged.nextCursor, "after-P6");
+    // A page that is the whole list replaces everything: the older rows no longer exist.
+    const whole = h.mergeFirstPage(previous, { conversations: [row("P1", 6)], nextCursor: null });
+    assert.deepEqual(whole.conversations.map((c) => c.id), ["P1"]);
+    assert.equal(whole.nextCursor, null);
+    // Nothing older was loaded: the page is the list, with its own cursor.
+    const same = h.mergeFirstPage({ conversations: [row("P1", 6), row("P2", 5)], nextCursor: "x" }, { conversations: [row("N0", 7), row("P1", 6), row("P2", 5)], nextCursor: "after-P2" });
+    assert.deepEqual(same.conversations.map((c) => c.id), ["N0", "P1", "P2"]);
+    assert.equal(same.nextCursor, "after-P2");
+    const appended = h.appendPage(
+      { conversations: [row("A", 9), row("B", 8)], nextCursor: "c1" },
+      { conversations: [row("B", 8), row("C", 7)], nextCursor: "c2" },
+    );
+    assert.deepEqual(appended.conversations.map((c) => c.id), ["A", "B", "C"], "a row that arrives twice is listed once");
+    assert.equal(appended.nextCursor, "c2");
+
+    assert.equal(h.likePattern(""), null);
+    assert.equal(h.likePattern("   "), null);
+    assert.equal(h.likePattern("peace"), "%peace%");
+    assert.equal(h.likePattern("  100%_\\ "), "%100\\%\\_\\\\%", "the pattern's own characters are made literal");
+    assert.equal(h.likePattern("a".repeat(70)), `%${"a".repeat(60)}%`, "a title is at most 60 characters");
+    assert.equal(h.likePattern(`${"a".repeat(59)} ${"b".repeat(5)}`), `%${"a".repeat(59)}%`, "the cut never leaves a trailing space");
+
+    const now = new Date("2026-11-16T15:00:00.000Z");
+    const conversation = (id, iso, title = id) => ({ id, title, lastMessageAt: iso });
+    const items = h.groupConversations(
+      [
+        conversation("future", "2026-11-17T01:00:00.000Z"),
+        conversation("today", "2026-11-16T09:15:00.000Z"),
+        conversation("yesterday", "2026-11-15T20:05:00.000Z"),
+        conversation("fri", "2026-11-13T15:50:00.000Z"),
+        conversation("fri2", "2026-11-12T10:00:00.000Z"),
+        conversation("sevenDays", "2026-11-09T07:00:00.000Z"),
+        conversation("eightDays", "2026-11-08T07:00:00.000Z"),
+        conversation("october", "2026-10-21T07:15:00.000Z", null),
+        conversation("lastYear", "2025-12-31T23:30:00.000Z"),
+      ],
+      now,
+      (iso) => `day:${iso}`,
+    );
+    assert.deepEqual(
+      items.filter((item) => item.kind === "header").map((item) => item.title),
+      ["Today", "Yesterday", "Previous 7 days", "November 2026", "October 2026", "December 2025"],
+      "a clock skewed into the future is still today; seven days ago is still the week, eight is a month",
+    );
+    assert.equal(new Set(items.map((item) => item.key)).size, items.length, "every key is its own");
+    const rows = Object.fromEntries(items.filter((item) => item.kind === "row").map((item) => [item.key, item]));
+    assert.equal(rows.today.time, "9:15 AM", "under Today the heading says the day, so a row shows the clock");
+    assert.equal(rows.yesterday.time, "8:05 PM");
+    assert.equal(rows.fri.time, "Fri, 3:50 PM", "under the week, the weekday and the clock");
+    assert.equal(rows.sevenDays.time, "Mon, 7:00 AM");
+    assert.equal(rows.eightDays.time, "Nov 8, 7:00 AM", "under a month, the date and the clock");
+    assert.equal(rows.lastYear.time, "Dec 31, 11:30 PM");
+    assert.equal(rows.today.label, "today, day:2026-11-16T09:15:00.000Z", "a screen reader hears the title and the full day");
+    assert.equal(rows.october.label, "A conversation with Scholar, day:2026-10-21T07:15:00.000Z", "no title is the plain name");
+    assert.deepEqual(h.groupConversations([], now, (iso) => iso), []);
+    // Each heading is followed by its rows, newest first, never two headings in a row.
+    for (let i = 1; i < items.length; i += 1) assert.ok(!(items[i - 1].kind === "header" && items[i].kind === "header"));
+  });
+
+  await test("history: the copy keeps typographic quotes and says no more than the app does", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    const strings = [];
+    const walk = (value) => {
+      if (typeof value === "string") strings.push(value);
+      else if (typeof value === "function") strings.push(value("peace"), value("A title", "Today, 5:36 PM"));
+      else if (value !== null && typeof value === "object") Object.values(value).forEach(walk);
+    };
+    walk(copy.scholar.history);
+    assert.ok(strings.length > 15);
+    for (const s of strings) {
+      assert.ok(!s.includes("'"), `a straight apostrophe: ${s}`);
+      assert.ok(!s.includes('"'), `a straight quote: ${s}`);
+      assert.ok(!/Gracehush/.test(s), `the old spelling: ${s}`);
+      assert.ok(!/confidential|private|guarantee|encrypted|delete.*automatic/i.test(s), `a claim the app cannot make: ${s}`);
+    }
+    assert.equal(copy.scholar.history.noResults("peace"), "No conversations match “peace”.");
+    assert.equal(copy.scholar.history.title, "Conversations");
+    assert.equal(copy.scholar.history.seeAll, "See all");
+  });
+
+  await test("tab: the Scholar tab asks for the three latest and knows whether more exist", async (w) => {
+    seedMany(w, 5);
+    const { useScholarHome } = w.use("@/hooks/useScholarHome");
+    const handle = w.renderHook(useScholarHome);
+    const current = await until(handle, (c) => c.state.phase === "ready", "the tab's list");
+    assert.deepEqual(current.state.conversations.map((c) => c.id), [mid(1000), mid(1001), mid(1002)], "the three newest");
+    assert.equal(current.state.hasMore, true, "two more are behind See all");
+    assert.equal(listRequests(w)[0].get("limit"), "4", "one more than shown, to know whether more follow");
+  });
+
+  await test("tab: exactly three conversations leave no See all", async (w) => {
+    seedMany(w, 3);
+    const { useScholarHome } = w.use("@/hooks/useScholarHome");
+    const handle = w.renderHook(useScholarHome);
+    const current = await until(handle, (c) => c.state.phase === "ready", "the tab's list");
+    assert.equal(current.state.conversations.length, 3);
+    assert.equal(current.state.hasMore, false);
+  });
+
+  await test("history: the mock data pages and searches like the server, without a request", async (w) => {
+    w.use("@/store/devStore").useDevStore.getState().setDataSource("mock");
+    // Pro on the mock plan: three conversations answered (a free account has one).
+    w.use("@/data/journalRepository").setMockSubscriptionTier("pro");
+    const mock = w.use("@/data/mock/scholar");
+    mock.resetMockScholar();
+    for (let n = 0; n < 3; n += 1) {
+      const sent = repo(w).sendTurn(text(`${QUESTION} ${n}`, 10 + n, { conversationId: mid(100 + n) }));
+      await advance(1_300);
+      assert.equal((await sent).ok, true);
+    }
+    const viaMock = async (promise) => {
+      await advance(400);
+      return promise;
+    };
+    const first = await viaMock(repo(w).listConversations({ limit: 2 }));
+    assert.equal(first.data.conversations.length, 2);
+    assert.notEqual(first.data.nextCursor, null);
+    const second = await viaMock(repo(w).listConversations({ limit: 2, cursor: first.data.nextCursor }));
+    assert.equal(second.data.conversations.length, 1);
+    assert.equal(second.data.nextCursor, null);
+    const none = await viaMock(repo(w).listConversations({ limit: 5, query: "zzzz" }));
+    assert.deepEqual(none.data.conversations, []);
+    const spaces = await viaMock(repo(w).listConversations({ limit: 5, query: "   " }));
+    assert.equal(spaces.data.conversations.length, 3, "spaces are no search");
+    assert.equal(listRequests(w).length, 0, "the mock never reaches the server");
     mock.resetMockScholar();
   });
 }
@@ -469,34 +864,178 @@ async function conversationChecks() {
     handle.unmount();
   });
 
-  await test("conversation: the free limit holds a message with Try again alone, and the heads-up follows the server's numbers", async (w) => {
-    w.server.state.scholarFreeLimit = 3;
+  await test("conversation: credits run low, then out: the countdown moves, the message waits with Try again, and renewal clears it", async (w) => {
+    // 316 of the 400 spent, the window renewing in 25 minutes.
+    w.server.state.scholarCreditRows.push({
+      user_id: "user_a",
+      used: 316,
+      allowance: 400,
+      renews_at: "2026-10-25T12:25:00.000000+00:00",
+      updated_at: stamp(BASE),
+    });
     const handle = renderConversation(w, {});
     await until(handle, (s) => s.phase === "ready", "ready");
     handle.result.current.send("one");
     let state = await until(handle, (s) => !s.sending && s.messages.length === 2, "the first answer");
-    assert.equal(state.headsUp, 2, "two free messages left today");
-    state.send("two");
-    state = await until(handle, (s) => !s.sending && s.messages.length === 4, "the second answer");
-    assert.equal(state.headsUp, 1);
-    state.send("three");
-    state = await until(handle, (s) => !s.sending && s.messages.length === 6, "the third answer");
-    assert.equal(state.headsUp, null, "none left: the heads-up gives way");
-    assert.equal(state.send("four"), true, "the composer still sends: the server screens it first");
-    state = await until(handle, (s) => !s.sending && s.notice !== null, "the limit");
-    assert.equal(state.notice, "freeLimit");
+    assert.deepEqual(state.creditsLow, { percent: 20, renewsInMinutes: 25 }, "80 of 400 left: the line above the composer");
+    assert.equal(state.creditsOut, null);
+    w.server.state.scholarCreditRows[0].used = 400;
+    assert.equal(state.send("two"), true, "the composer still sends: the server screens it first");
+    state = await until(handle, (s) => !s.sending && s.creditsOut !== null, "no credit left");
+    assert.equal(state.creditsOut, 25, "the minutes until they renew");
+    assert.equal(state.creditsLow, null);
+    assert.equal(state.notice, null, "the credits say it, not a notice of their own");
     const held = state.rows.filter((row) => row.kind === "user").pop();
     assert.equal(held.failure, "limit", "only Try again");
-    // Another day's count would come from the server too: a bigger limit shows a bigger number.
-    w.server.state.scholarFreeLimit = 5;
-    state.retry(held.message.id);
-    state = await until(handle, (s) => !s.sending && s.messages.length === 8, "the held message, answered");
-    assert.equal(state.headsUp, 1, "the server's numbers, not the app's");
+    // The countdown is one repeating timer of SCHOLAR_CREDITS_TICK_MS while the window runs, and it stops once they renew.
+    const tick = w.use("@/constants/app").SCHOLAR_CREDITS_TICK_MS;
+    const countdowns = () => [...clock.timers.values()].filter((timer) => timer.repeat && timer.ms === tick).length;
+    await advance(12 * 60_000);
+    assert.equal(handle.result.current.creditsOut, 13, "the countdown moves while the screen is open");
+    const running = countdowns();
+    assert.ok(running >= 1, "the countdown ticks while the window runs");
+    await advance(13 * 60_000);
+    assert.equal(handle.result.current.creditsOut, null, "renewed: the old window's numbers are gone");
+    assert.equal(handle.result.current.creditsLow, null);
+    assert.equal(countdowns(), running - 1, "renewed: the countdown stops ticking");
+    handle.result.current.retry(held.message.id);
+    state = await until(handle, (s) => !s.sending && s.messages.length === 4, "the held message, answered");
+    assert.equal(state.messages[2].id, held.message.id, "the same message, answered from a fresh window");
+    assert.equal(state.creditsLow, null, "396 of 400 left: no line");
     handle.unmount();
   });
 
-  await test("conversation: a heavy message is answered with its help line, no chips, no events, no heads-up, never the limit", async (w) => {
-    w.server.state.scholarFreeLimit = 0;
+  await test("conversation: outside Pro a message is kept with Try again: the free plan sees the plans, a trial the day Scholar opens", async (w) => {
+    w.server.state.serverPlans.user_a = "free";
+    // Its free conversation was another one (2026-11-20): this one is told by the plan.
+    freeUsedElsewhere(w);
+    const handle = renderConversation(w, {});
+    await until(handle, (s) => s.phase === "ready", "ready");
+    assert.equal(handle.result.current.paywallAsk, 0, "nothing opens before a message");
+    assert.equal(handle.result.current.send("one"), true, "the composer sends whatever the plan: the server screens it first");
+    let state = await until(handle, (s) => !s.sending && s.notice !== null, "the free plan");
+    assert.equal(state.notice, "plan", "Scholar is part of Pro, with See plans");
+    assert.equal(state.paywallAsk, 1, "and the plans open by themselves, once");
+    assert.equal(state.opensAt, null);
+    const held = state.rows.filter((row) => row.kind === "user").pop();
+    assert.equal(held.failure, "limit", "only Try again");
+    const ends = new Date(BASE + 3 * 86_400_000).toISOString();
+    w.server.state.serverPlans.user_a = "trial";
+    w.server.state.serverPlanEnds.user_a = ends;
+    state.retry(held.message.id);
+    state = await until(handle, (s) => !s.sending && s.notice === "opensSaved", "the trial");
+    assert.equal(Date.parse(state.opensAt), Date.parse(ends), "the day the plan begins");
+    assert.equal(state.creditsOut, null, "a trial has no credits");
+    assert.equal(state.paywallAsk, 1, "a trial is never sent to the plans");
+    w.server.state.serverPlans.user_a = "pro";
+    state.retry(held.message.id);
+    state = await until(handle, (s) => !s.sending && s.messages.length === 2, "the plan has begun: answered");
+    assert.equal(state.messages[0].id, held.message.id, "the same message");
+    assert.equal(state.notice, null);
+    assert.deepEqual(
+      calls(w, "scholar-turn").map((call) => call.body.messageId),
+      [held.message.id, held.message.id, held.message.id],
+    );
+    handle.unmount();
+  });
+
+  await test("conversation: a Pro account's credits are read when it opens, and only for an account RevenueCat calls Pro", async (w) => {
+    w.server.state.scholarCreditRows.push({
+      user_id: "user_a",
+      used: 330,
+      allowance: 400,
+      renews_at: "2026-10-25T13:30:00.123456+00:00",
+      updated_at: stamp(BASE),
+    });
+    const creditReads = () => w.server.state.requests.filter((r) => r.path === "/rest/v1/scholar_credits").length;
+    const before = renderConversation(w, {});
+    await until(before, (s) => s.phase === "ready", "ready");
+    await settle(4);
+    assert.equal(creditReads(), 0, "until RevenueCat has answered, nothing is read");
+    assert.equal(before.result.current.creditsLow, null);
+    before.unmount();
+    const entitlement = w.use("@/store/entitlementStore").useEntitlementStore.getState();
+    entitlement.start("user_a", "test_store");
+    entitlement.setEntitlement("user_a", "pro", null);
+    const handle = renderConversation(w, {});
+    const state = await until(handle, (s) => s.creditsLow !== null, "the credits line");
+    assert.deepEqual(state.creditsLow, { percent: 18, renewsInMinutes: 91 }, "70 of 400 left, renewing in an hour and a half");
+    assert.equal(creditReads(), 1);
+    handle.unmount();
+  });
+
+  await test("conversation: the credits' countdown moves within 30 seconds of a minute passing", async (w) => {
+    // No credit left, renewing at half past a minute: 25.5 minutes away reads 26, and 30 seconds later 25.
+    w.server.state.scholarCreditRows.push({
+      user_id: "user_a",
+      used: 400,
+      allowance: 400,
+      renews_at: "2026-10-25T12:25:30.000000+00:00",
+      updated_at: stamp(BASE),
+    });
+    const entitlement = w.use("@/store/entitlementStore").useEntitlementStore.getState();
+    entitlement.start("user_a", "test_store");
+    entitlement.setEntitlement("user_a", "pro", null);
+    const handle = renderConversation(w, {});
+    await until(handle, (s) => s.creditsOut !== null, "the credits read at open");
+    assert.equal(handle.result.current.creditsOut, 26, "25.5 minutes away");
+    await advance(30_000);
+    assert.equal(handle.result.current.creditsOut, 25, "30 seconds later, a minute less");
+    handle.unmount();
+  });
+
+  await test("entitlement: the screens learn the day a trial's plan begins from RevenueCat's trial, and nothing for another plan", async (w) => {
+    const { useEntitlement } = w.use("@/hooks/useEntitlement");
+    const store = w.use("@/store/entitlementStore").useEntitlementStore;
+    const seen = () => {
+      const handle = w.renderHook(useEntitlement, {});
+      const { known, tier, trialEndsAt } = handle.result.current;
+      handle.unmount();
+      return { known, tier, trialEndsAt };
+    };
+    assert.deepEqual(seen(), { known: false, tier: null, trialEndsAt: null }, "until RevenueCat answers");
+    const ends = BASE + 3 * 86_400_000;
+    store.getState().start("user_a", "test_store");
+    store.getState().setEntitlement("user_a", "trial", null, { endsAt: ends, willRenew: true });
+    assert.deepEqual(seen(), { known: true, tier: "trial", trialEndsAt: new Date(ends).toISOString() }, "the day Scholar opens");
+    store.getState().setEntitlement("user_a", "pro", null);
+    assert.equal(seen().trialEndsAt, null, "a paying plan has no trial end");
+    store.getState().setEntitlement("user_a", "trial", null, { endsAt: Number.NaN, willRenew: true });
+    assert.equal(seen().trialEndsAt, null, "an end that cannot be read is none");
+  }, { fakes: { "@/services/revenuecat": { refreshEntitlement: async () => undefined } } });
+
+  await test("conversation: a credits read at open that comes back after an answer never replaces the answer's newer numbers", async (w) => {
+    // 330 of 400 spent when the conversation opens. The read is held until the first answer has spent its message (334
+    // spent), then answers with the older 330: the answer's numbers stay.
+    const renews = "2026-10-25T13:30:00.000000+00:00";
+    w.server.state.scholarCreditRows.push({ user_id: "user_a", used: 330, allowance: 400, renews_at: renews, updated_at: stamp(BASE) });
+    let release = () => undefined;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    w.server.state.rest.scholar_credits.push(() => held);
+    const entitlement = w.use("@/store/entitlementStore").useEntitlementStore.getState();
+    entitlement.start("user_a", "test_store");
+    entitlement.setEntitlement("user_a", "pro", null);
+    const handle = renderConversation(w, {});
+    await until(handle, (s) => s.phase === "ready", "ready");
+    await until(handle, () => w.server.state.requests.some((r) => r.path === "/rest/v1/scholar_credits"), "the credits read, held");
+    handle.result.current.send("one");
+    await until(handle, (s) => !s.sending && s.messages.length === 2, "the first answer");
+    assert.deepEqual(handle.result.current.creditsLow, { percent: 17, renewsInMinutes: 90 }, "66 of 400 left, from the answer");
+    release(json(200, [{ used: 330, allowance: 400, renews_at: renews }]));
+    await settle(8);
+    assert.deepEqual(handle.result.current.creditsLow, { percent: 17, renewsInMinutes: 90 }, "the older read changes nothing");
+    assert.equal(
+      w.server.state.requests.filter((r) => r.path === "/rest/v1/scholar_credits").length,
+      1,
+      "read once, when the conversation opened",
+    );
+    handle.unmount();
+  });
+
+  await test("conversation: a heavy message is answered for any plan with its help line, no chips, no events, no credits line", async (w) => {
+    w.server.state.serverPlans.user_a = "free";
     const handle = renderConversation(w, {});
     await until(handle, (s) => s.phase === "ready", "ready");
     handle.result.current.send("HEAVY tonight is too much");
@@ -505,7 +1044,8 @@ async function conversationChecks() {
     assert.equal(state.heavy, true);
     assert.equal(state.help, "crisis");
     assert.equal(state.messages[1].helpLine, "crisis");
-    assert.equal(state.headsUp, null);
+    assert.equal(state.creditsLow, null);
+    assert.equal(state.creditsOut, null);
     const newest = state.rows.find((row) => row.kind === "answer");
     assert.equal(newest.newest, true, "the screen draws no chips for it: it checks heavy (source check below)");
     state.send("ABUSE someone hurts me at home");
@@ -594,17 +1134,33 @@ async function conversationChecks() {
   });
 
   await test("conversation: from a reflection that was a heavy moment it is heavy from the start, with that reflection's help line", async (w) => {
+    // A Pro account low on credits (70 of 400 left): they are read when the conversation opens, and a heavy one never shows them.
+    w.server.state.scholarCreditRows.push({
+      user_id: "user_a",
+      used: 330,
+      allowance: 400,
+      renews_at: "2026-10-25T13:30:00.123456+00:00",
+      updated_at: stamp(BASE),
+    });
+    const entitlement = w.use("@/store/entitlementStore").useEntitlementStore.getState();
+    entitlement.start("user_a", "test_store");
+    entitlement.setEntitlement("user_a", "pro", null);
     const entry = serverRow(2, { is_crisis: true, help_line: "abuse" });
     w.server.state.entries.push(entry);
     const handle = renderConversation(w, { entryId: entry.id });
     const state = await until(handle, (s) => s.phase === "ready" && s.entry !== null, "the reflection");
+    await until(handle, () => w.server.state.requests.some((r) => r.path === "/rest/v1/scholar_credits"), "the credits read");
+    await settle(4);
+    assert.equal(handle.result.current.creditsLow, null, "read, and never shown in a heavy conversation");
+    assert.equal(handle.result.current.creditsOut, null);
     assert.equal(state.messages.length, 0, "a new conversation");
     assert.equal(state.heavy, true, "before its first answer: no chips, the help button");
     assert.equal(state.help, "abuse", "the Get help sheet shows the reflection's own line");
     state.send("I don’t know what to do");
     const answered = await until(handle, (s) => !s.sending && s.messages.length === 2, "the answer");
     assert.equal(answered.heavy, true);
-    assert.equal(answered.headsUp, null);
+    assert.equal(answered.creditsLow, null);
+    assert.equal(answered.creditsOut, null);
     assert.equal(w.server.state.scholarConversations[0].is_heavy, true, "the server started it heavy too");
     assert.deepEqual(w.analyticsCalls, [], "no event");
     handle.unmount();
@@ -848,7 +1404,8 @@ async function listenChecks() {
     assert.equal(w.audio.devotionalPauses, 1, "a devotional that is playing pauses first");
     assert.deepEqual(w.audio.modes, ["playback"]);
     assert.equal(w.audio.players.length, 1, "one part at a time");
-    assert.ok(w.audio.players[0].uri.endsWith(`/cache/scholar/${id}-0.wav`));
+    // The world's account has allowed ElevenLabs, in the default voice, so each part is read and cached in it.
+    assert.ok(w.audio.players[0].uri.endsWith(`/cache/scholar/${id}-warm-0.wav`));
     assert.equal(w.audio.players[0].options.keepAudioSessionActive, false, "it never holds the session");
     assert.deepEqual(calls(w, "scholar-speak").map((call) => call.body.part), [0, 1], "the next part comes while one plays");
     assert.equal(calls(w, "scholar-speak")[0].headers["x-region"], "us-east-1");
@@ -885,21 +1442,133 @@ async function listenChecks() {
     assert.equal([...w.files.files.keys()].filter((uri) => uri.includes("/cache/scholar/")).length, 0, "and go when it closes");
   }, { player: true });
 
-  await test("listen: a free account is refused with listen_plan; in a heavy conversation it plays for everyone", async (w) => {
+  await test("listen: outside Pro it is refused by its plan (a trial with the day it opens), Pro spends credits on part 0, a heavy answer plays for everyone", async (w) => {
     const id = await answerOf(w);
     const player = w.use("@/services/scholarPlayer");
-    await player.playScholarAnswer(id);
-    await settle(4);
-    const refused = player.getScholarListenState();
-    assert.equal(refused.phase, "failed");
-    assert.equal(refused.usage.kind, "listen_plan", "the screen opens the Paywall with reason listen");
-    assert.equal(w.audio.players.length, 0);
-    const heavy = await repo(w).sendTurn(text("HEAVY I cannot sleep", 2, { conversationId: mid(30) }));
-    await player.playScholarAnswer(heavy.data.answer.id);
-    await settle(6);
-    assert.equal(player.getScholarListenState().phase, "playing");
+    const listen = async (messageId) => {
+      await player.playScholarAnswer(messageId);
+      await settle(6);
+      return player.getScholarListenState();
+    };
+    w.server.state.serverPlans.user_a = "free";
+    let state = await listen(id);
+    assert.equal(state.phase, "failed");
+    assert.deepEqual([state.usage.kind, state.usage.resetsAt], ["listen_plan", null], "the screen opens the Paywall with reason listen");
+    const ends = new Date(BASE + 3 * 86_400_000).toISOString();
+    w.server.state.serverPlans.user_a = "trial";
+    w.server.state.serverPlanEnds.user_a = ends;
+    state = await listen(id);
+    assert.equal(state.usage.kind, "listen_plan");
+    assert.equal(Date.parse(state.usage.resetsAt), Date.parse(ends), "the screen says the day Scholar opens");
+    w.server.state.serverPlans.user_a = "pro";
+    const row = w.server.state.scholarCreditRows.find((item) => item.user_id === "user_a");
+    row.used = 400;
+    state = await listen(id);
+    assert.deepEqual([state.phase, state.usage.kind, state.usage.remaining], ["failed", "credits", 0], "no credit left");
+    assert.equal(w.audio.players.length, 0, "nothing played");
+    row.used = 100;
+    state = await listen(id);
+    assert.equal(state.phase, "playing");
+    assert.deepEqual(calls(w, "scholar-speak").map((call) => call.body.part).slice(-2), [0, 1]);
+    assert.equal(row.used, 100 + w.server.state.scholarListenCost, "part 0 spent the answer's cost, once");
+    player.clearScholarAudio();
+    w.server.state.serverPlans.user_a = "free";
+    const heavy = await repo(w).sendTurn(text("HEAVY I cannot sleep", 20, { conversationId: mid(30) }));
+    state = await listen(heavy.data.answer.id);
+    assert.equal(state.phase, "playing", "a heavy answer plays for every plan");
+    assert.equal(row.used, 100 + w.server.state.scholarListenCost, "and is never counted");
     player.clearScholarAudio();
   }, { player: true });
+
+  await test("listen voice: with ElevenLabs allowed each part is asked for in the chosen voice and cached by voice; a voice changed while one plays is heard from the next listen; without the permission no voice goes", async (w) => {
+    paid(w);
+    allowTalk(w, { voiceKey: "storyteller" });
+    const id = await answerOf(w);
+    const player = w.use("@/services/scholarPlayer");
+    const prefs = w.use("@/store/profilePrefsStore").useProfilePrefsStore.getState();
+    const asked = () => calls(w, "scholar-speak").map((call) => [call.body.part, call.body.voice ?? "none"]);
+    await player.playScholarAnswer(id);
+    await settle(6);
+    assert.equal(player.getScholarListenState().phase, "playing");
+    assert.deepEqual(asked(), [[0, "storyteller"], [1, "storyteller"]], "each part in the chosen voice, the next while one plays");
+    assert.ok(w.audio.players[0].uri.endsWith(`/cache/scholar/${id}-storyteller-0.wav`), "cached under its voice");
+    assert.equal(w.files.files.get(w.audio.players[0].uri).bytes.toString(), "RIFF-storyteller-part-0", "the part read in that voice is the one that plays");
+    // Changed while part 0 plays: this listen keeps its voice to the end.
+    prefs.setScholarVoice("user_a", "wise");
+    w.audio.players[0].emit({ didJustFinish: true });
+    await settle(6);
+    assert.ok(w.audio.players[1].uri.endsWith(`/cache/scholar/${id}-storyteller-1.wav`), "one answer is never read in two chosen voices");
+    assert.equal(calls(w, "scholar-speak").length, 2);
+    w.audio.players[1].emit({ didJustFinish: true });
+    await settle(4);
+    assert.equal(player.getScholarListenState().phase, "idle");
+    // The next listen is in the new voice, cached apart from the first.
+    await player.playScholarAnswer(id);
+    await settle(6);
+    assert.deepEqual(asked().slice(2), [[0, "wise"], [1, "wise"]]);
+    assert.ok(w.audio.players[2].uri.endsWith(`/cache/scholar/${id}-wise-0.wav`));
+    player.stopScholarAudio();
+    // ElevenLabs no longer allowed: no voice goes at all, and the parts are the devotional voice's own.
+    prefs.setVoicePermission("user_a", null);
+    await player.playScholarAnswer(id);
+    await settle(6);
+    const plain = calls(w, "scholar-speak").slice(4);
+    assert.deepEqual(plain.map((call) => call.body.part), [0, 1]);
+    assert.ok(plain.every((call) => !Object.prototype.hasOwnProperty.call(call.body, "voice")), "no voice key in the request");
+    assert.ok(w.audio.players[3].uri.endsWith(`/cache/scholar/${id}-standard-0.wav`));
+    assert.equal(w.files.files.get(w.audio.players[3].uri).bytes.toString(), "RIFF-standard-part-0");
+    // Allowed again: the parts read in the chosen voice are still on the phone, so a replay asks for nothing.
+    player.stopScholarAudio();
+    prefs.setVoicePermission("user_a", new Date(clock.now).toISOString());
+    await player.playScholarAnswer(id);
+    await settle(6);
+    assert.equal(calls(w, "scholar-speak").length, 6, "a replay in a voice already read makes no request");
+    assert.ok(w.audio.players[4].uri.endsWith(`/cache/scholar/${id}-wise-0.wav`));
+    player.clearScholarAudio();
+  }, { permission: true, player: true });
+
+  await test("listen voice: a voice chosen while the first part is on its way changes nothing of that listen, the part fetched ahead included", async (w) => {
+    paid(w);
+    allowTalk(w, { voiceKey: "storyteller" });
+    const id = await answerOf(w);
+    const player = w.use("@/services/scholarPlayer");
+    const prefs = w.use("@/store/profilePrefsStore").useProfilePrefsStore.getState();
+    const asked = () => calls(w, "scholar-speak").map((call) => [call.body.part, call.body.voice ?? "none"]);
+    const started = player.playScholarAnswer(id);
+    // Chosen while part 0 is asked for, before anything plays.
+    prefs.setScholarVoice("user_a", "wise");
+    await started;
+    await settle(6);
+    assert.equal(player.getScholarListenState().phase, "playing");
+    assert.deepEqual(asked(), [[0, "storyteller"], [1, "storyteller"]], "the part fetched ahead is in this listen's voice too");
+    w.audio.players[0].emit({ didJustFinish: true });
+    await settle(6);
+    assert.ok(w.audio.players[1].uri.endsWith(`/cache/scholar/${id}-storyteller-1.wav`));
+    assert.equal(calls(w, "scholar-speak").length, 2, "and no part is asked for twice");
+    player.clearScholarAudio();
+  }, { permission: true, player: true });
+
+  await test("listen voice: the repository sends a voice only while ElevenLabs is allowed, whoever asks, and listenVoice says which", async (w) => {
+    paid(w);
+    allowTalk(w, { voice: false });
+    const id = await answerOf(w);
+    assert.equal(repo(w).listenVoice(), null, "no ElevenLabs permission, no voice");
+    const plain = await repo(w).speak(id, 0, "storyteller");
+    assert.equal(plain.ok, true, "the part is still read, in the devotional's voice");
+    assert.ok(!Object.prototype.hasOwnProperty.call(calls(w, "scholar-speak")[0].body, "voice"), "a voice passed in without the permission is dropped");
+    assert.equal(Buffer.from(plain.data.audioBase64, "base64").toString(), "RIFF-standard-part-0");
+    allowTalk(w, { ai: false });
+    assert.equal(repo(w).listenVoice(), "warm", "allowed with no voice chosen: the default voice");
+    allowTalk(w, { ai: false, voiceKey: "deep" });
+    assert.equal(repo(w).listenVoice(), "deep");
+    const voiced = await repo(w).speak(id, 1, repo(w).listenVoice());
+    assert.equal(voiced.ok, true);
+    assert.equal(calls(w, "scholar-speak")[1].body.voice, "deep");
+    assert.equal(Buffer.from(voiced.data.audioBase64, "base64").toString(), "RIFF-deep-part-1");
+    // A call with no voice still asks with none.
+    await repo(w).speak(id, 0);
+    assert.ok(!Object.prototype.hasOwnProperty.call(calls(w, "scholar-speak")[2].body, "voice"));
+  }, { permission: true });
 }
 
 // ================================================================== the permission's words, the session
@@ -945,7 +1614,40 @@ function sourceChecks() {
     assert.match(screen, /empty && !chat\.sending && !chat\.heavy \? \(/, "no starter chips in a conversation that starts heavy");
     assert.match(screen, /\{chat\.heavy \? \(/, "the Get help button in a heavy conversation");
     assert.match(screen, /onDelete=\{item\.message\.helpLine === "abuse" \? openDelete : null\}/, "the delete link under an abuse answer");
-    assert.match(screen, /!chat\.heavy && known && !isPaid/, "a free account's Listen opens the Paywall, except when heavy");
+    assert.match(screen, /if \(!chat\.heavy && outsidePlan\("listen"\)\) return;/, "outside a heavy conversation, Listen asks the plan first");
+    assert.match(
+      screen,
+      /function outsidePlan\(reason: "listen" \| "talk"\): boolean \{\s+if \(!known \|\| tier === "pro" \|\| !chat\.freeKnown\) return false;\s+if \(reason === "listen" \? chat\.freeHere : chat\.freeOpen\) return false;\s+if \(tier === "trial"\) chat\.noteOpens\(trialEndsAt\);\s+else navigation\.navigate\("Paywall", \{ source: "scholar", reason \}\);\s+return true;\s+\}/,
+      "Pro plays; the free conversation listens and talks; a trial is told the day Scholar opens; the free plan sees the plans; until both have answered, the server decides",
+    );
+    assert.match(
+      screen,
+      /const \{ paywallAsk \} = chat;\s+useEffect\(\(\) => \{\s+if \(paywallAsk > 0\) navigation\.navigate\("Paywall", \{ source: "scholar", reason: "conversation" \}\);\s+\}, \[paywallAsk, navigation\]\);/,
+      "a message the plan holds opens the plans by itself, with the conversation's own banner",
+    );
+    assert.match(
+      screen,
+      /\) : chat\.freeLeft !== null \? \([\s\S]{0,200}?<Text[^>]*>\s*\{copy\.scholar\.notices\.freeLeft\(chat\.freeLeft\)\}/,
+      "the free messages left show above the composer",
+    );
+    assert.match(screen, /if \(outsidePlan\("talk"\)\) return;/, "Talk asks the same");
+    assert.match(screen, /text=\{copy\.scholar\.notices\.creditsOut\}/, "no credit left: the notice above the composer");
+    assert.match(
+      screen,
+      /detail=\{\{\s+text: credits\.renew\(credits\.renewsIn\(chat\.creditsOut\)\),\s+label: credits\.renew\(credits\.renewsInSpoken\(chat\.creditsOut\)\),\s+\}\}/,
+      "under it, when they renew, written and spoken",
+    );
+    assert.match(
+      screen,
+      /if \(after\.usage\.kind === "listen_plan"\) \{\s+stopScholarAudio\(\);\s+if \(after\.usage\.resetsAt !== null\) chat\.noteOpens\(after\.usage\.resetsAt\);\s+else navigation\.navigate\("Paywall", \{ source: "scholar", reason: "listen" \}\);\s+\} else if \(after\.usage\.kind === "credits"\) \{\s+(\/\/[^\n]*\s+)*chat\.noteUsage\(after\.usage\);\s+\}/,
+      "a refused Listen: outside the plan a trial is told the day and the free plan sees the plans; no credit left, the notice",
+    );
+    assert.match(
+      screen,
+      /noticeKind === "plan"\s+\? \{\s+label: copy\.scholar\.notices\.seePlans,\s+onPress: \(\) => navigation\.navigate\("Paywall", \{ source: "scholar", reason: "conversation" \}\),\s+\}\s+: undefined/,
+      "See plans only on the plan's notice, to the Paywall with the free conversation’s banner",
+    );
+    assert.ok(!/accessibilityLiveRegion="polite"[^>]*credits\.low/.test(screen), "the credits line is not a live region: it moves every minute");
     assert.match(screen, /useEffect\(\(\) => \(\) => clearScholarAudio\(\), \[\]\)/, "closing the screen empties the cache");
     assert.ok(!/haptics/.test(screen), "no haptic on the screen");
     const hook = read("src/hooks/useConversation.ts");
@@ -1155,6 +1857,29 @@ async function copyChecks() {
     assert.ok(textLine, "the text line is spoken with its word");
     assert.equal(spokenDigits(textLine[1]), crisis.DV_TEXT_NUMBER);
   });
+
+  await test("copy: Scholar's plan and credits say what is true: Pro alone, the day a trial's plan begins, and when the credits renew", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    const { notices, credits } = copy.scholar;
+    assert.equal(notices.plan, "Scholar is part of GraceHush Pro. Your message is saved.");
+    assert.equal(notices.opens("Friday, Nov 21"), "Scholar opens when your plan begins on Friday, Nov 21.");
+    assert.equal(notices.opens(null), "Scholar opens when your plan begins.");
+    assert.equal(
+      notices.opensSaved("Friday, Nov 21"),
+      "Scholar opens when your plan begins on Friday, Nov 21. Your message is saved.",
+    );
+    assert.equal(notices.creditsOut, "You’ve used today’s Scholar credits.");
+    assert.equal(credits.renew(credits.renewsIn(372)), "They renew in 6 h 12 min.");
+    assert.equal(credits.renewsIn(60), "1 h");
+    assert.equal(credits.renewsIn(5), "5 min");
+    assert.equal(credits.renewsInSpoken(372), "6 hours 12 minutes");
+    assert.equal(credits.renewsInSpoken(61), "1 hour 1 minute");
+    assert.equal(credits.low(15, credits.renewsIn(372)), "Scholar credits: 15% left · renews in 6 h 12 min");
+    assert.equal(credits.lowSpoken(15, credits.renewsInSpoken(372)), "Scholar credits: 15 percent left. They renew in 6 hours 12 minutes.");
+    for (const s of [notices.plan, notices.opens(null), notices.opensSaved(null), notices.creditsOut, credits.low(15, "1 h")]) {
+      assert.ok(!/cancel|hurry|last chance|only today/i.test(s), `no pressure and no way out in Scholar's plan words: ${s}`);
+    }
+  });
 }
 
 // ================================================================== the live talk (step 39)
@@ -1214,12 +1939,12 @@ async function talkChecks() {
     assert.equal(started.data.session, "session-talk-1");
     assert.deepEqual(
       { talkSeconds: started.data.limits.talkSeconds, monthSecondsLeft: started.data.limits.monthSecondsLeft },
-      { talkSeconds: 600, monthSecondsLeft: 1800 },
+      { talkSeconds: 600, monthSecondsLeft: 3600 },
     );
     assert.match(started.data.limits.resetsAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "a time the phone can read");
     const ended = await repo(w).finishTalk(started.data.talkId);
     assert.equal(ended.ok, true);
-    assert.equal(ended.limits.monthSecondsLeft, 1740, "what is left is the server's number");
+    assert.equal(ended.limits.monthSecondsLeft, 3540, "what is left is the server's number");
     const [end] = calls(w, "scholar-voice-end");
     assert.deepEqual(Object.keys(end.body), ["talkId"]);
     assert.equal(end.headers["x-region"], "us-east-1");
@@ -1239,9 +1964,18 @@ async function talkChecks() {
     assert.equal(month.code, "LIMIT_REACHED");
     assert.equal(month.usage.kind, "talk_month");
     w.server.state.serverPlans.user_a = "free";
+    // Its free conversation was another one (2026-11-20): a talk here is told by the plan.
+    freeUsedElsewhere(w);
     const plan = await repo(w).startTalk({ conversationId: CONV, entryId: null });
     assert.equal(plan.code, "LIMIT_REACHED");
-    assert.equal(plan.usage.kind, "talk_plan");
+    assert.deepEqual([plan.usage.kind, plan.usage.resetsAt], ["talk_plan", null], "the free plan: the Talk screen opens the Paywall");
+    const ends = new Date(BASE + 3 * 86_400_000).toISOString();
+    w.server.state.serverPlans.user_a = "trial";
+    w.server.state.serverPlanEnds.user_a = ends;
+    const trial = await repo(w).startTalk({ conversationId: CONV, entryId: null });
+    assert.equal(trial.code, "LIMIT_REACHED");
+    assert.equal(trial.usage.kind, "talk_plan");
+    assert.equal(Date.parse(trial.usage.resetsAt), Date.parse(ends), "a trial: the day Scholar, its talk included, opens");
   }, { permission: true });
 
   await test("talk gateway: no start without the AI permission, without the voice permission, offline or on the mock data; an end always", async (w) => {
@@ -1309,7 +2043,7 @@ async function talkChecks() {
     const last = talk.getTalkState().last;
     assert.equal(last.requestedId, CONV);
     assert.equal(last.conversationId, CONV);
-    assert.equal(last.limits.monthSecondsLeft, 1740, "what is left of the month, as the server answered the end");
+    assert.equal(last.limits.monthSecondsLeft, 3540, "what is left of the month, as the server answered the end");
     // The screen has gone: back to idle, with the last talk kept for the Conversation screen.
     talk.resetTalk();
     assert.equal(talk.getTalkState().phase, "idle");
@@ -1422,7 +2156,7 @@ async function talkChecks() {
     assert.deepEqual(events(w, "scholar_talk_ended"), []);
     assert.equal(talk.getTalkState().last.limits, null, "nothing of it is counted, so nothing is shown");
     assert.equal(calls(w, "scholar-voice-end").length, 1, "its end is still told");
-    assert.equal(w.server.state.talkMonthLeft, 1800, "the month is untouched");
+    assert.equal(w.server.state.talkMonthLeft, 3600, "the month is untouched");
   }, { permission: true });
 
   await test("talk: a talk that turns heavy stops its countdown and takes the newest help line", async (w) => {
@@ -1530,7 +2264,7 @@ async function talkChecks() {
     await advance(5_000);
     assert.equal(calls(w, "scholar-voice-end").length, 3);
     await talk.talkClosing();
-    assert.equal(talk.getTalkState().last.limits.monthSecondsLeft, 1740, "the third try answered");
+    assert.equal(talk.getTalkState().last.limits.monthSecondsLeft, 3540, "the third try answered");
     await advance(60_000);
     assert.equal(calls(w, "scholar-voice-end").length, 3, "and nothing more");
     talk.resetTalk();
@@ -2064,7 +2798,7 @@ function talkSourceChecks() {
     assert.deepEqual(screenUsers, ["src/navigation/RootNavigator.tsx"]);
     assert.match(read("src/navigation/RootNavigator.tsx"), /getComponent=\{loadTalkScreen\}/, "loaded when the route opens");
     const conversation = read("src/screens/scholar/ConversationScreen.tsx");
-    assert.match(conversation, /const canTalk = voiceSupported\(\) && !\(chat\.heavy && known && !isPaid\);/, "never a paywall in a heavy conversation");
+    assert.match(conversation, /const canTalk = voiceSupported\(\) && !\(chat\.heavy && known && tier !== "pro"\);/, "in a heavy conversation Talk shows for Pro alone: never a paywall or a plan notice there");
     assert.match(read("src/services/talkAudio.ts"), /stopScholarAudio\(\);/);
   });
 
@@ -2087,7 +2821,17 @@ function talkSourceChecks() {
   sourceCheck("talk: the Talk screen draws our saved words, never ElevenLabs' text, and knows no limit number", () => {
     const screen = read("src/screens/scholar/ScholarTalkScreen.tsx");
     assert.match(screen, /onMessage=\{\(\{ role, message \}\) =>/, "the person's heard words only: Scholar's text is never read");
-    assert.ok(!/\b600\b|\b1800\b|\b30 \* 60\b/.test(screen), "the cap is the server's");
+    assert.ok(!/\b600\b|\b1800\b|\b3600\b|\b30 \* 60\b|\b60 \* 60\b/.test(screen), "the cap and the month are the server's");
+    assert.match(
+      screen,
+      /if \(failure\.usage\?\.kind === "talk_plan" && failure\.usage\.resetsAt !== null\) \{\s+return \{ text: notices\.opens\(formatResetDay\(failure\.usage\.resetsAt\)\), retry: false \};/,
+      "a trial is told the day Scholar opens, with no paywall",
+    );
+    assert.match(
+      screen,
+      /const needsPro =\s+failure\?\.code === "LIMIT_REACHED" && failure\.usage\?\.kind === "talk_plan" && failure\.usage\.resetsAt === null;/,
+      "only the free plan is sent to the Paywall",
+    );
     assert.ok(!/console\./.test(screen), "nothing is logged");
     const service = read("src/services/scholarTalk.ts");
     assert.ok(!/console\./.test(service));
@@ -2286,17 +3030,576 @@ async function talkCopyChecks() {
   });
 }
 
+// What plain Node cannot draw on the Conversations screen and the tab's "See all".
+function historySourceChecks() {
+  sourceCheck("history: the tab shows the latest three with See all only when more follow, and the Conversations screen is a route above the tabs", () => {
+    const tab = read("src/screens/scholar/ScholarScreen.tsx");
+    assert.match(tab, /\{state\.hasMore \? \(\s*<Pressable/, "See all only when more conversations follow");
+    assert.match(tab, /navigation\.navigate\("ScholarHistory"\)/, "See all opens the Conversations screen");
+    assert.match(tab, /accessibilityLabel=\{copy\.scholar\.history\.a11y\.seeAll\}/, "and says what it opens");
+    const home = read("src/hooks/useScholarHome.ts");
+    assert.match(home, /listConversations\(\{ limit: SCHOLAR_HOME_RECENTS \}\)/, "the tab asks for the latest few only");
+    assert.match(home, /hasMore: result\.data\.nextCursor !== null/, "more exist when the server says another page follows");
+    const app = read("src/constants/app.ts");
+    assert.match(app, /SCHOLAR_HOME_RECENTS = 3;/);
+    assert.match(app, /SCHOLAR_HISTORY_PAGE = 30;/);
+    assert.match(app, /SCHOLAR_SEARCH_DEBOUNCE_MS = 350;/);
+    assert.ok(!/SCHOLAR_RECENTS_LIMIT/.test(read("src/constants/app.ts") + read("src/data/scholarRemote.ts")), "the old fixed limit is gone");
+    assert.match(read("src/navigation/types.ts"), /ScholarHistory: undefined;/);
+    assert.match(read("src/navigation/RootNavigator.tsx"), /<Stack\.Screen name="ScholarHistory" component=\{ScholarHistoryScreen\} \/>/);
+  });
+
+  sourceCheck("history: the list is virtualised with sticky headings, loads on scroll, searches by title and asks before it deletes", () => {
+    const screen = read("src/screens/scholar/ScholarHistoryScreen.tsx");
+    assert.match(screen, /<FlatList/, "a virtualised list, so a hundred conversations cost no more than thirty");
+    assert.match(screen, /stickyHeaderIndices=\{headerIndices\}/, "the group headings stick");
+    assert.match(screen, /className="screen__content bg-linen pb-2 pt-5"/, "a sticky heading has the page's own background");
+    assert.match(screen, /onEndReached=\{ready !== null && !ready\.moreFailed \? history\.loadMore : undefined\}/, "the next page on scroll, and not again after a failure until asked");
+    assert.match(screen, /keyboardShouldPersistTaps="handled"/, "a tap on a row works with the keyboard up");
+    assert.match(screen, /keyboardDismissMode="on-drag"/);
+    assert.match(screen, /autoCorrect=\{false\}/, "a search is not autocorrected");
+    assert.match(screen, /keyboardAppearance="light"/);
+    assert.match(screen, /onLongPress=\{\(\) => onMenu\(item\.conversation\)\}/, "a long press offers the delete");
+    assert.match(screen, /accessibilityActions=\{\[\{ name: "delete"/, "a screen reader gets the same action");
+    assert.match(screen, /<BottomSheet visible=\{menuOpen\} onClose=\{\(\) => setMenuOpen\(false\)\} onDismiss=\{runAfterMenu\}>/, "the sheet hands over to the dialog once it has gone");
+    assert.match(screen, /if \(Platform\.OS === "ios"\) setTimeout\(runAfterMenu, MODAL_HANDOFF_FALLBACK_MS\);\s+else runAfterMenu\(\);/);
+    assert.match(screen, /tone="destructive"/, "the confirmation is the destructive one");
+    assert.match(screen, /const empty =\s+state\.phase === "ready" \?/, "the empty states belong to a loaded list");
+    assert.match(screen, /copy\.scholar\.history\.noResults\(applied\)/, "no results says what was searched for");
+    assert.match(screen, /item\.conversation\.title \?\? copy\.scholar\.untitled/, "a conversation with no title has the plain name");
+    assert.ok(!/scholarRepository/.test(screen), "the screen never calls the repository: its hook does");
+    assert.ok(!/haptics|track\(|console\./.test(screen), "no haptic, event or log line");
+    assert.ok(!/useScholarHome|scholarRemote/.test(screen));
+    const hook = read("src/hooks/useScholarHistory.ts");
+    assert.match(hook, /setTimeout\(\(\) => setApplied\(words\), SCHOLAR_SEARCH_DEBOUNCE_MS\)/, "the search waits for the typing to pause");
+    assert.match(hook, /if \(id !== request\.current\) return;/, "a response that lost its turn is dropped");
+    assert.match(hook, /if \(moreInFlight\.current\) return;/, "one next page at a time");
+    assert.match(hook, /result\.code === "NETWORK" \? "offline" : "failed"/);
+    assert.ok(!/haptics|track\(|console\./.test(hook), "no haptic, event or log line in the hook either");
+    const remote = read("src/data/scholarRemote.ts");
+    assert.match(remote, /\.order\("last_message_at", \{ ascending: false \}\)/);
+    assert.match(remote, /query\.ilike\("title", options\.pattern\)/, "the search runs on the server, so it covers every conversation");
+    assert.match(remote, /query\.lt\("last_message_at", options\.cursor\)/, "paging by the last time, as the server wrote it");
+    assert.match(remote, /\.limit\(options\.limit \+ 1\)/);
+    assert.match(remote, /\.eq\("user_id", userId\)/, "only this account's");
+  });
+}
+
+function heroSourceChecks() {
+  sourceCheck("hero: the tab's card sells what is here and leads to the live talk, and the ask bar is the one way to type", () => {
+    const hero = read("src/components/scholar/ScholarHero.tsx");
+    assert.match(hero, /onTalk: \(\(\) => void\) \| null;/, "the button is optional: a build that cannot hold a talk has none");
+    assert.match(hero, /onTalk !== null \? \(\s*<Pressable/, "no talk, no button");
+    assert.ok(!/onAsk/.test(hero), "the card no longer opens the keyboard: the ask bar under it does");
+    assert.match(hero, /showPro \? copy\.scholar\.hero\.ctaFreeLabel : copy\.scholar\.hero\.cta/, "a free account hears that it is Pro");
+    assert.match(hero, /\{showPro \? \(\s*<View className="rounded-full bg-plum px-2 py-0\.5">/, "the Pro chip is for a free account only");
+    assert.match(hero, /waveIcon = \{ android: "graphic_eq", ios: "waveform" \}/, "the talk's own icon, as the Talk button draws it");
+    assert.match(hero, /<View className="max-w-\[64%\]">/, "the text keeps to the left of the picture");
+    assert.match(hero, /copy\.scholar\.hero\.eyebrow/);
+    assert.match(hero, /accessibilityRole="header" className="mt-1 text-headline text-white"/, "the pitch is the heading");
+    assert.match(hero, /contentPosition=\{narrow \? \{ left: "65%" \} : undefined\}/, "a narrow phone keeps both faces whole");
+    assert.match(hero, /NARROW_WINDOW = 340;/);
+    assert.ok(!/haptics|track\(|console\./.test(hero), "no haptic, event or log line");
+    const tab = read("src/screens/scholar/ScholarScreen.tsx");
+    assert.match(tab, /const notPro = known && tier !== "pro";/, "only a plan RevenueCat has reported counts");
+    assert.match(tab, /useScholarHome\(notPro\)/, "the tab reads the free conversation only for an account that is not Pro");
+    assert.match(tab, /const unclaimed = notPro && freeConversation === null;/, "an account whose free conversation is unclaimed");
+    assert.match(
+      tab,
+      /const free = known && tier === "free" && freeConversation != null;/,
+      "only a free account that has had its free conversation is sent to the plans",
+    );
+    assert.match(tab, /const showPro = notPro && !unclaimed;/, "no Pro mark while the free conversation waits: it is free");
+    assert.match(tab, /<ScholarHero onTalk=\{voiceSupported\(\) \? talk : null\} showPro=\{showPro\} \/>/, "the button only where a talk can run");
+    assert.match(
+      tab,
+      /function talk\(\) \{\s+if \(!free\) \{\s+open\(\{ compose: "talk" \}\);\s+return;\s+\}\s+if \(opening\.current\) return;\s+opening\.current = true;\s+navigation\.navigate\("Paywall", \{ source: "scholar", reason: "talk" \}\);/,
+      "a free account sees the plans at once, once; anyone else starts the talk's own order",
+    );
+    assert.match(tab, /onAsk=\{\(\) => open\(\{ compose: "type" \}\)\}/, "the ask bar still opens the keyboard");
+    assert.match(read("src/navigation/types.ts"), /compose\?: "type" \| "speak" \| "talk";/);
+    const conversation = read("src/screens/scholar/ConversationScreen.tsx");
+    assert.match(conversation, /const talkOnOpen = useRef\(params\.compose === "talk"\);/, "only a conversation opened for a talk starts one");
+    assert.match(
+      conversation,
+      /if \(!talkOnOpen\.current \|\| !allowed \|\| chat\.phase !== "ready"\) return;\s+talkOnOpen\.current = false;\s+talkTimer\.current = setTimeout\(openTalk, FOCUS_DELAY_MS\);/,
+      "once, after the permission is answered and the screen has slid in",
+    );
+    assert.match(conversation, /if \(talkTimer\.current !== null\) clearTimeout\(talkTimer\.current\);/, "leaving within that moment starts nothing");
+    assert.match(conversation, /if \(params\.compose !== "type" \|\| !allowed \|\| chat\.phase !== "ready"\) return undefined;/, "a talk never brings the keyboard up");
+  });
+}
+
+async function heroCopyChecks() {
+  await test("hero: the tab says ask once, the hero's words are its own, and every claim is one the app keeps", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    const hero = copy.scholar.hero;
+    for (const key of ["eyebrow", "title", "caption", "cta", "pro", "ctaFreeLabel", "ctaFreeHint"]) {
+      assert.equal(typeof hero[key], "string", `hero.${key}`);
+      assert.ok(!/\bask/i.test(hero[key]), `the hero does not say ask (the ask bar does): ${hero[key]}`);
+    }
+    assert.ok(/\bask/i.test(copy.scholar.askBar), "the ask bar is where asking is said");
+    assert.ok(copy.scholar.askBar !== hero.cta && !copy.scholar.askBar.includes("Scholar"), "and it says what to type, not the name again");
+    assert.ok(!/\bask/i.test(copy.scholar.groups.starters), "the starters' heading does not say ask either");
+    assert.equal(hero.cta, "Talk it through", "the product's own words for the talk (the reflection row says it too)");
+    assert.ok(hero.title.length <= 16, `the heading stays on one line (180pt at 24pt fits the text column; a longer one wraps): ${hero.title}`);
+    assert.match(hero.ctaFreeLabel, new RegExp(`^${hero.cta}, ${hero.pro}$`), "a screen reader hears the button's name and its plan");
+    assert.match(hero.caption, /^AI /, "the card says what Scholar is, AI included");
+    assert.ok(!/(?:guarantee|heal|fix|cure|always)/i.test(`${hero.title} ${hero.caption}`), "no outcome is promised");
+    assert.equal(copy.scholar.title, undefined, "the old title is gone");
+    assert.equal(copy.scholar.caption, undefined, "and the old caption");
+  });
+}
+
+// The voices' Christian names and portraits, and the chat's voice sheet (2026-11-19, the owner's request).
+async function voiceNameChecks() {
+  await test("voices: a Christian name for each voice, no two alike, none sacred, and every voice still Scholar, an AI", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    const keys = w.use("@/constants/scholarVoices").SCHOLAR_VOICE_KEYS;
+    const names = keys.map((key) => copy.scholarVoice.voices[key].name);
+    for (const name of names) assert.match(name, /^[A-Z][a-z]+$/, `one plain name: ${name}`);
+    for (const old of ["Warm", "Bright", "Clear", "Soft", "Storyteller", "Deep", "Steady", "Wise"]) {
+      assert.ok(!names.includes(old), `a person's name, not the old word for the sound: ${old}`);
+    }
+    assert.equal(new Set(names.map((name) => name[0])).size, keys.length, "eight different first letters, so no two are mistaken");
+    // Scholar never speaks as God, as Jesus, as an angel or as a central figure of the Bible, so no voice carries such a name.
+    const sacred = /^(?:God|Jesus|Christ|Lord|Yahweh|Jehovah|Spirit|Messiah|Mary|Joseph|Moses|Abraham|David|Solomon|Elijah|Paul|Peter|John|Michael|Gabriel|Raphael|Lucifer)$/;
+    for (const name of names) assert.ok(!sacred.test(name), `not a name Scholar may not speak as: ${name}`);
+    for (const key of keys) assert.match(copy.scholarVoice.voices[key].description, /^A (?:woman|man)’s voice · /, `${key} still says how it sounds`);
+    assert.match(copy.scholarVoice.sheet.body, /Every voice is Scholar, an AI\./, "the voice sheet says every voice is Scholar, an AI");
+    assert.equal(copy.scholar.talk.voice("Hannah"), "Hannah’s voice", "the Talk screen names the voice the person chose");
+    assert.equal(copy.scholarVoice.a11y.preview("Hannah"), "Preview Hannah’s voice");
+    assert.equal(copy.scholarVoice.a11y.change("Hannah"), "Scholar’s voice, Hannah", "the header's portrait says whose voice it is");
+    assert.equal(typeof copy.scholarVoice.a11y.changeHint, "string");
+    assert.match(copy.scholarVoice.changeLater, /chat/, "the voice can be changed in the chat as well as in Profile");
+  });
+
+  await test("voices: the rows show the boldest man's voice first, then a woman's and a man's in turn, every voice once", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    const { SCHOLAR_VOICE_KEYS, SCHOLAR_VOICE_ORDER, DEFAULT_SCHOLAR_VOICE } = w.use("@/constants/scholarVoices");
+    assert.equal(SCHOLAR_VOICE_ORDER.length, SCHOLAR_VOICE_KEYS.length, "every voice is shown");
+    assert.deepEqual([...SCHOLAR_VOICE_ORDER].sort(), [...SCHOLAR_VOICE_KEYS].sort(), "each voice once, and no other");
+    assert.equal(SCHOLAR_VOICE_ORDER[0], "deep", "Gideon, the deep voice, comes first");
+    SCHOLAR_VOICE_ORDER.forEach((key, index) => {
+      const kind = /^A (woman|man)’s voice/.exec(copy.scholarVoice.voices[key].description)[1];
+      assert.equal(kind, index % 2 === 0 ? "man" : "woman", `${copy.scholarVoice.voices[key].name} at place ${index + 1}`);
+    });
+    const names = SCHOLAR_VOICE_ORDER.map((key) => copy.scholarVoice.voices[key].name);
+    assert.deepEqual(names, ["Gideon", "Hannah", "Nathan", "Phoebe", "Caleb", "Lydia", "Ezra", "Selah"]);
+    assert.equal(DEFAULT_SCHOLAR_VOICE, "warm", "the order changes nothing about the default");
+  });
+
+  await test("listen voice copy: the ElevenLabs permission, the voice sheet and Profile say the chosen voice also reads answers aloud", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    assert.match(copy.voicePermission.body, /when you tap Listen/, "the permission names Listen before anything is sent");
+    assert.match(copy.voicePermission.body, /Google’s AI still writes the answers/);
+    assert.match(copy.voicePermission.trust, /each answer it reads aloud, until GraceHush deletes them there/, "and what ElevenLabs keeps of a reading, until it is deleted");
+    assert.match(copy.voicePermission.trust, /train its models is switched off/);
+    assert.match(copy.scholarVoice.sheet.body, /when it reads an answer aloud/);
+    assert.match(copy.profile.scholarVoice.helper, /when it reads an answer aloud/);
+    assert.match(copy.profile.voicePermission.on, /ElevenLabs speaks Scholar’s answers/);
+    assert.match(copy.profile.voicePermission.off, /Listen reads answers in the voice of your devotionals/, "off says what Listen does instead");
+  });
+}
+
+// Height and width of a JPEG from its frame header, and whether it is progressive and carries an Exif block.
+function jpegInfo(bytes) {
+  assert.ok(bytes[0] === 0xff && bytes[1] === 0xd8, "a JPEG");
+  let offset = 2;
+  let exif = false;
+  while (offset < bytes.length) {
+    assert.equal(bytes[offset], 0xff, "a marker");
+    const marker = bytes[offset + 1];
+    const length = bytes.readUInt16BE(offset + 2);
+    if (marker === 0xe1) exif = true;
+    if (marker === 0xc0 || marker === 0xc2) {
+      return { height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7), progressive: marker === 0xc2, exif };
+    }
+    offset += 2 + length;
+  }
+  throw new Error("no frame header");
+}
+
+function voiceAvatarSourceChecks() {
+  sourceCheck("voices: every voice has its portrait, a small square JPEG drawn as a decorative circle beside its name", () => {
+    const keys = /SCHOLAR_VOICE_KEYS = \[([^\]]+)\]/.exec(read("src/constants/scholarVoices.ts"))[1].match(/"(\w+)"/g).map((key) => key.slice(1, -1));
+    const images = read("src/constants/images.ts");
+    assert.match(images, /export const voiceAvatars: Record<ScholarVoiceKey, number> = \{/);
+    for (const key of keys) {
+      const name = `voiceAvatar${key[0].toUpperCase()}${key.slice(1)}`;
+      assert.match(images, new RegExp(`import ${name} from "@/assets/images/voice-avatar-${key}\\.jpg";`), `${key}'s portrait is imported`);
+      assert.match(images, new RegExp(`\\n  ${key}: ${name},`), `${key}'s portrait is in the map`);
+      const bytes = fs.readFileSync(path.join(REPO, `assets/images/voice-avatar-${key}.jpg`));
+      const info = jpegInfo(bytes);
+      assert.deepEqual([info.width, info.height], [384, 384], `${key}: 384 by 384, enough for 40 points at 3x and no more`);
+      assert.ok(info.progressive, `${key}: a progressive JPEG, as every picture of the app`);
+      assert.ok(!info.exif, `${key}: no metadata`);
+      assert.ok(bytes.length < 120_000, `${key}: small (${bytes.length} bytes)`);
+    }
+    const avatar = read("src/components/scholar/VoiceAvatar.tsx");
+    assert.match(avatar, /accessibilityElementsHidden\s+importantForAccessibility="no-hide-descendants"/, "decorative: the name beside it is what is read");
+    assert.match(avatar, /<Image source=\{voiceAvatars\[voice\]\} contentFit="cover" style=\{StyleSheet\.absoluteFill\} \/>/);
+    assert.match(avatar, /selected \? "border-2 border-plum" : "border border-petal"/, "the chosen voice has a plum ring");
+    const rows = read("src/components/scholar/VoiceRows.tsx");
+    assert.match(rows, /const rows = SCHOLAR_VOICE_ORDER\.map\(/, "the rows follow the display order, not the server's");
+    assert.ok(!/SCHOLAR_VOICE_KEYS/.test(rows), "nothing in the rows reads the server's order");
+    assert.match(rows, /<VoiceAvatar voice=\{key\} size=\{40\} selected=\{checked\} \/>/, "each row shows the voice's portrait");
+    assert.match(rows, /\{checked \? \(\s*<View\s+className="items-center justify-center rounded-full bg-plum"\s+style=\{styles\.check\}/, "a check on the chosen one only");
+    assert.ok(!/size-2\.5 rounded-full bg-plum/.test(rows), "the radio dot beside the portrait is gone");
+    assert.match(rows, /accessibilityRole=\{pro \? "button" : "radio"\}/, "a screen reader still hears a radio button, and whether it is checked");
+    assert.match(rows, /accessibilityState=\{pro \? undefined : \{ checked \}\}/);
+    assert.match(rows, /const pro = locked && key !== DEFAULT_SCHOLAR_VOICE;/, "every voice but the default is Pro when locked");
+    assert.match(rows, /if \(pro\) \{\s+onLocked\?\.\(key\);\s+return;\s+\}/, "a Pro voice opens the plans and is never chosen");
+    assert.match(rows, /\{voiceCopy\.pro\}/, "the Pro chip");
+    assert.match(
+      rows,
+      /onPress=\{\(\) => \{\s+if \(previewing\) stopSample\(\);\s+else void playSample\(scholarVoicePreviews\[key\]\);\s+\}\}/,
+      "the preview plays for every voice: hearing one is free",
+    );
+  });
+
+  sourceCheck("voices: the chat's header portrait opens the voice sheet where a talk can run, never in a heavy conversation", () => {
+    const screen = read("src/screens/scholar/ConversationScreen.tsx");
+    assert.match(screen, /const showVoice = voiceSupported\(\) && chat\.phase === "ready" && !chat\.heavy;/);
+    assert.match(
+      screen,
+      /\{showVoice \? \(\s*<Pressable\s+accessibilityRole="button"\s+accessibilityLabel=\{copy\.scholarVoice\.a11y\.change\(copy\.scholarVoice\.voices\[voice\]\.name\)\}\s+accessibilityHint=\{copy\.scholarVoice\.a11y\.changeHint\}\s+onPress=\{openVoices\}/,
+      "the chosen voice's portrait, named, opens the voices",
+    );
+    assert.match(screen, /<VoiceAvatar voice=\{voice\} size=\{32\} \/>/);
+    assert.match(
+      screen,
+      /function openVoices\(\) \{\s+stopScholarAudio\(\);\s+setVoicesStep\(voiceAllowed \? "voices" : "permission"\);\s+\}/,
+      "an answer being read stops before a preview can play over it, and without ElevenLabs allowed the sheet asks first",
+    );
+    assert.match(screen, /<BottomSheet visible=\{voicesStep !== null\} onClose=\{\(\) => setVoicesStep\(null\)\} onDismiss=\{runAfterVoices\}>/);
+    assert.match(screen, /const \{ voice, setVoice, locked: voicesLocked \} = useScholarVoice\(\);/);
+    assert.match(
+      screen,
+      /function voiceLocked\(\) \{\s+setVoicesStep\(null\);\s+afterVoices\.current = \(\) => navigation\.navigate\("Paywall", \{ source: "scholar", reason: "voice" \}\);\s+if \(Platform\.OS === "ios"\) setTimeout\(runAfterVoices, MODAL_HANDOFF_FALLBACK_MS\);\s+else runAfterVoices\(\);\s+\}/,
+      "the sheet closes first, then the plans open",
+    );
+    assert.match(
+      screen,
+      /function talkVoiceLocked\(\) \{\s+setTalkSheet\(null\);\s+afterTalkSheet\.current = \(\) => navigation\.navigate\("Paywall", \{ source: "scholar", reason: "voice" \}\);/,
+      "the Talk sheet's voices do the same",
+    );
+    assert.match(screen, /locked=\{voicesLocked\}\s+onLocked=\{talkVoiceLocked\}/, "the Talk sheet's rows are locked alike");
+    assert.match(
+      screen,
+      /\{voicesStep === "permission" \? \(\s*<VoicePermissionStep\s+onAllow=\{\(\) => \{\s+setVoiceAllowed\(true\);\s+setVoicesStep\("voices"\);\s+\}\}\s+onNotNow=\{\(\) => setVoicesStep\(null\)\}/,
+      "Allow keeps the permission and shows the voices; Not now closes the sheet",
+    );
+    assert.equal(
+      screen.split("<VoiceRows selected={voice} onSelect={setVoice} locked={voicesLocked} onLocked={voiceLocked} />").length - 1,
+      1,
+      "the sheet's rows keep the account's voice",
+    );
+    assert.match(screen, /label=\{copy\.scholarVoice\.sheet\.done\} onPress=\{\(\) => setVoicesStep\(null\)\}/);
+    assert.ok(screen.indexOf("{showVoice ? (") < screen.indexOf("{chat.heavy ? ("), "the portrait sits before the menu, where Get help would be");
+    const talk = read("src/screens/scholar/ScholarTalkScreen.tsx");
+    assert.match(talk, /\{state\.voice !== null && !state\.heavy \? <VoiceAvatar voice=\{state\.voice\} size=\{20\} \/> : null\}/, "the talk shows the portrait, except in a heavy talk");
+    assert.match(
+      read("src/components/scholar/TalkSheet.tsx"),
+      /<VoiceRows selected=\{voice\} onSelect=\{onChooseVoice\} locked=\{locked\} onLocked=\{onLocked\} \/>/,
+      "the first talk's sheet shows the portraits too, locked alike",
+    );
+  });
+
+  sourceCheck("listen voice: one ElevenLabs permission step for the first talk and the chat's voice sheet, and Listen decides its voice once", () => {
+    const step = read("src/components/scholar/VoicePermissionStep.tsx");
+    for (const part of ["{permission.title}", "{permission.body}", "{permission.trust}", "{permission.caption}"]) {
+      assert.ok(step.includes(part), `the step says ${part}`);
+    }
+    assert.match(step, /label=\{permission\.allow\} onPress=\{onAllow\}/);
+    assert.match(step, /label=\{permission\.notNow\} tone="ghost" onPress=\{onNotNow\}/);
+    assert.match(step, /accessibilityRole="link"\s+accessibilityLabel=\{permission\.privacy\}\s+onPress=\{onOpenPrivacy\}/);
+    const talkSheet = read("src/components/scholar/TalkSheet.tsx");
+    assert.match(talkSheet, /<VoicePermissionStep onAllow=\{onAllow\} onNotNow=\{onClose\} onOpenPrivacy=\{onOpenPrivacy\} \/>/, "the first talk asks with the same step");
+    assert.ok(!talkSheet.includes("permission.body"), "and holds no second copy of its words");
+    const player = read("src/services/scholarPlayer.ts");
+    assert.match(player, /const voice = listenVoice\(\);/, "the voice is decided once, when a listen starts");
+    assert.match(player, /return `\$\{messageId\}-\$\{voice \?\? "standard"\}-\$\{part\}`;/, "and is part of each cached part's name");
+    const repository = read("src/data/scholarRepository.ts");
+    assert.match(repository, /return hasVoicePermission\(\) \? accountVoice\(\) : null;/);
+    assert.match(
+      repository,
+      /return useEntitlementStore\.getState\(\)\.tier === "free" \? DEFAULT_SCHOLAR_VOICE : getScholarVoice\(\);/,
+      "a free account listens in the default voice, as the server holds it to",
+    );
+    assert.match(repository, /const spokenIn = voice !== null && hasVoicePermission\(\) \? voice : null;/, "a voice goes only while ElevenLabs is allowed");
+  });
+}
+
+// ================================================================== the free conversation (2026-11-20)
+// An account that is not Pro has one free conversation with Scholar, ever: its first eight messages answered, its answers read
+// aloud, and three minutes of live talk in it. A hard moment is answered on every plan, never counted and never claims it.
+const freeRowOf = (w, sub = "user_a") => w.server.state.scholarFreeUse.find((row) => row.user_id === sub) ?? null;
+const freeReads = (w) => w.server.state.requests.filter((r) => r.path === "/rest/v1/scholar_free_use").length;
+
+function setTier(w, tier) {
+  const entitlement = w.use("@/store/entitlementStore").useEntitlementStore.getState();
+  entitlement.start("user_a", "test_store");
+  entitlement.setEntitlement("user_a", tier, null);
+}
+
+async function freeChecks() {
+  await test("free: one conversation of eight messages, each answered with what is left, the heads-up from three, the ninth kept with the plans, once, and Pro answers it", async (w) => {
+    w.server.state.serverPlans.user_a = "free";
+    const handle = renderConversation(w, {});
+    let state = await until(handle, (s) => s.phase === "ready" && s.freeKnown, "the free conversation read");
+    assert.deepEqual([state.freeHere, state.freeOpen, state.freeLeft], [false, true, null], "unclaimed: this one may be it");
+    assert.equal(freeReads(w), 1, "read once when the conversation opens");
+    const lefts = [];
+    for (let n = 1; n <= 8; n += 1) {
+      assert.equal(handle.result.current.send(`question ${n}`), true);
+      state = await until(handle, (s) => !s.sending && s.messages.length === 2 * n, `answer ${n}`);
+      assert.equal(state.notice, null, `message ${n} is answered`);
+      lefts.push(state.freeLeft);
+    }
+    assert.deepEqual(lefts, [null, null, null, null, 3, 2, 1, null], "what is left shows from three down, and none once all are used");
+    assert.equal(state.freeHere, true, "this is the free conversation");
+    assert.equal(state.paywallAsk, 0, "nothing opens while a free message is left");
+    const row = freeRowOf(w);
+    assert.deepEqual([row.conversation_id, row.messages], [state.conversationId, 8], "the server counted eight, here");
+    assert.equal(w.server.state.scholarCreditRows.length, 0, "a free message spends no credit");
+    handle.result.current.send("question 9");
+    state = await until(handle, (s) => !s.sending && s.notice !== null, "the ninth");
+    assert.equal(state.notice, "plan", "Scholar is part of Pro, with See plans");
+    assert.equal(state.paywallAsk, 1, "the plans open by themselves, once");
+    const held = state.rows.filter((r) => r.kind === "user").pop();
+    assert.equal(held.failure, "limit", "the ninth is kept with Try again");
+    assert.equal(freeRowOf(w).messages, 8, "the ninth is not counted");
+    w.server.state.serverPlans.user_a = "pro";
+    state.retry(held.message.id);
+    state = await until(handle, (s) => !s.sending && s.messages.length === 18, "Pro answers the ninth");
+    assert.equal(state.notice, null);
+    assert.equal(state.paywallAsk, 1, "nothing opens again");
+    assert.equal(state.messages[16].id, held.message.id, "the same message, answered");
+    assert.equal(w.server.state.scholarCreditRows[0].used, w.server.state.scholarMessageCost, "Pro's message spends its credits");
+    handle.unmount();
+  });
+
+  await test("free: a hard moment never claims or counts; after the free conversation another is told by the plan, deleting it gives nothing back, and a trial is told the day its plan begins", async (w) => {
+    w.server.state.serverPlans.user_a = "free";
+    const heavy = await repo(w).sendTurn(text("HEAVY I cannot sleep", 1, { conversationId: mid(40) }));
+    assert.equal(heavy.ok, true, "a hard moment is answered on the free plan");
+    assert.deepEqual([heavy.data.answer.isHeavy, heavy.data.usage], [true, null], "with its help line and no count");
+    assert.equal(w.server.state.scholarFreeUse.length, 0, "and it never claims the free conversation");
+    assert.equal(await repo(w).readScholarFree(), null);
+    const first = await repo(w).sendTurn(text(QUESTION, 2));
+    assert.equal(first.ok, true, `the free conversation answers: ${JSON.stringify(first)}`);
+    const usage = first.data.usage;
+    assert.deepEqual([usage.kind, usage.used, usage.limit, usage.remaining, usage.resetsAt], ["free", 1, 8, 7, null]);
+    assert.deepEqual(await repo(w).readScholarFree(), { conversationId: CONV, messages: 1 }, "the first conversation claims it");
+    const second = await repo(w).sendTurn(text(QUESTION, 3, { conversationId: mid(41) }));
+    assert.equal(second.code, "LIMIT_REACHED", "another conversation is told by the plan");
+    assert.deepEqual([second.usage.kind, second.usage.resetsAt], ["scholar_plan", null]);
+    assert.equal((await repo(w).deleteConversation(CONV)).ok, true);
+    const third = await repo(w).sendTurn(text(QUESTION, 4, { conversationId: mid(42) }));
+    assert.equal(third.code, "LIMIT_REACHED", "deleting the free conversation gives nothing back");
+    assert.deepEqual(await repo(w).readScholarFree(), { conversationId: CONV, messages: 1 });
+    const heavyAfter = await repo(w).sendTurn(text("HEAVY still awake", 5, { conversationId: mid(43) }));
+    assert.equal(heavyAfter.ok, true, "a hard moment is answered after the free conversation too");
+    assert.equal(heavyAfter.data.usage, null);
+    assert.equal(freeRowOf(w).messages, 1, "and counts nothing");
+    const ends = new Date(BASE + 3 * 86_400_000).toISOString();
+    w.server.state.serverPlans.user_a = "trial";
+    w.server.state.serverPlanEnds.user_a = ends;
+    const trial = await repo(w).sendTurn(text(QUESTION, 6, { conversationId: mid(44) }));
+    assert.equal(trial.usage.kind, "scholar_plan");
+    assert.equal(Date.parse(trial.usage.resetsAt), Date.parse(ends), "a trial is told the day its plan begins, never the plans");
+  });
+
+  await test("free listen: the free conversation's answers are read aloud, in Hannah's voice on the free plan; a trial keeps its voice; another conversation is told by its plan", async (w) => {
+    allowTalk(w, { voiceKey: "deep" });
+    const other = (await repo(w).sendTurn(text(QUESTION, 1, { conversationId: mid(50) }))).data.answer.id;
+    w.server.state.serverPlans.user_a = "free";
+    const id = (await repo(w).sendTurn(text(QUESTION, 2))).data.answer.id;
+    const player = w.use("@/services/scholarPlayer");
+    const asked = () => calls(w, "scholar-speak").map((call) => call.body.voice ?? "none");
+    const listen = async (messageId) => {
+      await player.playScholarAnswer(messageId);
+      await settle(6);
+      return player.getScholarListenState();
+    };
+    // Before RevenueCat answers, the phone asks for the chosen voice and the server reads Hannah's for the free plan.
+    let state = await listen(id);
+    assert.equal(state.phase, "playing", "the free conversation listens on the free plan");
+    assert.deepEqual(asked(), ["deep", "deep"]);
+    assert.equal(w.files.files.get(w.audio.players[0].uri).bytes.toString(), "RIFF-warm-part-0", "and hears Hannah");
+    player.clearScholarAudio();
+    // RevenueCat has said free: the phone asks for Hannah's voice itself.
+    setTier(w, "free");
+    state = await listen(id);
+    assert.deepEqual(asked().slice(2), ["warm", "warm"]);
+    player.clearScholarAudio();
+    // A trial hears the voice it chose.
+    w.server.state.serverPlans.user_a = "trial";
+    setTier(w, "trial");
+    state = await listen(id);
+    assert.deepEqual(asked().slice(4), ["deep", "deep"]);
+    assert.equal(w.files.files.get(w.audio.players[2].uri).bytes.toString(), "RIFF-deep-part-0");
+    player.clearScholarAudio();
+    w.server.state.serverPlans.user_a = "free";
+    state = await listen(other);
+    assert.equal(state.phase, "failed", "another conversation is not the free one");
+    assert.deepEqual([state.usage.kind, state.usage.resetsAt], ["listen_plan", null]);
+    player.clearScholarAudio();
+  }, { permission: true, player: true });
+
+  await test("free talk: the free conversation talks for three minutes in all, in Hannah's voice with no month; used up, elsewhere or in a hard moment, the plan answers", async (w) => {
+    w.server.state.serverPlans.user_a = "free";
+    allowTalk(w, { voiceKey: "deep" });
+    const start = (conversationId = CONV) => repo(w).startTalk({ conversationId, entryId: null });
+    let started = await start();
+    assert.equal(started.ok, true, "a talk on the free plan, in its free conversation");
+    assert.equal(calls(w, "scholar-voice-start")[0].body.voice, "deep", "before RevenueCat answers, the chosen voice is asked for");
+    assert.equal(started.data.voice, "warm", "and the server gives Hannah's");
+    assert.deepEqual([started.data.limits.talkSeconds, started.data.limits.monthSecondsLeft], [180, null], "three minutes, no month");
+    assert.deepEqual(await repo(w).readScholarFree(), { conversationId: CONV, messages: 0 }, "a talk claims the free conversation");
+    let ended = await repo(w).finishTalk(started.data.talkId);
+    assert.equal(ended.limits.talkSeconds, 120, "what is left of the three minutes");
+    const elsewhere = await start(mid(60));
+    assert.deepEqual([elsewhere.code, elsewhere.usage.kind], ["LIMIT_REACHED", "talk_plan"], "another conversation is told by the plan");
+    setTier(w, "free");
+    started = await start();
+    assert.equal(calls(w, "scholar-voice-start").pop().body.voice, "warm", "RevenueCat said free: Hannah's voice is asked for");
+    assert.equal(started.data.limits.talkSeconds, 120);
+    ended = await repo(w).finishTalk(started.data.talkId);
+    started = await start();
+    ended = await repo(w).finishTalk(started.data.talkId);
+    assert.equal(ended.limits.talkSeconds, 0, "the three minutes are used");
+    const used = await start();
+    assert.deepEqual([used.code, used.usage.kind, used.usage.resetsAt], ["LIMIT_REACHED", "talk_plan", null], "then the plans");
+    const heavy = await repo(w).sendTurn(text("HEAVY I cannot sleep", 1, { conversationId: mid(61) }));
+    assert.equal(heavy.data.conversation.isHeavy, true);
+    const inHeavy = await start(mid(61));
+    assert.deepEqual([inHeavy.code, inHeavy.usage.kind], ["LIMIT_REACHED", "talk_plan"], "no free talk in a hard moment");
+  }, { permission: true });
+
+  await test("free talk: a trial's free conversation talks in the voice it chose", async (w) => {
+    const ends = new Date(BASE + 3 * 86_400_000).toISOString();
+    w.server.state.serverPlans.user_a = "trial";
+    w.server.state.serverPlanEnds.user_a = ends;
+    setTier(w, "trial");
+    allowTalk(w, { voiceKey: "deep" });
+    const started = await repo(w).startTalk({ conversationId: CONV, entryId: null });
+    assert.equal(started.ok, true);
+    assert.equal(calls(w, "scholar-voice-start")[0].body.voice, "deep");
+    assert.equal(started.data.voice, "deep", "a trial keeps all eight voices");
+    assert.equal(started.data.limits.talkSeconds, 180);
+    const elsewhere = await repo(w).startTalk({ conversationId: mid(62), entryId: null });
+    assert.equal(Date.parse(elsewhere.usage.resetsAt), Date.parse(ends), "elsewhere a trial is told the day its plan begins");
+  }, { permission: true });
+
+  await test("free mock: the mock's free conversation answers eight, refuses the ninth and any other conversation by the plan, and reads back what it used", async (w) => {
+    w.use("@/store/devStore").useDevStore.getState().setDataSource("mock");
+    w.use("@/data/journalRepository").setMockSubscriptionTier("free");
+    const mock = w.use("@/data/mock/scholar");
+    mock.resetMockScholar();
+    const dev = w.use("@/store/devStore").useDevStore;
+    const viaMock = async (promise) => {
+      await advance(1_300);
+      return promise;
+    };
+    assert.equal(await repo(w).readScholarFree(), null, "unclaimed");
+    for (let n = 1; n <= 8; n += 1) {
+      const answered = await viaMock(repo(w).sendTurn(text(QUESTION, n)));
+      assert.equal(answered.ok, true, `free message ${n}`);
+      assert.deepEqual([answered.data.usage.kind, answered.data.usage.used, answered.data.usage.remaining], ["free", n, 8 - n]);
+    }
+    const ninth = await viaMock(repo(w).sendTurn(text(QUESTION, 9)));
+    assert.deepEqual([ninth.code, ninth.usage.kind, ninth.usage.resetsAt], ["LIMIT_REACHED", "scholar_plan", null]);
+    const other = await viaMock(repo(w).sendTurn(text(QUESTION, 10, { conversationId: mid(70) })));
+    assert.equal(other.code, "LIMIT_REACHED", "another conversation is told by the plan");
+    assert.deepEqual(await repo(w).readScholarFree(), { conversationId: CONV, messages: 8 });
+    dev.getState().setNextScholarOutcome("heavy");
+    const heavy = await viaMock(repo(w).sendTurn(text("a hard night", 11, { conversationId: mid(71) })));
+    assert.deepEqual([heavy.ok, heavy.data.usage], [true, null], "a hard moment is answered and never counted");
+    w.use("@/data/journalRepository").setMockSubscriptionTier("trial");
+    const trial = await viaMock(repo(w).sendTurn(text(QUESTION, 12, { conversationId: mid(72) })));
+    assert.ok(Date.parse(trial.usage.resetsAt) > clock.now, "a trial is told the day its plan begins");
+    assert.equal(calls(w, "scholar-turn").length, 0, "the mock never reaches the server");
+    assert.equal(freeReads(w), 0, "nor its free conversation");
+    mock.resetMockScholar();
+    assert.equal(await repo(w).readScholarFree(), null, "a reset forgets it");
+  });
+
+  await test("free voices: a free account hears Hannah and its other voices are locked; a trial and Pro choose any, and the choice is kept", async (w) => {
+    w.use("@/store/profilePrefsStore").useProfilePrefsStore.getState().setScholarVoice("user_a", "deep");
+    const { useScholarVoice } = w.use("@/hooks/useAiPermission");
+    const read = () => {
+      const handle = w.renderHook(useScholarVoice);
+      const { voice, chosen, locked } = handle.result.current;
+      handle.unmount();
+      return [voice, chosen, locked];
+    };
+    assert.deepEqual(read(), ["deep", "deep", false], "until RevenueCat answers, the chosen voice: the server decides");
+    setTier(w, "free");
+    assert.deepEqual(read(), ["warm", "deep", true], "the free plan hears Hannah, and the choice is kept for later");
+    setTier(w, "trial");
+    assert.deepEqual(read(), ["deep", "deep", false], "a trial has every voice");
+    setTier(w, "pro");
+    assert.deepEqual(read(), ["deep", "deep", false]);
+  });
+
+  await test("free tab: the Scholar tab reads the free conversation only for an account that is not Pro", async (w) => {
+    w.server.state.serverPlans.user_a = "free";
+    const { useScholarHome } = w.use("@/hooks/useScholarHome");
+    let handle = w.renderHook(useScholarHome, true);
+    let current = await until(handle, (c) => c.free !== undefined, "the free conversation read");
+    assert.equal(current.free, null, "unclaimed");
+    handle.unmount();
+    await repo(w).sendTurn(text(QUESTION));
+    handle = w.renderHook(useScholarHome, true);
+    current = await until(handle, (c) => c.free != null, "claimed");
+    assert.deepEqual(current.free, { conversationId: CONV, messages: 1 });
+    handle.unmount();
+    const before = freeReads(w);
+    handle = w.renderHook(useScholarHome, false);
+    current = await until(handle, (c) => c.state.phase === "ready", "the list");
+    await settle(4);
+    assert.equal(handle.result.current.free, undefined, "Pro reads nothing of it");
+    assert.equal(freeReads(w), before);
+    handle.unmount();
+  });
+
+  await test("free copy: the free conversation's words are true, value-first and never teach leaving", async (w) => {
+    const { copy } = w.use("@/constants/copy");
+    const { app } = { app: w.use("@/constants/app") };
+    assert.equal(copy.paywall.scholar.conversation, "You’ve had your free conversation with Scholar. Scholar is part of GraceHush Pro.");
+    assert.equal(copy.paywall.scholar.voice, "Scholar’s other voices are part of GraceHush Pro.");
+    assert.equal(copy.scholar.notices.freeLeft(3), "3 free messages left in this conversation.");
+    assert.equal(copy.scholar.notices.freeLeft(1), "1 free message left in this conversation.");
+    assert.equal(app.SCHOLAR_LEFT_NOTICE_FROM, 3, "the heads-up shows from three messages left");
+    assert.equal(copy.scholarVoice.pro, "Pro");
+    assert.equal(copy.scholarVoice.a11y.lockedHint, "Opens GraceHush Pro");
+    assert.equal(copy.scholarVoice.a11y.locked("Gideon", "Deep · Comforting"), "Gideon, Deep, Comforting, Pro");
+    for (const s of [copy.paywall.scholar.conversation, copy.paywall.scholar.voice, copy.scholar.notices.freeLeft(2)]) {
+      assert.ok(!/'|"|cancel|hurry|last chance|only today|expire/i.test(s), `curly punctuation, no pressure and no way out: ${s}`);
+    }
+  });
+}
+
 (async () => {
   await dataChecks();
+  await historyChecks();
   await conversationChecks();
+  await freeChecks();
   await rowChecks();
   await listenChecks();
   await accountChecks();
   sourceChecks();
+  historySourceChecks();
+  heroSourceChecks();
   await copyChecks();
+  await heroCopyChecks();
   await talkChecks();
   talkSourceChecks();
   await talkCopyChecks();
+  await voiceNameChecks();
+  voiceAvatarSourceChecks();
   for (const stack of strayFetches) failures.push(stack);
   if (failures.length > 0) {
     console.log(`${passed} checks passed, ${failures.length} FAILED:\n`);

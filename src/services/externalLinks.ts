@@ -106,6 +106,17 @@ export async function openSystemShare(message: string): Promise<void> {
   }
 }
 
+// A file in the system share sheet (iOS): the Today tab's word card as a picture (services/wordCardShare.ts). WhatsApp's and
+// Messages' own links carry text only, so a picture goes through the iPhone's share menu, where each app's panel closes back
+// into GraceHush after Send. Nothing is sent with it: the picture says everything. A sheet that cannot open shares nothing.
+export async function openSystemShareFile(url: string): Promise<void> {
+  try {
+    await Share.share({ url });
+  } catch {
+    // The share sheet could not open.
+  }
+}
+
 // No device details, no user id and no body: the person writes what they want to say.
 export function openSupportEmail(): Promise<LinkResult> {
   return openUrl(`mailto:${SUPPORT_EMAIL}?subject=GraceHush%20feedback`);

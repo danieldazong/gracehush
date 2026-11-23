@@ -9,11 +9,14 @@ import { AppError } from "../_shared/errors.ts";
 
 const BUCKETS = ["journal_media", "exports"] as const;
 // Deleted one by one when the profile's cascade left rows behind. A Scholar message goes before its conversation (step 38), and
-// an affirmation before its entry. The record of live talks (step 39) depends on nothing but the profile.
+// an affirmation before its entry. The credits (2026-11-18), the free conversation (2026-11-20) and the record of live talks
+// (step 39) depend on nothing but the profile.
 const TABLES = [
   "scholar_messages",
   "scholar_conversations",
   "scholar_usage",
+  "scholar_credits",
+  "scholar_free_use",
   "scholar_voice_sessions",
   "daily_affirmations",
   "journal_entries",
@@ -31,8 +34,9 @@ export async function removeUserFiles(admin: SupabaseClient, userId: string): Pr
 }
 
 // The profile row, and with it (each table's user_id foreign key, on delete cascade) every entry, affirmation, record of a
-// deleted devotional, and Scholar conversation, message, day of usage and record of a live talk. Then each table is counted for
-// this user, and anything left is deleted by hand: a cascade that did not happen is reported (`leftover`), never hidden.
+// deleted devotional, and Scholar conversation, message, day of usage, row of credits and record of a live talk. Then each table
+// is counted for this user, and anything left is deleted by hand: a cascade that did not happen is reported (`leftover`), never
+// hidden.
 // `profiles` is how many profile rows went: 1 the first time, 0 after.
 export async function deleteUserRows(
   admin: SupabaseClient,

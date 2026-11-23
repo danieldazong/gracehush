@@ -9,7 +9,7 @@ import type { PlaybackTrack } from "@/types";
 // What the lock screen, Control Center, CarPlay, a headset and the Android notification show and can do while a devotional
 // is loaded (step 26). Only the title and the scripture reference ever go on it: never the words, the emotion or the date.
 // Nothing here throws or logs: a lock screen that cannot be set up leaves the devotional playable in the app.
-type LockScreenTrack = Pick<PlaybackTrack, "title" | "subtitle">;
+type LockScreenTrack = Pick<PlaybackTrack, "title" | "subtitle" | "scenes">;
 
 // The two skip buttons jump as far as the buttons in the app. Android draws a numbered icon for 5, 10, 15 and 30 seconds.
 const OPTIONS: AudioLockScreenOptions = {
@@ -19,9 +19,9 @@ const OPTIONS: AudioLockScreenOptions = {
   seekBackwardIntervalSeconds: SKIP_MS / 1000,
 };
 
-// The artwork is a file address: expo-audio hands it to the system, which loads it itself. Since 2026-11-02 it is the
-// painted scene of the hour the devotional is loaded (the one Now Playing opens on), in its square crop, and it stays for
-// that devotional: only the card in the app drifts. Each scene's bundled picture is turned into a local file once (in
+// The artwork is a file address: expo-audio hands it to the system, which loads it itself. It is the painted scene that
+// interprets the reflection best (the first of the track's scenes, the one Now Playing opens on; since 2026-11-20, the
+// scene of the hour before that), in its square crop, and it stays for that devotional: only the card in the app drifts. Each scene's bundled picture is turned into a local file once (in
 // development Metro serves it, in a build it is already on the phone) and kept for the next devotional that shows it. A
 // failure is not kept, so the next devotional tries again.
 const artworkUrls = new Map<number, string>();
@@ -47,7 +47,7 @@ function metadata(track: LockScreenTrack, artwork: string | null): AudioMetadata
 // Puts the player on the lock screen. The controls appear at once; the artwork is added when it is ready, because the
 // first lookup of a scene can take a moment and must not hold the controls back.
 export function activateLockScreen(player: AudioPlayer, track: LockScreenTrack): void {
-  const scene = getPlayerSceneForHour(new Date().getHours());
+  const scene = track.scenes[0] ?? getPlayerSceneForHour(new Date().getHours());
   const known = artworkUrls.get(scene) ?? null;
   try {
     player.setActiveForLockScreen(true, metadata(track, known), OPTIONS);

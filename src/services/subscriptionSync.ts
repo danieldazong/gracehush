@@ -4,7 +4,8 @@ import { syncSubscription } from "@/api/journalApi";
 import { getDataSource } from "@/data/mock/scenario";
 import { syncProfile } from "@/services/profileSync";
 import { refreshEntitlement } from "@/services/revenuecat";
-import { useEntitlementStore } from "@/store/entitlementStore";
+import { reconcileTrialReminder } from "@/services/trialReminder";
+import { useEntitlementStore, type EntitlementState } from "@/store/entitlementStore";
 import { useProfilePrefsStore } from "@/store/profilePrefsStore";
 
 // Keeps the server's plan in step with RevenueCat's (step 30). The server never takes the app's word for a purchase: the app
@@ -57,7 +58,19 @@ export function startPlanWatch(userId: string): () => void {
     if (fromRevenueCat !== fromServer) void syncPlanNow();
   };
 
+  // The trial-end reminder follows RevenueCat's answer for this account (2026-11-18): a trial that is gone, or that was cancelled
+  // in the store and will not renew, has nothing to remind about, so a reminder that is waiting is removed. Only on the real data
+  // source (the mock plan has no store behind it), only for this account's own answer, and once for each answer, not for every
+  // other change of the store. It never makes a reminder and never asks for a permission.
+  const reconcile = (state: EntitlementState, previous: EntitlementState | null) => {
+    if (stopped || getDataSource() !== "supabase") return;
+    if (state.userId !== userId || state.checkedAt === null) return;
+    if (previous !== null && state.checkedAt === previous.checkedAt) return;
+    void reconcileTrialReminder(state.trial);
+  };
+
   const stopEntitlement = useEntitlementStore.subscribe(check);
+  const stopTrial = useEntitlementStore.subscribe(reconcile);
   const stopPrefs = useProfilePrefsStore.subscribe(check);
   const subscription = AppState.addEventListener("change", (status) => {
     if (status !== "active" || stopped) return;
@@ -69,12 +82,14 @@ export function startPlanWatch(userId: string): () => void {
     });
   });
   check();
+  reconcile(useEntitlementStore.getState(), null);
 
   const stop = () => {
     if (stopped) return;
     stopped = true;
     subscription.remove();
     stopEntitlement();
+    stopTrial();
     stopPrefs();
     if (stopCurrent === stop) stopCurrent = null;
   };

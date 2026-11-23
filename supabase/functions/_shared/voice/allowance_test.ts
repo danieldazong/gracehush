@@ -5,6 +5,8 @@ import {
   checkTalkAllowance,
   countTalkTurns,
   elapsedSeconds,
+  freeTalkLeft,
+  freeTalkLimits,
   heavySecondsUsed,
   monthSecondsUsed,
   talkCapReached,
@@ -12,24 +14,30 @@ import {
 } from "./allowance.ts";
 import { VOICE_LIMITS, VOICE_SESSION_MAX_SECONDS, VOICE_SESSION_TTL_MS } from "./constants.ts";
 
-// A live talk's time (step 39, decisions 21 to 25): 30 minutes a calendar month, at most 10 minutes a talk, and a heavy
-// conversation's talk never counted and never cut.
+// A live talk's time (step 39, decisions 21 to 25; 60 minutes since 2026-11-18): 60 minutes a calendar month for a Pro account,
+// at most 10 minutes a talk, and a heavy conversation's talk never counted and never cut. Since 2026-11-20 the free plan and the
+// free trial have 3 minutes of talk in their one free conversation, and none anywhere else.
 
 const WINDOW = monthWindow(new Date("2026-11-13T10:00:00.000Z"), "Africa/Lagos");
 const RESETS = "2026-11-30T23:00:00.000Z";
+const NOW = Date.parse("2026-11-13T10:00:00.000Z");
+const TRIAL_ENDS = "2026-11-16T10:00:00.000Z";
 
 const base = {
   tier: "pro" as const,
+  expiresAt: "2027-11-13T10:00:00.000Z",
+  now: NOW,
   heavy: false,
   monthSeconds: 0,
   heavySecondsToday: 0,
   startsToday: 0,
   window: WINDOW,
+  free: { open: false, secondsUsed: 0 },
 };
 
 Deno.test("allowance: the numbers of decisions 21 to 25", () => {
   assertEquals(VOICE_LIMITS, {
-    monthSeconds: 1_800,
+    monthSeconds: 3_600,
     talkSeconds: 600,
     minTalkSeconds: 30,
     backstopSeconds: 1_800,
@@ -82,26 +90,24 @@ Deno.test("allowance: the month counts every clear talk, and the day's heavy tim
   assertEquals(heavySecondsUsed([]), 0);
 });
 
-Deno.test("allowance: a paid account with time left may talk, for the smaller of 10 minutes and what is left", () => {
-  for (const tier of ["trial", "pro"] as const) {
-    assertEquals(checkTalkAllowance({ ...base, tier }), {
-      kind: "ok",
-      capSeconds: 600,
-      limits: { talkSeconds: 600, monthSecondsLeft: 1_800, resetsAt: RESETS },
-    });
-  }
-  assertEquals(checkTalkAllowance({ ...base, monthSeconds: 1_200 }), {
+Deno.test("allowance: a Pro account with time left may talk, for the smaller of 10 minutes and what is left", () => {
+  assertEquals(checkTalkAllowance(base), {
+    kind: "ok",
+    capSeconds: 600,
+    limits: { talkSeconds: 600, monthSecondsLeft: 3_600, resetsAt: RESETS },
+  });
+  assertEquals(checkTalkAllowance({ ...base, monthSeconds: 3_000 }), {
     kind: "ok",
     capSeconds: 600,
     limits: { talkSeconds: 600, monthSecondsLeft: 600, resetsAt: RESETS },
   });
-  assertEquals(checkTalkAllowance({ ...base, monthSeconds: 1_500 }), {
+  assertEquals(checkTalkAllowance({ ...base, monthSeconds: 3_300 }), {
     kind: "ok",
     capSeconds: 300,
     limits: { talkSeconds: 300, monthSecondsLeft: 300, resetsAt: RESETS },
   });
   // Exactly 30 seconds left is still a talk.
-  assertEquals(checkTalkAllowance({ ...base, monthSeconds: 1_770 }), {
+  assertEquals(checkTalkAllowance({ ...base, monthSeconds: 3_570 }), {
     kind: "ok",
     capSeconds: 30,
     limits: { talkSeconds: 30, monthSecondsLeft: 30, resetsAt: RESETS },
@@ -109,14 +115,14 @@ Deno.test("allowance: a paid account with time left may talk, for the smaller of
 });
 
 Deno.test("allowance: under 30 seconds left counts as used up, with when the month's time returns", () => {
-  for (const monthSeconds of [1_771, 1_799, 1_800, 2_400]) {
+  for (const monthSeconds of [3_571, 3_599, 3_600, 4_800]) {
     assertEquals(checkTalkAllowance({ ...base, monthSeconds }), {
       kind: "month",
       usage: {
         kind: "talk_month",
         used: monthSeconds,
-        limit: 1_800,
-        remaining: Math.max(0, 1_800 - monthSeconds),
+        limit: 3_600,
+        remaining: Math.max(0, 3_600 - monthSeconds),
         resetsAt: RESETS,
       },
     });
@@ -128,11 +134,73 @@ Deno.test("allowance: under 30 seconds left counts as used up, with when the mon
   }
 });
 
-Deno.test("allowance: a free account gets the plan's answer, in a heavy conversation too, before any other limit", () => {
+Deno.test("allowance: the free plan gets the plan's answer, in a heavy conversation too, before any other limit", () => {
+  const free = { ...base, tier: "free" as const, expiresAt: null };
   const plan = { kind: "plan", usage: { kind: "talk_plan", used: 0, limit: 0, remaining: 0, resetsAt: null } };
-  assertEquals(checkTalkAllowance({ ...base, tier: "free" }), plan);
-  assertEquals(checkTalkAllowance({ ...base, tier: "free", heavy: true }), plan);
-  assertEquals(checkTalkAllowance({ ...base, tier: "free", startsToday: 99, monthSeconds: 9_999 }), plan);
+  assertEquals(checkTalkAllowance(free), plan);
+  assertEquals(checkTalkAllowance({ ...free, heavy: true }), plan);
+  assertEquals(checkTalkAllowance({ ...free, startsToday: 99, monthSeconds: 9_999 }), plan);
+});
+
+Deno.test("allowance: the free conversation's talk time is 3 minutes in all, and under 30 seconds left counts as used up", () => {
+  assertEquals(freeTalkLeft(0), 180);
+  assertEquals(freeTalkLeft(-20), 180);
+  assertEquals(freeTalkLeft(100), 80);
+  assertEquals(freeTalkLeft(150), 30);
+  assertEquals(freeTalkLeft(151), 0);
+  assertEquals(freeTalkLeft(180), 0);
+  assertEquals(freeTalkLeft(999), 0);
+  // No month for an account that is not Pro: the app says nothing about minutes it does not have.
+  assertEquals(freeTalkLimits(60, WINDOW), { talkSeconds: 120, monthSecondsLeft: null, resetsAt: RESETS });
+});
+
+Deno.test("allowance: the free plan and a trial may talk in their free conversation, while its time lasts and never when heavy", () => {
+  for (const plan of [{ tier: "free" as const, expiresAt: null }, { tier: "trial" as const, expiresAt: TRIAL_ENDS }]) {
+    const open = { ...base, ...plan, free: { open: true, secondsUsed: 0 } };
+    assertEquals(checkTalkAllowance(open), {
+      kind: "ok",
+      capSeconds: 180,
+      limits: { talkSeconds: 180, monthSecondsLeft: null, resetsAt: RESETS },
+    });
+    // The month's time is Pro's and plays no part here.
+    assertEquals(checkTalkAllowance({ ...open, monthSeconds: 9_999 }).kind, "ok");
+    // What earlier talks in the conversation used is taken off.
+    assertEquals(checkTalkAllowance({ ...open, free: { open: true, secondsUsed: 120 } }), {
+      kind: "ok",
+      capSeconds: 60,
+      limits: { talkSeconds: 60, monthSecondsLeft: null, resetsAt: RESETS },
+    });
+    const planned = {
+      kind: "plan",
+      usage: {
+        kind: "talk_plan",
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        resetsAt: plan.tier === "trial" ? TRIAL_ENDS : null,
+      },
+    };
+    // Used up, a heavy conversation, and another conversation are the plan's answer.
+    assertEquals(checkTalkAllowance({ ...open, free: { open: true, secondsUsed: 151 } }), planned);
+    assertEquals(checkTalkAllowance({ ...open, heavy: true }), planned);
+    assertEquals(checkTalkAllowance({ ...open, free: { open: false, secondsUsed: 0 } }), planned);
+    // The day's starts still stand in the way.
+    assertEquals(checkTalkAllowance({ ...open, startsToday: 20 }), { kind: "starts" });
+  }
+  // Pro never reads the free conversation.
+  assertEquals(checkTalkAllowance({ ...base, free: { open: true, secondsUsed: 999 } }).kind, "ok");
+});
+
+Deno.test("allowance: a trial gets the plan's answer with the day its plan begins, in a heavy conversation too", () => {
+  const trial = { ...base, tier: "trial" as const, expiresAt: TRIAL_ENDS };
+  const plan = { kind: "plan", usage: { kind: "talk_plan", used: 0, limit: 0, remaining: 0, resetsAt: TRIAL_ENDS } };
+  assertEquals(checkTalkAllowance(trial), plan);
+  assertEquals(checkTalkAllowance({ ...trial, heavy: true }), plan);
+  // A trial whose end has passed names no day.
+  assertEquals(checkTalkAllowance({ ...trial, now: Date.parse(TRIAL_ENDS) + 1 }), {
+    kind: "plan",
+    usage: { kind: "talk_plan", used: 0, limit: 0, remaining: 0, resetsAt: null },
+  });
 });
 
 Deno.test("allowance: the twenty-first talk of a day is refused, heavy or not", () => {
@@ -140,7 +208,7 @@ Deno.test("allowance: the twenty-first talk of a day is refused, heavy or not", 
   assertEquals(checkTalkAllowance({ ...base, startsToday: 20 }), { kind: "starts" });
   assertEquals(checkTalkAllowance({ ...base, startsToday: 20, heavy: true }), { kind: "starts" });
   // The day's starts come before the month: a used-up month on the twenty-first start is still "starts".
-  assertEquals(checkTalkAllowance({ ...base, startsToday: 21, monthSeconds: 1_800 }), { kind: "starts" });
+  assertEquals(checkTalkAllowance({ ...base, startsToday: 21, monthSeconds: 3_600 }), { kind: "starts" });
 });
 
 Deno.test("allowance: a heavy conversation's talk is never counted or capped, up to 120 minutes of heavy talk a day", () => {
@@ -151,13 +219,13 @@ Deno.test("allowance: a heavy conversation's talk is never counted or capped, up
   };
   assertEquals(checkTalkAllowance({ ...base, heavy: true }), open);
   // A used-up month does not stand in a heavy conversation's way.
-  assertEquals(checkTalkAllowance({ ...base, heavy: true, monthSeconds: 1_800 }), open);
+  assertEquals(checkTalkAllowance({ ...base, heavy: true, monthSeconds: 3_600 }), open);
   assertEquals(checkTalkAllowance({ ...base, heavy: true, heavySecondsToday: 7_199 }), open);
   assertEquals(checkTalkAllowance({ ...base, heavy: true, heavySecondsToday: 7_200 }), { kind: "resting" });
   assertEquals(checkTalkAllowance({ ...base, heavy: true, heavySecondsToday: 9_000 }), { kind: "resting" });
   // The day's heavy time never stops a talk in a clear conversation.
   assertEquals(checkTalkAllowance({ ...base, heavySecondsToday: 9_000 }).kind, "ok");
-  assertEquals(talkLimits({ heavy: true, monthSeconds: 1_800, window: WINDOW }), {
+  assertEquals(talkLimits({ heavy: true, monthSeconds: 3_600, window: WINDOW }), {
     talkSeconds: null,
     monthSecondsLeft: null,
     resetsAt: RESETS,
